@@ -3,7 +3,7 @@ Generic calculation interface for pynbody snapshots.
 """
 
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from pynbody import units
 from pynbody.snapshot import SimSnap
@@ -15,7 +15,7 @@ class CalculatorBase(Generic[ReturnT], ABC):
     """
 
     @abstractmethod
-    def __call__(self, sim: SimSnap) -> ReturnT:
+    def __call__(self, sim: SimSnap, *args: Any, **kwargs: Any) -> ReturnT:
         """Executes the calculation on a given simulation snapshot.
 
         This is the main public method to run the calculator.
