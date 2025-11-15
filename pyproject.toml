@@ -1,0 +1,47 @@
+# ======================================================================================
+# Project metadata
+# ======================================================================================
+
+[project]
+name = "pynbodyext"
+description = "Extensions and utilities for pynbody"
+authors = [
+    { name = "Shuai LU (卢帅)", email = "lushuai@stu.xmu.edu.cn" }
+]
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = ["pynbody>=2.0"]  # adjust as needed
+classifiers = [
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+dynamic = ["version"]
+
+[project.readme]
+file = "README.md"
+content-type = "text/markdown"
+
+[project.urls]
+Repository = "https://github.com/GalaxySimAnalytics/pynbody-extras"
+Github = "https://github.com/GalaxySimAnalytics/pynbody-extras"
+
+
+# ======================================================================================
+# Build system configuration
+# ======================================================================================
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "pynbodyext.__version__"}
