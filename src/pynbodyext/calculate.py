@@ -1,10 +1,9 @@
-""" 
-
-
+"""
+Generic calculation interface for pynbody snapshots.
 """
 
 from abc import ABC, abstractmethod
-from typing import TypeVar,Generic, Union
+from typing import Generic, TypeVar
 
 from pynbody import units
 from pynbody.snapshot import SimSnap
@@ -14,7 +13,7 @@ ReturnT = TypeVar("ReturnT",covariant=True)
 class CalculatorBase(Generic[ReturnT], ABC):
     """An abstract base class for performing calculations on particle data.
     """
-    
+
     @abstractmethod
     def __call__(self, sim: SimSnap) -> ReturnT:
         """Executes the calculation on a given simulation snapshot.
@@ -31,22 +30,22 @@ class CalculatorBase(Generic[ReturnT], ABC):
         -------
         ReturnT
             The result of the calculation. The exact type depends on the subclass.
-        
+
         Raises
         ------
         NotImplementedError
             If a subclass does not override this method.
         """
-        
+
         raise NotImplementedError(
             f"{self.__class__.__name__} must implement __call__(self, sim: SimSnap) -> ReturnT"
         )
 
 
-    
+
     def _in_sim_units(
         self,
-        value: Union[str, units.UnitBase, float, int],
+        value: str | units.UnitBase | float | int,
         sim_parameter: str,
         sim: SimSnap,
     ) -> float:
@@ -61,7 +60,7 @@ class CalculatorBase(Generic[ReturnT], ABC):
         ----------
         value : str or pynbody.units.UnitBase or float or int
             The value to be converted.
-            - str: parsed by `pynbody.units.Unit`, e.g., "10 kpc", "200 km s^-1".
+            - str: parsed by `pynbody.units.Unit`, e.g., "10 kpc", "200 km s**-1".
             - UnitBase: converted using `.in_units(target_units, **context)`.
             - number: treated as already in the target native units.
         sim_parameter : str
@@ -77,12 +76,17 @@ class CalculatorBase(Generic[ReturnT], ABC):
         """
         if isinstance(value, str):
             value = units.Unit(value)
-        if units.is_unit_like(value):
+        if isinstance(value, units.UnitBase):
             value = float(value.in_units(sim[sim_parameter].units,
                                           **sim[sim_parameter].conversion_context()))
-        return value
-    
-    
+        if isinstance(value, (int, float)):
+            return float(value)
+
+        raise TypeError(
+            "value must be str, pynbody.units.UnitBase (or unit-like), or a number"
+        )
+
+
     def __repr__(self):
         if hasattr(self,"name"):
             return f"<Calculator {self.name}()>"
