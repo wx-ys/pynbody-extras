@@ -49,12 +49,17 @@ class WrapTransformation(transformation.Transformation):
         self._k_offsets: np.ndarray | None = None  # shape (N, 3), ints
         super().__init__(f, description=convention + "_wrap")
 
-    def _resolve_boxsize_float(self, f: SimSnap) -> float:
+    def _resolve_boxsize_float(self, f: SimSnap) -> float | None:
         L = self.boxsize
         if L is None:
-            L = f.properties["boxsize"]
+            try:
+                L = f.ancestor.properties["boxsize"]
+            except (AttributeError, KeyError):
+                L = None
+        if L is None:
+            return None
         if isinstance(L, units.UnitBase):
-            L = float(L.ratio(f["pos"].units, **f.conversion_context()))
+            L = L.ratio(f["pos"].units, **f.conversion_context())
         return float(L)
 
     def _select_k_dtype(self, max_abs: float) -> np.dtype[Any]:
@@ -75,6 +80,12 @@ class WrapTransformation(transformation.Transformation):
         z = f["z"].view(np.ndarray)
 
         L = self._resolve_boxsize_float(f)
+        if L is None:
+            warnings.warn(
+                "wrap: no boxsize specified and snapshot has no 'boxsize' property; skipping wrap",
+                stacklevel=2,
+            )
+            return
         if self.convention == "center":
             lower = -0.5 * L
         elif self.convention == "upper":
@@ -152,6 +163,12 @@ class WrapTransformation(transformation.Transformation):
 
         f = array.sim
         L = self._resolve_boxsize_float(f)
+        if L is None:
+            warnings.warn(
+                "wrap: no boxsize specified and snapshot has no 'boxsize' property; skipping wrap",
+                stacklevel=2,
+            )
+            return
         if self.convention == "center":
             lower = -0.5 * L
         elif self.convention == "upper":
