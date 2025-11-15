@@ -45,3 +45,90 @@ where = ["src"]
 
 [tool.setuptools.dynamic]
 version = {attr = "pynbodyext.__version__"}
+
+
+
+# ======================================================================================
+# Ruff configuration
+# ======================================================================================
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+fix = true
+exclude = [
+    "tests/",
+    "docs/"
+]
+
+[tool.ruff.format]
+# Enable reformatting of code snippets in docstrings.
+docstring-code-format = true
+skip-magic-trailing-comma = true
+
+
+[tool.ruff.lint]
+select = [
+    "E","W",# pycodestyle
+    "F",    # pyflakes
+    "C4",   # flake8-comprehensions
+    "B",    # flake8-bugbear
+    "G",    # flake8-logging-format
+    "TC",   # flake8-type-checking
+    "YTT",  # flake8-2020
+    "Q",    # flake8-quotes
+    "PIE",  # flake8-pie
+    "TID",  # flake8-tidy-imports
+    "ISC",  # flake8-implicit-str-concat
+
+    # pylint
+    "PLE","PLR","PLW",
+
+    "UP",   # pyupgrade
+    "I",    # isort
+    "NPY",  # numpy specific rules
+]
+ignore = [
+    # Magic number
+    "PLR2004",
+    # Too many arguments to function call
+    "PLR0913",
+    # Too many branches
+    "PLR0912",
+    # line too long
+    "E501", 
+    # Do not use variables named 'I', 'O', or 'l'
+    "E741",
+    # allow module import not at top of file, important for notebooks, cyclic imports
+    "E402",
+    # allow use (X,Y) in isinstance call
+    "UP038",
+]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+known-third-party = [
+  "numpy",
+  "scipy",
+  "matplotlib",
+  "pytest",
+]
+known-first-party = ["gal3d"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+# ======================================================================================
+# mypy configuration
+# ======================================================================================
+[tool.mypy]
+python_version = "3.10"
+
+ignore_missing_imports = true
+
+warn_unused_configs = true
+warn_unused_ignores = true
+warn_unreachable = true
+warn_redundant_casts = true
+
+disallow_incomplete_defs = true
+check_untyped_defs = true
