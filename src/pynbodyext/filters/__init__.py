@@ -3,8 +3,9 @@ Particle Selection Filters
 ==========================
 """
 
-
+from .base import FilterLike
 from .filt import (
+    And,
     Annulus,
     BandPass,
     Cuboid,
@@ -13,8 +14,25 @@ from .filt import (
     Filter,
     HighPass,
     LowPass,
+    Not,
+    Or,
     SolarNeighborhood,
     Sphere,
 )
 
-__all__ = ["Filter", "FamilyFilter", "Sphere", "Disc", "Annulus", "Cuboid", "BandPass", "HighPass", "LowPass", "SolarNeighborhood"]
+__all__ = [
+    "FilterLike",
+    "Filter",
+    "Sphere",
+    "Cuboid",
+    "Disc",
+    "BandPass",
+    "HighPass",
+    "LowPass",
+    "Annulus",
+    "SolarNeighborhood",
+    "And",
+    "Or",
+    "Not",
+    "FamilyFilter",
+]

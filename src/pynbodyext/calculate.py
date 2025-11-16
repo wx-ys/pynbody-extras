@@ -8,34 +8,23 @@ from typing import Any, Generic, TypeVar
 from pynbody import units
 from pynbody.snapshot import SimSnap
 
+try:
+    from typing import Protocol
+except ImportError:  # pragma: no cover
+    from typing_extensions import Protocol  # type: ignore
+
 ReturnT = TypeVar("ReturnT",covariant=True)
 
-class CalculatorBase(Generic[ReturnT], ABC):
-    """An abstract base class for performing calculations on particle data.
-    """
+
+class SimCallable(Protocol[ReturnT]):
+    def __call__(self, sim: SimSnap, *args: Any, **kwargs: Any) -> ReturnT: ...
+
+class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
+    """An abstract base class for performing calculations on particle data."""
 
     @abstractmethod
     def __call__(self, sim: SimSnap, *args: Any, **kwargs: Any) -> ReturnT:
-        """Executes the calculation on a given simulation snapshot.
-
-        This is the main public method to run the calculator.
-
-        Parameters
-        ----------
-        sim : pynbody.snapshot.SimSnap
-            The particle data (a snapshot or sub-snapshot) on which to perform
-            the calculation.
-
-        Returns
-        -------
-        ReturnT
-            The result of the calculation. The exact type depends on the subclass.
-
-        Raises
-        ------
-        NotImplementedError
-            If a subclass does not override this method.
-        """
+        """Executes the calculation on a given simulation snapshot."""
 
         raise NotImplementedError(
             f"{self.__class__.__name__} must implement __call__(self, sim: SimSnap) -> ReturnT"
