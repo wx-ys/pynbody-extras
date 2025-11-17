@@ -1,76 +1,48 @@
 """
 Flexible 1D binning utilities for particle-based simulation data.
 
-This module defines the `BinsSet` class: a pluggable helper for constructing
-one-dimensional bins (edges, centers) from a simulation (`SimSnap`) and assigning
-particles to those bins. The design emphasizes extensibility via registries for
-three stages:
+This module defines the :class:`~pynbodyext.profiles.bins.BinsSet` class, a pluggable helper
+for constructing one-dimensional bins (edges, centers) from a simulation
+(:class:`~pynbody.snapshot.SimSnap`) and assigning particles to those bins.
 
-1. Data extraction (`bins_by`) - how to obtain the 1D quantity to be binned.
-2. Edge construction (`bins_type`) - how to compute bin edges when the user
-   supplies an integer number of bins.
-3. Area/volume calculation (`bins_area`) - how to compute geometric measures
-   (area or volume) per bin.
+Extensibility
+-------------
+The design emphasizes extensibility via registries for three stages:
+
+1. Data extraction (``bins_by``) — how to obtain the 1D quantity to be binned.
+2. Edge construction (``bins_type``) — how to compute bin edges when the user supplies
+   an integer number of bins.
+3. Area/volume calculation (``bins_area``) — how to compute geometric measures (area or volume)
+   per bin.
 
 Registries
 ----------
 You can register new behaviors using decorators:
 
-- `@BinsSet.bins_by_register(name="...")`
-- `@BinsSet.bins_algorithm_register(name="...")`
-- `@BinsSet.bins_area_register(name="...")`
+- :meth:`~pynbodyext.profiles.bins.BinsSet.bins_by_register`
+- :meth:`~pynbodyext.profiles.bins.BinsSet.bins_algorithm_register`
+- :meth:`~pynbodyext.profiles.bins.BinsSet.bins_area_register`
 
 Each decorator stores a callable under the provided (or inferred) name so that
 users may pass a string instead of a function. This keeps user code concise:
 
-    >>> bins = BinsSet(bins_by="r", bins_area="annulus", bins_type="lin", nbins=20)
-    >>> bins(sim)  # materialize
+>>> bins = BinsSet(bins_by="r", bins_area="annulus", bins_type="lin", nbins=20)
+>>> bins(sim)  # materialize
+>>> bins.rbins        # centers
+>>> bins.bin_edges    # edges
+>>> bins.npart_bins   # counts per bin
+>>> bins.binsize      # area per bin
 
-Quick Example
--------------
-    >>> import pynbody
-    >>> sim = pynbody.load("snapshot")  # hypothetical
-    >>> bins = BinsSet(
-    ...     bins_by="r",          # radial distance field
-    ...     bins_area="annulus",  # area for 2D annuli
-    ...     bins_type="lin",      # linear edges
-    ...     nbins=30
-    ... )
-    >>> bins(sim)
-    >>> bins.rbins        # centers
-    >>> bins.bin_edges    # edges
-    >>> bins.npart_bins   # counts per bin
-    >>> bins.binsize      # area per bin
-
-Supported Styles
-----------------
-Docstrings follow the NumPy style, compatible with Sphinx via the `napoleon`
-extension. They also render well in MyST Markdown if you enable
-`myst_parser` and `sphinx.ext.napoleon` in `conf.py`.
-
-Error Handling
+Error handling
 --------------
-The bin-building step validates inputs (e.g., explicit edges must be 1D with
-length ≥ 2). Algorithms may raise `ValueError` for invalid input domains (e.g.,
-logarithmic bins with non-positive minima).
-
-Extension Guide
----------------
-To add a new cylindrical volume calculator:
-
->>> @BinsSet.bins_area_register(name="my_cyl_volume")
->>> def my_cyl_volume(self, edges):
->>>     height = self._kwargs.get("height", 1.0)
->>>     return np.pi * (edges[1:]**2 - edges[:-1]**2) * height
-
-Then call:
-
->>> BinsSet(bins_by="r", bins_area="my_cyl_volume", bins_type="lin", nbins=10, height=5.0)
+The bin-building step validates inputs (e.g., explicit edges must be 1D with length ≥ 2).
+Algorithms may raise :class:`ValueError` for invalid input domains (e.g., logarithmic bins
+with non-positive minima).
 
 See Also
 --------
-BinsSet
-    Main class orchestrating bin construction and assignments.
+- :class:`~pynbodyext.profiles.profile.Profile`
+- :class:`~pynbodyext.profiles.proarray.ProfileArray`
 """
 
 from collections.abc import Callable
@@ -93,36 +65,36 @@ BinsAlgorithmFunc: TypeAlias = Callable[["BinsSet", SimOrNpArray], SimOrNpArray]
 """Callable constructing bin edges from raw data (returns length nbins+1)."""
 
 class BinsSet:
-    """Flexible, pluggable 1D binning helper for particle-based data.
+    """
+    Flexible, pluggable 1D binning helper for particle-based data.
 
     This class constructs bin edges and assigns particles to bins using:
 
-    - a "bins_by" source (field name, registry key, or callable) to obtain the
-      1D quantity ``x`` to bin,
-    - a "bins_type" algorithm (registry key or callable) to produce bin edges,
+    - a ``bins_by`` source (field name, registry key, or callable) to obtain the 1D
+      quantity ``x`` to bin,
+    - a ``bins_type`` algorithm (registry key or callable) to produce bin edges,
       or an explicit array of edges,
-    - a "bins_area" calculator (registry key or callable) to compute bin
-      area/volume per bin (optional but recommended).
+    - a ``bins_area`` calculator (registry key or callable) to compute bin area/volume
+      per bin (optional but recommended).
 
-    Attributes are populated after calling the instance with a `SimSnap`.
+    Attributes are populated after calling the instance with a :class:`~pynbody.snapshot.SimSnap`.
 
     Parameters
     ----------
-    bins_by : str or Callable[[SimSnap], SimOrNpArray]
+    bins_by : str or :data:`~pynbodyext.profiles.bins.BinByFunc`
         How to obtain the 1D data array to bin. Resolution order:
         1. If callable: call directly.
         2. If string and in registry: use registered callable.
         3. Else: treat as simulation field key (e.g., ``sim["r"]``).
-    bins_area : str or Callable[[BinsSet, SimOrNpArray], SimOrNpArray]
-        Calculator for per-bin area or volume (returns array of length nbins).
+    bins_area : str or :data:`~pynbodyext.profiles.bins.BinsAreaFunc`
+        Calculator for per-bin area or volume (returns array of length ``nbins``).
         If a string, must be a registry key.
-    bins_type : str or Callable[[BinsSet, SimOrNpArray], SimOrNpArray]
-        Edge-building algorithm when ``nbins`` is an integer. Must produce
-        an array of edges (length nbins+1). Ignored if explicit edges are
-        supplied as ``nbins``.
-    nbins : int or np.ndarray or SimArray
-        If int: the number of bins (used with ``bins_type``).
-        If array-like: treated as explicit bin edges (length ≥ 2).
+    bins_type : str or :data:`~pynbodyext.profiles.bins.BinsAlgorithmFunc`
+        Edge-building algorithm when ``nbins`` is an integer. Must produce an array
+        of edges (length ``nbins + 1``). Ignored if explicit edges are supplied as ``nbins``.
+    nbins : int or :class:`~numpy.ndarray` or :class:`~pynbody.array.SimArray`
+        If int: the number of bins (used with ``bins_type``). If array-like: treated as explicit
+        bin edges (length ≥ 2).
     bin_min : float, optional
         Minimum domain value for edge construction when using an algorithm.
         Defaults to the minimum of the data.
@@ -130,39 +102,25 @@ class BinsSet:
         Maximum domain value for edge construction when using an algorithm.
         Defaults to the maximum of the data.
     **kwargs
-        Extra parameters stored on the instance for use by custom algorithms
-        and area/volume calculators.
+        Extra parameters stored on the instance for use by custom algorithms and area/volume calculators.
 
     Attributes
     ----------
-    x : SimOrNpArray or None
+    x : :data:`~pynbodyext.profiles.bins.SimOrNpArray` or None
         The resolved data array being binned.
-    bin_edges : SimOrNpArray or None
-        Array of bin edges (length nbins+1).
-    rbins : SimOrNpArray or None
-        Bin centers (midpoints) (length nbins).
-    dr : SimOrNpArray or None
-        Approximate half-widths computed via ``np.gradient(rbins)``.
-        For exact widths use ``np.diff(bin_edges)``.
-    binind : list[np.ndarray] or None
+    bin_edges : :data:`~pynbodyext.profiles.bins.SimOrNpArray` or None
+        Array of bin edges (length ``nbins + 1``).
+    rbins : :data:`~pynbodyext.profiles.bins.SimOrNpArray` or None
+        Bin centers (midpoints) (length ``nbins``).
+    dr : :data:`~pynbodyext.profiles.bins.SimOrNpArray` or None
+        Approximate half-widths computed via :func:`numpy.gradient`.
+        For exact widths use :func:`numpy.diff` on :attr:`bin_edges`.
+    binind : list[:class:`~numpy.ndarray`] or None
         List of index arrays per bin (particle indices).
-    npart_bins : np.ndarray or None
-        Number of particles in each bin (length nbins).
-    binsize : SimOrNpArray or None
+    npart_bins : :class:`~numpy.ndarray` or None
+        Number of particles in each bin (length ``nbins``).
+    binsize : :data:`~pynbodyext.profiles.bins.SimOrNpArray` or None
         Area or volume per bin (depends on ``bins_area`` implementation).
-
-    Notes
-    -----
-    - If you provide explicit edges (array), ``bins_type`` is ignored.
-    - Non-uniform bins may have edge effects when using ``np.gradient`` for ``dr``.
-    - Units are preserved by cloning `SimArray` metadata onto constructed edges.
-
-    See Also
-    --------
-    bins_by_register : Register a data extraction callable.
-    bins_algorithm_register : Register a bin edge construction algorithm.
-    bins_area_register : Register an area/volume calculator.
-
     """
     _bins_by_registry: dict[str, BinByFunc] = {}
     _bins_area_registry: dict[str, BinsAreaFunc] = {}
@@ -197,12 +155,12 @@ class BinsSet:
 
     def is_defined(self) -> bool:
         """
-        Check if the BinsSet is defined.
+        Check if the :class:`~pynbodyext.profiles.bins.BinsSet` is materialized.
 
         Returns
         -------
         bool
-            True if bin edges are defined, False otherwise.
+            ``True`` if bin edges and derived attributes are defined, ``False`` otherwise.
         """
         return (self.bin_edges is not None
                 and self.rbins is not None
@@ -215,19 +173,20 @@ class BinsSet:
         """
         Resolve the data array to bin from ``self._bins_by``.
 
-        Resolution order:
+        Resolution order
+        ----------------
         1. If ``_bins_by`` is callable: call it.
         2. If string and present in ``_bins_by_registry``: call registered function.
         3. Else: treat as a field key in the simulation.
 
         Parameters
         ----------
-        sim : SimSnap
+        sim : :class:`~pynbody.snapshot.SimSnap`
             Simulation snapshot.
 
         Returns
         -------
-        SimOrNpArray
+        :data:`~pynbodyext.profiles.bins.SimOrNpArray`
             The resolved 1D data array.
 
         Raises
@@ -251,19 +210,20 @@ class BinsSet:
 
     def _coerce_edges_units(self, edges: np.ndarray, x: SimOrNpArray) -> SimOrNpArray:
         """
-        Attach units and simulation reference to edges if ``x`` is a `SimArray`.
+        Attach units and simulation reference to edges if ``x`` is a :class:`~pynbody.array.SimArray`.
 
         Parameters
         ----------
-        edges : np.ndarray
+        edges : :class:`~numpy.ndarray`
             Raw bin edges.
-        x : SimOrNpArray
+        x : :data:`~pynbodyext.profiles.bins.SimOrNpArray`
             The source data array.
 
         Returns
         -------
-        SimOrNpArray
-            Either the original edges array or a `SimArray` clone with units/sim copied.
+        :data:`~pynbodyext.profiles.bins.SimOrNpArray`
+            Either the original edges array or a :class:`~pynbody.array.SimArray` clone
+            with units/sim copied.
         """
         if isinstance(x, SimArray):
             out = SimArray(edges)
@@ -279,24 +239,23 @@ class BinsSet:
         Behavior
         --------
         - If ``_nbins`` is an array-like: interpret directly as edges.
-        - Else: use ``_bins_type`` (callable or registry entry) to build edges
-          spanning the domain defined by (bin_min, bin_max) or (min(x), max(x)).
+        - Else: use ``_bins_type`` (callable or registry entry) to build edges spanning
+          the domain defined by (``bin_min``, ``bin_max``) or (``min(x)``, ``max(x)``).
 
         Parameters
         ----------
-        x : SimOrNpArray
+        x : :data:`~pynbodyext.profiles.bins.SimOrNpArray`
             Data array used to determine domain and quantiles.
 
         Returns
         -------
-        SimOrNpArray
-            Array of bin edges (length nbins+1).
+        :data:`~pynbodyext.profiles.bins.SimOrNpArray`
+            Array of bin edges (length ``nbins + 1``).
 
         Raises
         ------
         ValueError
-            If explicit edges are invalid (not 1D or length < 2) or if
-            ``_bins_type`` is unrecognized.
+            If explicit edges are invalid (not 1D or length < 2) or if ``_bins_type`` is unrecognized.
         """
         # If nbins is an array, interpret as explicit edges
         if not isinstance(self._nbins, (int, np.integer)):
@@ -323,13 +282,13 @@ class BinsSet:
 
         Parameters
         ----------
-        bin_edges : SimOrNpArray
-            Bin edge array (length nbins+1).
+        bin_edges : :data:`~pynbodyext.profiles.bins.SimOrNpArray`
+            Bin edge array (length ``nbins + 1``).
 
         Returns
         -------
-        SimOrNpArray
-            Area/volume per bin (length nbins).
+        :data:`~pynbodyext.profiles.bins.SimOrNpArray`
+            Area/volume per bin (length ``nbins``).
 
         Raises
         ------
@@ -346,45 +305,40 @@ class BinsSet:
     @staticmethod
     def _calc_binmid(bin_edges: SimOrNpArray) -> SimOrNpArray:
         """
-        Compute bin centers as midpoints.
+        Compute bin centers (midpoints) from edges.
 
         Parameters
         ----------
-        bin_edges : SimOrNpArray
-            Bin edge array (length nbins+1).
+        bin_edges : :data:`~pynbodyext.profiles.bins.SimOrNpArray`
+            Edge array (length ``nbins + 1``).
 
         Returns
         -------
-        SimOrNpArray
-            Midpoint centers (length nbins).
+        :data:`~pynbodyext.profiles.bins.SimOrNpArray`
+            Midpoints (length ``nbins``).
         """
         return 0.5 * (bin_edges[:-1] + bin_edges[1:])
 
 
     def _assign_particles(self, x: SimOrNpArray, bin_edges: SimOrNpArray) -> tuple[list[np.ndarray], np.ndarray]:
         """
-        Assign particle indices to bins via ``np.digitize``.
+        Assign particle indices to bins via :func:`numpy.digitize`.
 
         Out-of-range values are clamped to the first or last bin.
 
         Parameters
         ----------
-        x : SimOrNpArray
+        x : :data:`~pynbodyext.profiles.bins.SimOrNpArray`
             Data array being binned.
-        bin_edges : SimOrNpArray
-            Edge array (length nbins+1).
+        bin_edges : :data:`~pynbodyext.profiles.bins.SimOrNpArray`
+            Edge array (length ``nbins + 1``).
 
         Returns
         -------
-        binind : list[np.ndarray]
+        binind : list[:class:`~numpy.ndarray`]
             List of index arrays, one per bin.
-        npart_bins : np.ndarray
+        npart_bins : :class:`~numpy.ndarray`
             Number of particles per bin.
-
-        Notes
-        -----
-        The clamping ensures all points contribute to some bin, avoiding
-        empty classification due to numeric edge cases.
         """
         partbin = np.digitize(np.asarray(x), np.asarray(bin_edges), right=True) - 1
         nbins = len(bin_edges) - 1
@@ -400,21 +354,14 @@ class BinsSet:
         """
         Materialize binning for a simulation.
 
-        Default behavior (inplace=False)
-        --------------------------------
-        Acts as a factory: returns a NEW `BinsSet` instance with all computed
-        attributes populated, leaving the original instance (the “configuration
-        object”) untouched. This makes patterns like:
+        Default behavior (``inplace=False``)
+        ------------------------------------
+        Acts as a factory: returns a NEW :class:`~pynbodyext.profiles.bins.BinsSet` instance with all computed
+        attributes populated, leaving the original instance (the “configuration object”) untouched.
 
-            factory = BinsSet(bins_by="r", bins_area="annulus", bins_type="lin", nbins=30)
-            bins1 = factory(sim1)
-            bins2 = factory(sim2)
-
-        safe: `bins1 is not bins2` and both remain independent.
-
-        Backward-compatible mode (inplace=True)
-        ---------------------------------------
-        Retains previous semantics: mutates `self` in place and returns it.
+        Backward-compatible mode (``inplace=True``)
+        -------------------------------------------
+        Retains previous semantics: mutates ``self`` in place and returns it.
 
         Steps
         -----
@@ -426,22 +373,15 @@ class BinsSet:
 
         Parameters
         ----------
-        sim : SimSnap
+        sim : :class:`~pynbody.snapshot.SimSnap`
             Simulation snapshot.
-        inplace : bool, default False
-            If True, mutate and return `self`. If False, return a new
-            materialized instance.
+        inplace : bool, default ``False``
+            If ``True``, mutate and return ``self``. If ``False``, return a new materialized instance.
 
         Returns
         -------
-        BinsSet
-            A materialized bin set (new object unless `inplace=True`).
-
-        Notes
-        -----
-        - When `inplace=False`, the original instance remains a pure
-          configuration (no data-dependent attributes set).
-        - A safety clamp ensures edges are valid; if not, `[0.0, 1.0]` is used.
+        :class:`~pynbodyext.profiles.bins.BinsSet`
+            A materialized bin set (new object unless ``inplace=True``).
         """
         target: BinsSet
         if inplace:
@@ -475,25 +415,8 @@ class BinsSet:
 
     def spawn_with_same_edges(self, sim: SimSnap) -> "BinsSet":
         """
-        Create a new `BinsSet` for another simulation reusing existing bin edges.
-
-        Useful when comparing distributions across multiple snapshots with
-        identical bin definitions.
-
-        Parameters
-        ----------
-        sim : SimSnap
-            Target simulation.
-
-        Returns
-        -------
-        BinsSet
-            Child instance with recomputed particle assignments and counts.
-
-        Notes
-        -----
-        - The new instance shares edges, centers, widths, and area/volume.
-        - Data extraction (``bins_by``) is re-run for the new simulation.
+        Create a new :class:`~pynbodyext.profiles.bins.BinsSet` for ``sim``, reusing
+        the already-computed edges/centers/widths, and recomputing bin assignments.
         """
         child = BinsSet(
             bins_by=self._bins_by,
@@ -703,19 +626,10 @@ def linear_bins_algorithm(
     self: "BinsSet", x: SimOrNpArray
     ) -> SimOrNpArray:
     """
-    Linear (equally spaced) bin edges over [xmin, xmax].
+    Build linearly spaced bin edges over the domain.
 
-    Parameters
-    ----------
-    self : BinsSet
-        Instance containing nbins and optional domain overrides.
-    x : SimOrNpArray
-        Data array (used for min/max if not overridden).
-
-    Returns
-    -------
-    np.ndarray
-        Edges array (length nbins+1).
+    Uses ``self._bin_min`` / ``self._bin_max`` when provided, else the min/max of ``x``.
+    Returns an array of length ``nbins + 1``.
     """
     nbins = int(self._nbins)
     xmin = float(np.min(x)) if self._bin_min is None else self._bin_min
@@ -727,26 +641,9 @@ def logarithmic_bins_algorithm(
     self: "BinsSet", x: SimOrNpArray
     ) -> SimOrNpArray:
     """
-    Logarithmic (base-10) spaced edges over [xmin, xmax].
+    Build logarithmically spaced bin edges over the positive domain.
 
-    Requires xmin > 0.
-
-    Parameters
-    ----------
-    self : BinsSet
-        Instance with configuration.
-    x : SimOrNpArray
-        Data array used for min/max if not overridden.
-
-    Returns
-    -------
-    np.ndarray
-        Log-spaced edges (length nbins+1).
-
-    Raises
-    ------
-    ValueError
-        If xmin <= 0.
+    Requires strictly positive lower bound. Returns an array of length ``nbins + 1``.
     """
     nbins = int(self._nbins)
     xmin = float(np.min(x)) if self._bin_min is None else self._bin_min
@@ -760,29 +657,9 @@ def equal_number_bins_algorithm(
     self: "BinsSet", x: SimOrNpArray
     ) -> SimOrNpArray:
     """
-    Construct edges so each bin has approximately equal number of points.
+    Build edges so that each bin contains approximately the same number of particles.
 
-    Parameters
-    ----------
-    self : BinsSet
-        Instance with nbins and optional domain clamps.
-    x : SimOrNpArray
-        Raw data array.
-
-    Returns
-    -------
-    np.ndarray
-        Edges array (length nbins+1).
-
-    Raises
-    ------
-    ValueError
-        If input array is empty.
-
-    Notes
-    -----
-    This performs a simple quantile-like partition and may repeat edges if
-    data has insufficient spread.
+    Typically implemented via quantiles of ``x``. Returns an array of length ``nbins + 1``.
     """
     nbins = int(self._nbins)
 
@@ -810,21 +687,7 @@ def annulus_area(
     self: "BinsSet", bin_edges: SimOrNpArray
     ) -> SimOrNpArray:
     """
-    Area of 2D circular annuli.
-
-    Formula: π (r_{i+1}^2 - r_i^2)
-
-    Parameters
-    ----------
-    self : BinsSet
-        Instance (unused but kept for consistency).
-    bin_edges : SimOrNpArray
-        Radial edges.
-
-    Returns
-    -------
-    np.ndarray
-        Annulus areas (length nbins).
+    Area of 2D circular annuli: ``pi * (r_{i+1}^2 - r_i^2)`` for each bin.
     """
     return np.pi * (bin_edges[1:]**2 - bin_edges[:-1]**2)
 
@@ -833,21 +696,7 @@ def spherical_shell_area(
     self: "BinsSet", bin_edges: SimOrNpArray
     ) -> SimOrNpArray:
     """
-    Volume of spherical shells.
-
-    Formula: (4/3) π (r_{i+1}^3 - r_i^3)
-
-    Parameters
-    ----------
-    self : BinsSet
-        Instance (unused).
-    bin_edges : SimOrNpArray
-        Radial edges.
-
-    Returns
-    -------
-    np.ndarray
-        Shell volumes (length nbins).
+    Volume of 3D spherical shells: ``4/3 * pi * (r_{i+1}^3 - r_i^3)`` for each bin.
     """
     return 4/3 * np.pi * (bin_edges[1:]**3 - bin_edges[:-1]**3)
 
@@ -856,26 +705,9 @@ def cylindrical_shell_area(
     self: "BinsSet", bin_edges: SimOrNpArray
     ) -> SimOrNpArray:
     """
-    Volume of cylindrical shells with height z.
+    Lateral surface area or volume proxy for cylindrical shells.
 
-    Formula: π (r_{i+1}^2 - r_i^2) * z
-
-    Parameters
-    ----------
-    self : BinsSet
-        Instance containing kwargs (expects 'z').
-    bin_edges : SimOrNpArray
-        Radial edges.
-
-    Returns
-    -------
-    np.ndarray
-        Shell volumes (length nbins).
-
-    Raises
-    ------
-    ValueError
-        If 'z' is not provided via instance kwargs.
+    Implementations typically read additional parameters (e.g., ``height``) from ``self._kwargs``.
     """
     z = self._kwargs.get("z", None)
     if z is None:
