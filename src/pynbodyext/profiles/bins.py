@@ -77,10 +77,10 @@ from collections.abc import Callable
 from typing import Any, TypeAlias, overload
 
 import numpy as np
-from pynbody.array import SimArray
+from pynbody.array import IndexedSimArray, SimArray
 from pynbody.snapshot import SimSnap
 
-SimOrNpArray: TypeAlias = SimArray | np.ndarray
+SimOrNpArray: TypeAlias = SimArray | np.ndarray | IndexedSimArray
 """Type alias for arrays accepted or returned by binning routines."""
 
 BinByFunc: TypeAlias = Callable[[SimSnap], SimOrNpArray]
