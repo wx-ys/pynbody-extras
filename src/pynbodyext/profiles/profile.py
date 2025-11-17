@@ -53,6 +53,8 @@ ProType = TypeVar("ProType",bound="ProfileBase")
 ProFunc: TypeAlias = Callable[[ProType], AllArray]
 SimFunc: TypeAlias = Callable[[SimSnap], AllArray]
 
+
+_PARENT_KEYS = ("rbins", "dr", "binsize")  # not changed keys
 _BIN_PROPERTY_KEYS = ("rbins", "dr", "binsize", "npart_bins")  # per-bin properties
 
 
@@ -515,6 +517,6 @@ class SubProfile(ProfileBase):
         to avoid recalculation; other fields are resolved locally.
         """
         # avoid recalculating bin properties for subsets
-        if key in _BIN_PROPERTY_KEYS:
+        if key in _PARENT_KEYS:
             return self.parent._resolve_field(key)
         return super()._resolve_field(key)
