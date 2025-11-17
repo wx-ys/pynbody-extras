@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import warnings
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, TypeAlias, cast
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, TypeAlias, cast, overload
 
 import numpy as np
 from pynbody import filt as _pyn_filt
 from pynbody.family import Family
 from pynbody.snapshot import SimSnap
 
-from .bins import BinByFunc, BinsSet
+from .bins import BinByFunc, BinsSet, SimOrNpArray
 from .proarray import ProfileArray
 
 if TYPE_CHECKING:
@@ -20,6 +21,9 @@ if TYPE_CHECKING:
 # Assumptions / light shims (remove if already defined elsewhere)
 # ------------------------------------------------------------------
 FilterLike: TypeAlias = _pyn_filt.Filter | np.ndarray | Family | slice | int | np.int32 | np.int64
+
+ProFunc: TypeAlias = Callable[["ProfileBase"], ProfileArray | SimOrNpArray]
+
 _BIN_PROPERTY_KEYS = ("rbins", "dr", "binsize", "npart_bins")  # per-bin properties
 
 
@@ -34,6 +38,8 @@ class ProfileBase:
     Abstract base providing shared mechanics (bin set, caching, weight).
     Concrete classes: Profile (root) and SubProfile (subset view).
     """
+
+    _profile_property_registry: dict[str, ProFunc] = {}
 
     def __init__(self,
                  sim: SimSnap,
@@ -178,6 +184,11 @@ class ProfileBase:
         return subprof
 
      # ---- Main public indexing ----
+    @overload
+    def __getitem__(self, key: str) -> ProfileArray: ...
+    @overload
+    def __getitem__(self, key: FilterLike) -> SubProfile: ...
+
     def __getitem__(self, key: str | FilterLike) -> ProfileArray | SubProfile:
 
         # str -> ProfileArray
@@ -204,6 +215,32 @@ class ProfileBase:
         fams = [f.name for f in self.families()]
         parent_flag = "root" if self._parent is None else "sub"
         return f"<{cls} type={parent_flag} nbins={self.nbins} families={fams} ncached={self.num_cached_arr}>"
+
+    @classmethod
+    @overload
+    def profile_property(
+        cls,
+        fn: ProFunc,
+        name: str | None = None,
+    ) -> ProFunc: ...
+    @classmethod
+    @overload
+    def profile_property(
+        cls,
+        fn: None = None,
+        name: str | None = None,
+    ) -> Callable[[ProFunc], ProFunc]: ...
+    @classmethod
+    def profile_property(cls,
+        fn: ProFunc | None = None,
+        name: str | None = None
+    ) -> ProFunc | Callable[[ProFunc], ProFunc]:
+        def decorator(func: ProFunc) -> ProFunc:
+            cls._profile_property_registry[name or func.__name__] = func
+            return func
+        if fn is None:
+            return decorator
+        return decorator(fn)
 
 # ------------------------------------------------------------------
 # Root profile
