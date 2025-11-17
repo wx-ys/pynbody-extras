@@ -55,6 +55,7 @@ for a pattern-based matcher.
 """
 
 import re
+import warnings
 from typing import TYPE_CHECKING, Literal, Optional, Union, cast, overload
 
 import numpy as np
@@ -345,7 +346,7 @@ class ProfileArray(SimArray):
 
     # ---- public API ----
 
-    def _ensure_base_for_stats(self):
+    def _check_base_for_stats(self) -> bool:
         """
         Guard that the instance can compute further statistics.
 
@@ -358,12 +359,18 @@ class ProfileArray(SimArray):
             or if the name is not set.
         """
         if self._profile is None:
-            raise TypeError("Statistics are only available on the base ProfileData.")
+            warnings.warn(
+                "Statistics are only available on the base ProfileData.",
+                stacklevel=2,
+            )
+            return False
         if self._source == "per_bin":
-            raise RuntimeError("Per-bin array cannot be used for per-particle statistics")
-        if self._name is None:
-            raise RuntimeError("Name is not set for this ProfileArray")
-
+            warnings.warn(
+                "Statistics are only available on the base ProfileData.",
+                stacklevel=2,
+            )
+            return False
+        return True
     @property
     def profile(self) -> Union["ProfileBase", None]:
         """
@@ -413,11 +420,12 @@ class ProfileArray(SimArray):
         ------
         TypeError, RuntimeError
             If a statistic is requested on an instance that cannot compute
-            further statistics (see :meth:`_ensure_base_for_stats`).
+            further statistics (see :meth:`_check_base_for_stats`).
         """
         # dispatch on stats name vs normal indexing
         if isinstance(item, str):
-            self._ensure_base_for_stats()
+            if not self._check_base_for_stats():
+                raise RuntimeError("Cannot compute statistics on this ProfileArray")
             profile = cast("ProfileBase", self._profile)
             name = self._name
             if profile.is_cached(name,item):
@@ -429,6 +437,16 @@ class ProfileArray(SimArray):
         # normal ndarray-like indexing
         return super().__getitem__(item)
 
+    def keys(self) -> list[str]:
+        key = []
+        if self._check_base_for_stats():
+            for i in ProfileArray._registry:
+                if i.example_name is not None:
+                    key.append(i.example_name)
+        return key
+
+    def _ipython_key_completions_(self) -> list[str]:
+        return self.keys()
 
     def __repr__(self):
         """
@@ -475,9 +493,15 @@ class StatisticBase:
       the particles that fall into a single bin.
     - Implementations should return ``numpy.nan`` when an empty bin is given.
     """
-
+    example_name: str | None = None
     def __init_subclass__(cls) -> None:
         """Register subclasses for discovery."""
+        if getattr(cls,"example_name", None) is None:
+            warnings.warn(
+                f"StatisticBase subclass {cls.__name__} missing example_name attribute, would be good to add one for clarity.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         ProfileArray._registry.append(cls)
 
     def __init__(self, key:str):
@@ -534,7 +558,7 @@ class StatisticBase:
             return None
 
 class Mean(StatisticBase):
-
+    example_name: str = "mean"
     def __call__(
         self,
         arr: SimOrNpArray,
@@ -553,7 +577,7 @@ class Mean(StatisticBase):
             return None
 
 class Sum(StatisticBase):
-
+    example_name: str = "sum"
     def __call__(
         self,
         arr: SimOrNpArray,
@@ -569,7 +593,7 @@ class Sum(StatisticBase):
             return None
 
 class Sum_w(StatisticBase):
-
+    example_name: str = "sum_w"
     def __call__(
         self,
         arr: SimOrNpArray,
@@ -588,7 +612,7 @@ class Sum_w(StatisticBase):
             return None
 
 class Percentile(StatisticBase):
-
+    example_name: str = "p16"
     def __init__(self, key: str, percentile: int):
         super().__init__(key)
         self.percentile = percentile
@@ -637,7 +661,7 @@ class Percentile(StatisticBase):
 
 
 class RMS(StatisticBase):
-
+    example_name: str = "rms"
     def __call__(
         self,
         arr: SimOrNpArray,
@@ -658,7 +682,7 @@ class RMS(StatisticBase):
             return None
 
 class Median(StatisticBase):
-
+    example_name: str = "median"
     def __call__(
         self,
         arr: SimOrNpArray,
@@ -675,7 +699,7 @@ class Median(StatisticBase):
             return None
 
 class Dispersion(StatisticBase):
-
+    example_name: str = "disp"
     def __call__(
         self,
         arr: SimOrNpArray,
