@@ -3,15 +3,21 @@ Generic calculation interface for pynbody snapshots.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeAlias, TypeVar
 
+import numpy as np
+from numpy.typing import NDArray
 from pynbody import units
+from pynbody.array import SimArray
 from pynbody.snapshot import SimSnap
 
 try:
     from typing import Protocol
 except ImportError:  # pragma: no cover
     from typing_extensions import Protocol  # type: ignore
+
+SingleElementSimArray: TypeAlias = SimArray          # size == 1
+SingleElementNDArray: TypeAlias = NDArray[Any]       # size == 1
 
 ReturnT = TypeVar("ReturnT",covariant=True)
 
@@ -34,7 +40,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
     def _in_sim_units(
         self,
-        value: str | units.UnitBase | float | int,
+        value: str | units.UnitBase | float | int | SingleElementSimArray | SingleElementNDArray,
         sim_parameter: str,
         sim: SimSnap,
     ) -> float:
@@ -47,7 +53,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
         Parameters
         ----------
-        value : str or pynbody.units.UnitBase or float or int
+        value : str or pynbody.units.UnitBase or float or int or single-element SimArray or NDArray
             The value to be converted.
             - str: parsed by `pynbody.units.Unit`, e.g., "10 kpc", "200 km s**-1".
             - UnitBase: converted using `.in_units(target_units, **context)`.
@@ -68,11 +74,19 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         if isinstance(value, units.UnitBase):
             value = float(value.in_units(sim[sim_parameter].units,
                                           **sim[sim_parameter].conversion_context()))
+        if isinstance(value, np.ndarray):
+            if value.ndim == 0 or value.size == 1:
+                if isinstance(value, SimArray):
+                    value = value.in_units(sim[sim_parameter].units,
+                                       **sim[sim_parameter].conversion_context()).item()
+                else:
+                    value = value.item()
         if isinstance(value, (int, float)):
             return float(value)
 
         raise TypeError(
-            "value must be str, pynbody.units.UnitBase (or unit-like), or a number"
+            "value must be str, pynbody.units.UnitBase (or unit-like), or a number, or a single-element SimArray or NDArray, got "
+            f"{type(value)}"
         )
 
 
