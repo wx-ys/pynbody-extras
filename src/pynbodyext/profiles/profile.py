@@ -65,7 +65,7 @@ class ProfileBase:
     # ---- Caching API required by ProfileArray ----
     def cache(self, pro_arr: ProfileArray) -> None:
         """Store a computed statistic ProfileArray in cache."""
-        key = pro_arr._key
+        key = pro_arr._name
         mode = pro_arr._mode
         if key is None or mode is None:
             return
@@ -152,7 +152,11 @@ class ProfileBase:
         if key in self._data_cache:
                 return self._data_cache[key]
 
-        if key in _BIN_PROPERTY_KEYS:
+        if key in self._stats_cache:
+            if "mean" in self._stats_cache[key]:
+                return self._stats_cache[key]["mean"]
+
+        if key in _BIN_PROPERTY_KEYS or key in self._profile_property_registry:
             if key == "rbins":
                 arr = self.rbins
             elif key == "dr":
@@ -161,17 +165,14 @@ class ProfileBase:
                 arr = self.binsize
             elif key == "npart_bins":
                 arr = self.npart_bins
-            else:
-                raise KeyError(key)
+
+            if key in self._profile_property_registry:
+                arr = self._profile_property_registry[key](self)
             base = ProfileArray(self, name=key, array=arr, mode=None)
             self._data_cache[key] = base
             return base
 
         # Base creation: let ProfileArray decide source; default statistic mean
-        if key in self._stats_cache:
-            if "mean" in self._stats_cache[key]:
-                return self._stats_cache[key]["mean"]
-
         base_arr = ProfileArray(self, name=key, mode="mean")
         self._stats_cache[key][cast("str", base_arr._mode)] = base_arr
         return base_arr
@@ -287,7 +288,7 @@ class Profile(ProfileBase):
             bins_by = (lambda s: calc_x(s)) if calc_x else "r"
             bset = BinsSet(
                 bins_by=bins_by,
-                bins_area="annulus",     # choose a sensible default; adjust if 'auto' is implemented
+                bins_area="spherical_shell",     # choose a sensible default; adjust if 'auto' is implemented
                 bins_type=type,
                 nbins=nbins_param,
                 bin_min=rmin,
@@ -348,3 +349,6 @@ class SubProfile(ProfileBase):
             return self.parent._resolve_field(key)
         return super()._resolve_field(key)
 
+@ProfileBase.profile_property
+def density(pro: ProfileBase) -> ProfileArray | SimOrNpArray:
+    return pro["mass"]["sum"] / pro["binsize"]
