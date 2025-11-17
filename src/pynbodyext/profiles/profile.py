@@ -39,7 +39,8 @@ class ProfileBase:
     Concrete classes: Profile (root) and SubProfile (subset view).
     """
 
-    _profile_property_registry: dict[str, ProFunc] = {}
+    _profile_property_registry: defaultdict[type, dict[str, ProFunc]] = defaultdict(dict)
+
 
     def __init__(self,
                  sim: SimSnap,
@@ -79,6 +80,11 @@ class ProfileBase:
         return self._stats_cache[key][item]
 
     # ---- Properties bridging to BinsSet ----
+
+    @property
+    def bins(self) -> BinsSet:
+        return self._bins
+
     @property
     def nbins(self) -> int:
         return len(self._bins.rbins) if self._bins.rbins is not None else 0
@@ -115,6 +121,14 @@ class ProfileBase:
         data_keys = list(self._data_cache.keys()) + list(self._stats_cache.keys())
         return sorted(set(data_keys).union(_BIN_PROPERTY_KEYS))
 
+    def property_keys(self) -> list[str]:
+        par = self.parent
+        reg_by_cls = par.__class__._profile_property_registry
+        reg_keys: set[str] = set()
+        for c in par.__class__.mro():
+            reg_keys |= set(reg_by_cls.get(c, {}).keys())
+        return sorted(reg_keys)
+
     @property
     def parent(self) -> Profile:
         """Return the ultimate root (the original Profile)."""
@@ -143,6 +157,16 @@ class ProfileBase:
         )
 
     # ---- Field resolution ----
+    def _get_property_func(self, key: str) -> ProFunc | None:
+        par = self.parent
+
+        reg_by_cls = par.__class__._profile_property_registry
+        for c in par.__class__.mro():
+            bucket = reg_by_cls.get(c)
+            if bucket and key in bucket:
+                return bucket[key]
+        return None
+
     def _resolve_field(self, key: str) -> ProfileArray:
         """
         Resolve a field key to a ProfileArray. If already cached, return it;
@@ -156,7 +180,8 @@ class ProfileBase:
             if "mean" in self._stats_cache[key]:
                 return self._stats_cache[key]["mean"]
 
-        if key in _BIN_PROPERTY_KEYS or key in self._profile_property_registry:
+        func = self._get_property_func(key)
+        if key in _BIN_PROPERTY_KEYS or func is not None:
             if key == "rbins":
                 arr = self.rbins
             elif key == "dr":
@@ -166,8 +191,8 @@ class ProfileBase:
             elif key == "npart_bins":
                 arr = self.npart_bins
 
-            if key in self._profile_property_registry:
-                arr = self._profile_property_registry[key](self)
+            if func is not None:
+                arr = func(self)
             base = ProfileArray(self, name=key, array=arr, mode=None)
             self._data_cache[key] = base
             return base
@@ -237,7 +262,8 @@ class ProfileBase:
         name: str | None = None
     ) -> ProFunc | Callable[[ProFunc], ProFunc]:
         def decorator(func: ProFunc) -> ProFunc:
-            cls._profile_property_registry[name or func.__name__] = func
+            bucket = cls._profile_property_registry[cls]
+            bucket[name or func.__name__] = func
             return func
         if fn is None:
             return decorator
@@ -345,6 +371,7 @@ class SubProfile(ProfileBase):
         return self.parent.get_subprofile(subset)
 
     def _resolve_field(self, key: str) -> ProfileArray:
+        # avoid recalculating bin properties for subsets
         if key in _BIN_PROPERTY_KEYS:
             return self.parent._resolve_field(key)
         return super()._resolve_field(key)
