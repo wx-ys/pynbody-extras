@@ -70,6 +70,9 @@ RegistBinAreaString: TypeAlias = str | Literal["annulus","cylindrical_shell","sp
 RegistBinAlgorithmString: TypeAlias = str | Literal["lin","log","equaln"]
 
 
+__all__ = ["BinsSet"]
+
+
 class BinsSet:
     """
     Flexible, pluggable 1D binning helper for particle-based data.

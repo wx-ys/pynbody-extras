@@ -58,6 +58,9 @@ _PARENT_KEYS = ("rbins", "dr", "binsize")  # not changed keys
 _BIN_PROPERTY_KEYS = ("rbins", "dr", "binsize", "npart_bins")  # per-bin properties
 
 
+__all__ = ["Profile", "SubProfile", "ProfileBase"]
+
+
 def _is_sim_like(x: Any) -> bool:
     return isinstance(x, SimSnap)
 

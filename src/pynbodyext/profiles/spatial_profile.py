@@ -6,6 +6,7 @@ from pynbody.snapshot import SimSnap
 
 from .profile import AllArray, BinsAlgorithmFunc, BinsSet, Callable, Profile, RegistBinAlgorithmString
 
+__all__ = ["SpatialProfile", "RadialProfile"]
 
 class SpatialProfile(Profile):
     pass
