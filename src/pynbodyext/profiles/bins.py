@@ -497,6 +497,21 @@ class BinsSet:
         child.binsize = self.binsize
         return child
 
+    @classmethod
+    def available_options(cls) -> dict:
+        return {
+            "bins_by": list(cls._bins_by_registry.keys()),
+            "bins_area": list(cls._bins_area_registry.keys()),
+            "bins_type": list(cls._bins_algorithm_registry.keys()),
+        }
+
+    def __repr__(self)->str:
+        return (
+            f"BinsSet(bins_by={self._bins_by}, bins_area={self._bins_area}, "
+            f"bins_type={self._bins_type}, nbins={self._nbins}, "
+            f"bin_min={self._bin_min}, bin_max={self._bin_max})"
+        )
+
 
     # ------------------- registry helpers ---------------------------------#
 
