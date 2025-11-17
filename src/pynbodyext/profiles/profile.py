@@ -128,6 +128,11 @@ class ProfileBase:
         for c in par.__class__.mro():
             reg_keys |= set(reg_by_cls.get(c, {}).keys())
         return sorted(reg_keys)
+    def all_keys(self) -> list[str]:
+        return sorted(set(self.keys()).union(set(self.property_keys())))
+
+    def _ipython_key_completions_(self) -> list[str]:
+        return self.all_keys()
 
     @property
     def parent(self) -> Profile:
