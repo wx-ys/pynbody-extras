@@ -20,7 +20,7 @@ from __future__ import annotations
 import warnings
 from collections import defaultdict
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, TypeAlias, cast, overload
+from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar, cast, overload
 
 import numpy as np
 from pynbody import filt as _pyn_filt
@@ -49,7 +49,8 @@ FilterLike: TypeAlias = _pyn_filt.Filter | np.ndarray | Family | slice | int | n
 
 AllArray: TypeAlias = ProfileArray | SimOrNpArray
 
-ProFunc: TypeAlias = Callable[["ProfileBase"], AllArray]
+ProType = TypeVar("ProType",bound="ProfileBase")
+ProFunc: TypeAlias = Callable[[ProType], AllArray]
 SimFunc: TypeAlias = Callable[[SimSnap], AllArray]
 
 _BIN_PROPERTY_KEYS = ("rbins", "dr", "binsize", "npart_bins")  # per-bin properties
