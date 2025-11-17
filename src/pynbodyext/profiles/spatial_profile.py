@@ -23,7 +23,7 @@ class RadialProfile(SpatialProfile):
         bins_set: BinsSet | None = None,
         **kwargs: Any):
         if ndim == 2:
-            bins_by = "r"
+            bins_by = "rxy"
             bins_area = "cylindrical_shell"
         elif ndim == 3:
             bins_by = "r"
