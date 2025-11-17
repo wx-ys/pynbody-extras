@@ -10,11 +10,10 @@ from pynbody import filt as _pyn_filt
 from pynbody.family import Family
 from pynbody.snapshot import SimSnap
 
-from .bins import BinByFunc, BinsSet, SimOrNpArray
+from .bins import BinByFunc, BinsAlgorithmFunc, BinsAreaFunc, BinsSet, SimOrNpArray
 from .proarray import ProfileArray
 
 if TYPE_CHECKING:
-    from numpy.typing import ArrayLike
     from pynbody.array import SimArray
 
 # ------------------------------------------------------------------
@@ -22,7 +21,10 @@ if TYPE_CHECKING:
 # ------------------------------------------------------------------
 FilterLike: TypeAlias = _pyn_filt.Filter | np.ndarray | Family | slice | int | np.int32 | np.int64
 
-ProFunc: TypeAlias = Callable[["ProfileBase"], ProfileArray | SimOrNpArray]
+AllArray: TypeAlias = ProfileArray | SimOrNpArray
+
+ProFunc: TypeAlias = Callable[["ProfileBase"], AllArray]
+SimFunc: TypeAlias = Callable[[SimSnap], AllArray]
 
 _BIN_PROPERTY_KEYS = ("rbins", "dr", "binsize", "npart_bins")  # per-bin properties
 
@@ -45,17 +47,16 @@ class ProfileBase:
     def __init__(self,
                  sim: SimSnap,
                  bins_set: BinsSet,
-                 weight_key: str | None,
+                 weight: AllArray | None = None,
                  parent: Profile | None = None):
         self.sim: SimSnap = sim
-        self._bins: BinsSet = bins_set
+        self._bins: BinsSet = bins_set if bins_set.is_defined() else bins_set(sim)
         self._parent: Profile | None = parent
 
         # Weight handling: if key provided, materialize array; else None
-        self._weight_key = weight_key
-        self._weight: SimArray | np.ndarray | None = (
-            sim[weight_key] if (weight_key is not None) else None
-        )
+        self._weight: SimArray | np.ndarray | None = weight
+        if self._weight is not None:
+            assert len(self._weight) == len(sim), "Weight array length must match simulation length."
 
         # Caches:
         # _data_cache: field key -> base ProfileArray (per-bin or computed default)
@@ -154,10 +155,13 @@ class ProfileBase:
         """
         child_bins = self._bins.spawn_with_same_edges(sim_subset)
         root_parent = self.parent
+        sub_weight = (self._weight[sim_subset.get_index_list(self.sim)]
+                      if self._weight is not None
+                      else None)
         return SubProfile(
             sim_subset,
             bins_set=child_bins,
-            weight_key=self._weight_key,
+            weight=sub_weight,
             parent=root_parent,   # ensure single parent
         )
 
@@ -296,37 +300,37 @@ class Profile(ProfileBase):
     - Chained string on returned `ProfileArray` computes statistics (see `StatisticBase` registry).
     """
 
-    def __init__(self,
-                 sim: SimSnap,
-                 *,
-                 weight_by: str | None = "mass",
-                 bins_set: BinsSet | None = None,
-                 type: str = "lin",
-                 nbins: int = 100,
-                 rmin: float | None = None,
-                 rmax: float | None = None,
-                 bins: ArrayLike | None = None,
-                 calc_x: BinByFunc | None = None):
+    def __init__(
+        self,
+        sim: SimSnap,
+        *,
+        weight: str | AllArray | Callable[[SimSnap], AllArray] | None = None,
+        bins_by: str | BinByFunc = "r",
+        bins_area: str | BinsAreaFunc = "spherical_shell",
+        bins_type: str | BinsAlgorithmFunc = "lin",
+        nbins: int | AllArray = 100,
+        bin_min: float | None = None,
+        bin_max: float | None = None,
+        bins_set: BinsSet | None = None,
+        **kwargs: Any):
         # Build or reuse BinsSet
         if bins_set is not None:
             bset = bins_set
         else:
-            if bins is not None:
-                nbins_param: int | ArrayLike = bins
-            else:
-                nbins_param = nbins
-            # If calc_x provided, wrap in callable respecting signature expected by BinsSet._resolve_x
-            bins_by = (lambda s: calc_x(s)) if calc_x else "r"
             bset = BinsSet(
-                bins_by=bins_by,
-                bins_area="spherical_shell",     # choose a sensible default; adjust if 'auto' is implemented
-                bins_type=type,
-                nbins=nbins_param,
-                bin_min=rmin,
-                bin_max=rmax,
-            ).__call__(sim)
+                bins_by=bins_by, bins_area=bins_area, bins_type=bins_type,
+                nbins=nbins, bin_min=bin_min, bin_max=bin_max,**kwargs)
+        weight_arr: AllArray | None
+        if weight is None:
+            weight_arr = None
+        elif isinstance(weight, str):
+            weight_arr = sim[weight]
+        elif callable(weight):
+            weight_arr = weight(sim)
+        else:
+            weight_arr = weight
 
-        super().__init__(sim, bset, weight_key=weight_by, parent=None)
+        super().__init__(sim, bset, weight=weight_arr, parent=None)
         self._subs_cache: dict[SimSnap, SubProfile] = {}
 
 
@@ -364,14 +368,6 @@ class SubProfile(ProfileBase):
     per-bin assignments for the subset's particles.
     """
 
-    def __init__(self,
-                 sim_subset: SimSnap,
-                 *,
-                 bins_set: BinsSet,
-                 weight_key: str | None,
-                 parent: Profile):
-        super().__init__(sim_subset, bins_set, weight_key=weight_key, parent=parent)
-
     def get_subprofile(self, subset: SimSnap) -> SubProfile:
         return self.parent.get_subprofile(subset)
 
@@ -382,5 +378,5 @@ class SubProfile(ProfileBase):
         return super()._resolve_field(key)
 
 @ProfileBase.profile_property
-def density(pro: ProfileBase) -> ProfileArray | SimOrNpArray:
+def density(pro: ProfileBase) -> AllArray:
     return pro["mass"]["sum"] / pro["binsize"]
