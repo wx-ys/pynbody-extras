@@ -81,6 +81,11 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
                                        **sim[sim_parameter].conversion_context()).item()
                 else:
                     value = value.item()
+            else:
+                raise TypeError(
+                    "value must be a single-element array if it is an ndarray, got array with shape "
+                    f"{value.shape}"
+                )
         if isinstance(value, (int, float)):
             return float(value)
 
