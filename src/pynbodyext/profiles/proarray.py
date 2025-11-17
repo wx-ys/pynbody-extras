@@ -698,6 +698,49 @@ class Median(StatisticBase):
         else:
             return None
 
+class Abs(StatisticBase):
+    """
+    A wrapper statistic that applies abs() before delegating to another statistic.
+
+    Examples:
+    - "abs" or "abs_mean": mean(abs(arr)) [weighted if weights provided]
+    - "abs_p16": Percentile 16 on abs(arr)
+    - "abs_median": median(abs(arr))
+    - "abs_sum": sum(abs(arr))
+    - "abs_sum_w": weighted sum(abs(arr))
+    """
+    example_name: str = "abs"
+
+    def __init__(self, key: str, substat: "StatisticBase"):
+        super().__init__(key)
+        self._substat = substat
+
+    def __call__(
+        self,
+        arr: SimOrNpArray,
+        weight: SimOrNpArray | None,
+    ) -> float | int | np.floating:
+        return self._substat(np.abs(arr), weight)
+
+    @classmethod
+    def valid(cls, key: str) -> Union["StatisticBase", None]:
+        k = key.lower()
+        # accept "abs" and alias to "abs_mean"
+        if k in ["abs","abs_"]:
+            subkey = "mean"
+        elif k.startswith("abs_"):
+            subkey = k[4:]
+        else:
+            return None
+
+        # Delegate to the underlying statistic (e.g., "mean", "p16", "median", "sum_w", etc.)
+        sub = ProfileArray.get_statistic(subkey)
+        if sub is None:
+            # Don't claim keys we can't actually compute
+            return None
+        standard_key = "abs_"+sub.key
+        return cls(standard_key, sub)
+
 class Dispersion(StatisticBase):
     example_name: str = "disp"
     def __call__(
