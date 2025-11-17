@@ -46,7 +46,7 @@ See Also
 """
 
 from collections.abc import Callable
-from typing import Any, TypeAlias, overload
+from typing import Any, Literal, TypeAlias, overload
 
 import numpy as np
 from pynbody.array import IndexedSimArray, SimArray
@@ -63,6 +63,12 @@ BinsAreaFunc: TypeAlias = Callable[["BinsSet", SimOrNpArray], SimOrNpArray]
 
 BinsAlgorithmFunc: TypeAlias = Callable[["BinsSet", SimOrNpArray], SimOrNpArray]
 """Callable constructing bin edges from raw data (returns length nbins+1)."""
+
+
+RegistBinBy: TypeAlias = str | Literal["r","rxy"]
+RegistBinArea: TypeAlias = str | Literal["annulus","cylindrical_shell","spherical_shell"]
+RegistBinAlgorithm: TypeAlias = str | Literal["lin","log","equaln"]
+
 
 class BinsSet:
     """
@@ -128,9 +134,9 @@ class BinsSet:
 
     def __init__(
         self,
-        bins_by: str | BinByFunc,
-        bins_area: str | BinsAreaFunc,
-        bins_type: str | BinsAlgorithmFunc,
+        bins_by: RegistBinBy | BinByFunc,
+        bins_area: RegistBinArea | BinsAreaFunc,
+        bins_type: RegistBinAlgorithm | BinsAlgorithmFunc,
         nbins: int | np.ndarray | SimArray,
         bin_min:float | None = None,
         bin_max:float | None = None,

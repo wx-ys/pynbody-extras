@@ -27,7 +27,16 @@ from pynbody import filt as _pyn_filt
 from pynbody.family import Family
 from pynbody.snapshot import SimSnap
 
-from .bins import BinByFunc, BinsAlgorithmFunc, BinsAreaFunc, BinsSet, SimOrNpArray
+from .bins import (
+    BinByFunc,
+    BinsAlgorithmFunc,
+    BinsAreaFunc,
+    BinsSet,
+    RegistBinAlgorithm,
+    RegistBinArea,
+    RegistBinBy,
+    SimOrNpArray,
+)
 from .proarray import ProfileArray
 
 if TYPE_CHECKING:
@@ -429,9 +438,9 @@ class Profile(ProfileBase):
         sim: SimSnap,
         *,
         weight: str | AllArray | Callable[[SimSnap], AllArray] | None = None,
-        bins_by: str | BinByFunc = "r",
-        bins_area: str | BinsAreaFunc = "spherical_shell",
-        bins_type: str | BinsAlgorithmFunc = "lin",
+        bins_by: RegistBinBy | BinByFunc = "r",
+        bins_area: RegistBinArea | BinsAreaFunc = "spherical_shell",
+        bins_type: RegistBinAlgorithm | BinsAlgorithmFunc = "lin",
         nbins: int | AllArray = 100,
         bin_min: float | None = None,
         bin_max: float | None = None,
@@ -508,7 +517,3 @@ class SubProfile(ProfileBase):
         if key in _BIN_PROPERTY_KEYS:
             return self.parent._resolve_field(key)
         return super()._resolve_field(key)
-
-@ProfileBase.profile_property
-def density(pro: ProfileBase) -> AllArray:
-    return pro["mass"]["sum"] / pro["binsize"]
