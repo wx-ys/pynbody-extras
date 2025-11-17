@@ -80,8 +80,8 @@ class RadialProfileBuilder(ProfileBuilderBase[RadialProfile]):
         weight: AllArray | str | Callable[[SimSnap], AllArray] | None = None,
         bins_type: RegistBinAlgorithmString | BinsAlgorithmFunc = "lin",
         nbins: AllArray | int = 100,
-        bin_min: str | float | UnitBase | None = None,
-        bin_max: str | float | UnitBase | None = None,
+        bin_min: str | float | UnitBase | Callable[[SimSnap], float] | None = None,
+        bin_max: str | float | UnitBase | Callable[[SimSnap], float] | None = None,
         bins_set: BinsSet | None = None,
         **kwargs: Any
     ):
@@ -98,11 +98,13 @@ class RadialProfileBuilder(ProfileBuilderBase[RadialProfile]):
 
     def __call__(self, sim: SimSnap) -> RadialProfile:
         if self.bin_min is not None:
-            bin_min = self._in_sim_units(self.bin_min, "pos", sim)
+            bin_min = self.bin_min(sim) if callable(self.bin_min) else self.bin_min
+            bin_min = self._in_sim_units(bin_min, "pos", sim)
         else:
             bin_min = None
         if self.bin_max is not None:
-            bin_max = self._in_sim_units(self.bin_max, "pos", sim)
+            bin_max = self.bin_max(sim) if callable(self.bin_max) else self.bin_max
+            bin_max = self._in_sim_units(bin_max, "pos", sim)
         else:
             bin_max = None
 
