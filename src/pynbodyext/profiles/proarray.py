@@ -552,6 +552,41 @@ class Mean(StatisticBase):
         else:
             return None
 
+class Sum(StatisticBase):
+
+    def __call__(
+        self,
+        arr: SimOrNpArray,
+        weight: SimOrNpArray | None,
+    )-> float | int | np.floating:
+        return arr.sum()
+
+    @classmethod
+    def valid(cls, key: str) -> Union["StatisticBase", None]:
+        if key.lower() == "sum":
+            return cls("sum")
+        else:
+            return None
+
+class Sum_w(StatisticBase):
+
+    def __call__(
+        self,
+        arr: SimOrNpArray,
+        weight: SimOrNpArray | None,
+    )-> float | int | np.floating:
+        if weight is not None:
+            return (arr * weight).sum()
+        else:
+            return arr.sum()
+
+    @classmethod
+    def valid(cls, key: str) -> Union["StatisticBase", None]:
+        if key.lower() == "sum_w":
+            return cls("sum_w")
+        else:
+            return None
+
 class Percentile(StatisticBase):
 
     def __init__(self, key: str, percentile: int):
