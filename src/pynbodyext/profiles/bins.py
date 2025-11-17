@@ -348,13 +348,28 @@ class BinsSet:
         """
         partbin = np.digitize(np.asarray(x), np.asarray(bin_edges), right=True) - 1
         nbins = len(bin_edges) - 1
-        partbin[partbin < 0] = 0
-        partbin[partbin >= nbins] = nbins - 1 if nbins > 0 else 0
-        binind: list[np.ndarray] = []
-        for i in range(nbins):
-            binind.append(np.where(partbin == i)[0])
-        npart_bins = np.array([len(ind) for ind in binind], dtype=int)
-        return binind, npart_bins
+        if nbins <= 0:
+            return [], np.array([], dtype=int)
+
+
+        # keep only values that fell into a valid bin
+        valid_mask = (partbin >= 0) & (partbin < nbins)
+        if not np.any(valid_mask):
+            return [np.empty(0, dtype=int) for _ in range(nbins)], np.zeros(nbins, dtype=int)
+
+        bin_id = partbin[valid_mask]
+        idx = np.nonzero(valid_mask)[0]
+
+        # counts per bin (fast, vectorized)
+        counts = np.bincount(bin_id, minlength=nbins).astype(int)
+
+        # group indices by bin with a single stable sort, then slice by cumulative counts
+        order = np.argsort(bin_id, kind="stable")
+        idx_sorted = idx[order]
+        starts = np.concatenate(([0], np.cumsum(counts)))
+        binind = [idx_sorted[starts[i]:starts[i+1]] for i in range(nbins)]
+
+        return binind, counts
 
     def __call__(self, sim: SimSnap, inplace: bool = False) -> "BinsSet":
         """
