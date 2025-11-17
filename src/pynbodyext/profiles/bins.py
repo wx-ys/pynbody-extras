@@ -195,6 +195,21 @@ class BinsSet:
         self.npart_bins: np.ndarray | None = None
         self.binsize: SimArray | np.ndarray | None = None  # area or volume
 
+    def is_defined(self) -> bool:
+        """
+        Check if the BinsSet is defined.
+
+        Returns
+        -------
+        bool
+            True if bin edges are defined, False otherwise.
+        """
+        return (self.bin_edges is not None
+                and self.rbins is not None
+                and self.dr is not None
+                and self.binind is not None
+                and self.npart_bins is not None
+                and self.binsize is not None)
 
     def _resolve_x(self, sim: SimSnap) -> SimOrNpArray:
         """
