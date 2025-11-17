@@ -65,9 +65,9 @@ BinsAlgorithmFunc: TypeAlias = Callable[["BinsSet", SimOrNpArray], SimOrNpArray]
 """Callable constructing bin edges from raw data (returns length nbins+1)."""
 
 
-RegistBinBy: TypeAlias = str | Literal["r","rxy"]
-RegistBinArea: TypeAlias = str | Literal["annulus","cylindrical_shell","spherical_shell"]
-RegistBinAlgorithm: TypeAlias = str | Literal["lin","log","equaln"]
+RegistBinByString: TypeAlias = str | Literal["r","rxy"]
+RegistBinAreaString: TypeAlias = str | Literal["annulus","cylindrical_shell","spherical_shell"]
+RegistBinAlgorithmString: TypeAlias = str | Literal["lin","log","equaln"]
 
 
 class BinsSet:
@@ -134,9 +134,9 @@ class BinsSet:
 
     def __init__(
         self,
-        bins_by: RegistBinBy | BinByFunc,
-        bins_area: RegistBinArea | BinsAreaFunc,
-        bins_type: RegistBinAlgorithm | BinsAlgorithmFunc,
+        bins_by: RegistBinByString | BinByFunc,
+        bins_area: RegistBinAreaString | BinsAreaFunc,
+        bins_type: RegistBinAlgorithmString | BinsAlgorithmFunc,
         nbins: int | np.ndarray | SimArray,
         bin_min:float | None = None,
         bin_max:float | None = None,
