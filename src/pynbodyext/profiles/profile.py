@@ -1,35 +1,34 @@
 from __future__ import annotations
 
+import warnings
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
+import numpy as np
 from pynbody import filt as _pyn_filt
+from pynbody.family import Family
 from pynbody.snapshot import SimSnap
 
 from .bins import BinByFunc, BinsSet
 from .proarray import ProfileArray
 
 if TYPE_CHECKING:
-    import numpy as np
     from numpy.typing import ArrayLike
     from pynbody.array import SimArray
 
 # ------------------------------------------------------------------
 # Assumptions / light shims (remove if already defined elsewhere)
 # ------------------------------------------------------------------
-FilterLike: TypeAlias = _pyn_filt.Filter
+FilterLike: TypeAlias = _pyn_filt.Filter | np.ndarray | Family | slice | int | np.int32 | np.int64
 _BIN_PROPERTY_KEYS = ("rbins", "dr", "binsize", "npart_bins")  # per-bin properties
+
+
 def _is_sim_like(x: Any) -> bool:
     return isinstance(x, SimSnap)
-
-# Optional external filter type placeholder
-class _ExtFilter:
-    pass
 
 # ------------------------------------------------------------------
 # Profile base
 # ------------------------------------------------------------------
-
 class ProfileBase:
     """
     Abstract base providing shared mechanics (bin set, caching, weight).
@@ -48,7 +47,7 @@ class ProfileBase:
         # Weight handling: if key provided, materialize array; else None
         self._weight_key = weight_key
         self._weight: SimArray | np.ndarray | None = (
-            sim[weight_key] if (weight_key is not None and weight_key in sim.keys()) else None
+            sim[weight_key] if (weight_key is not None) else None
         )
 
         # Caches:
@@ -171,6 +170,34 @@ class ProfileBase:
         self._stats_cache[key][cast("str", base_arr._mode)] = base_arr
         return base_arr
 
+
+    def get_subprofile(self, subset: SimSnap) -> SubProfile:
+        warnings.warn("get_subprofile is deprecated; use __getitem__ with a filter instead",
+                      DeprecationWarning, stacklevel=2)
+        subprof = self._spawn(subset)
+        return subprof
+
+     # ---- Main public indexing ----
+    def __getitem__(self, key: str | FilterLike) -> ProfileArray | SubProfile:
+
+        # str -> ProfileArray
+        if isinstance(key, str):
+            return self._resolve_field(key)
+
+        # FilterLike → subset
+        subset = self.sim[key]
+        return self.get_subprofile(subset)
+
+    def __getattr__(self, name: str) -> SubProfile:
+        # Mirror SimSnap pattern: attribute exposing subsnap returns SubProfile
+        try:
+            sub = getattr(self.sim, name)
+        except AttributeError as e:
+            raise AttributeError(name) from e
+        if _is_sim_like(sub):
+            return self.get_subprofile(sub)
+        raise AttributeError(name)
+
     # ---- Representation ----
     def __repr__(self) -> str:
         cls = self.__class__.__name__
@@ -241,26 +268,6 @@ class Profile(ProfileBase):
         self._subs_cache[subset] = subprof
         return subprof
 
-    # ---- Main public indexing ----
-    def __getitem__(self, key: str | FilterLike | _ExtFilter) -> ProfileArray | SubProfile:
-        # Filter → subset
-        if isinstance(key, (_ExtFilter, _pyn_filt.Filter)):
-            subset = self.sim[key]
-            return self.get_subprofile(subset)
-
-        if isinstance(key, str):
-            return self._resolve_field(key)
-        raise TypeError(f"Unsupported key type '{type(key)}' for Profile.__getitem__")
-
-    def __getattr__(self, name: str) -> SubProfile:
-        # Mirror SimSnap pattern: attribute exposing subsnap returns SubProfile
-        try:
-            sub = getattr(self.sim, name)
-        except AttributeError as e:
-            raise AttributeError(name) from e
-        if _is_sim_like(sub):
-            return self.get_subprofile(sub)
-        raise AttributeError(name)
 
     @property
     def nsubs(self) -> int:
@@ -296,21 +303,11 @@ class SubProfile(ProfileBase):
                  parent: Profile):
         super().__init__(sim_subset, bins_set, weight_key=weight_key, parent=parent)
 
-    def __getitem__(self, key: str | FilterLike | _ExtFilter) -> ProfileArray | SubProfile:
-        if isinstance(key, (_ExtFilter, _pyn_filt.Filter)):
-            subset = self.sim[key]
-            return self.parent.get_subprofile(subset)
-        if isinstance(key, str):
-            if key in _BIN_PROPERTY_KEYS:
-                return self.parent._resolve_field(key)
-            return self._resolve_field(key)
-        raise TypeError(f"Unsupported key type '{type(key)}' for SubProfile.__getitem__")
+    def get_subprofile(self, subset: SimSnap) -> SubProfile:
+        return self.parent.get_subprofile(subset)
 
-    def __getattr__(self, name: str) -> SubProfile:
-        try:
-            sub = getattr(self.sim, name)
-        except AttributeError as e:
-            raise AttributeError(name) from e
-        if _is_sim_like(sub):
-            return self.parent.get_subprofile(sub)
-        raise AttributeError(name)
+    def _resolve_field(self, key: str) -> ProfileArray:
+        if key in _BIN_PROPERTY_KEYS:
+            return self.parent._resolve_field(key)
+        return super()._resolve_field(key)
+
