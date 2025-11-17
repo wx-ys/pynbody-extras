@@ -24,7 +24,7 @@ class RadialProfile(SpatialProfile):
         **kwargs: Any):
         if ndim == 2:
             bins_by = "rxy"
-            bins_area = "cylindrical_shell"
+            bins_area = "annulus"
         elif ndim == 3:
             bins_by = "r"
             bins_area = "spherical_shell"
