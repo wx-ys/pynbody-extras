@@ -6,10 +6,10 @@ one-dimensional bins (edges, centers) from a simulation (`SimSnap`) and assignin
 particles to those bins. The design emphasizes extensibility via registries for
 three stages:
 
-1. Data extraction (`bins_by`) – how to obtain the 1D quantity to be binned.
-2. Edge construction (`bins_type`) – how to compute bin edges when the user
+1. Data extraction (`bins_by`) - how to obtain the 1D quantity to be binned.
+2. Edge construction (`bins_type`) - how to compute bin edges when the user
    supplies an integer number of bins.
-3. Area/volume calculation (`bins_area`) – how to compute geometric measures
+3. Area/volume calculation (`bins_area`) - how to compute geometric measures
    (area or volume) per bin.
 
 Registries
@@ -381,9 +381,25 @@ class BinsSet:
         npart_bins = np.array([len(ind) for ind in binind], dtype=int)
         return binind, npart_bins
 
-    def __call__(self, sim: SimSnap) -> "BinsSet":
+    def __call__(self, sim: SimSnap, inplace: bool = False) -> "BinsSet":
         """
         Materialize binning for a simulation.
+
+        Default behavior (inplace=False)
+        --------------------------------
+        Acts as a factory: returns a NEW `BinsSet` instance with all computed
+        attributes populated, leaving the original instance (the “configuration
+        object”) untouched. This makes patterns like:
+
+            factory = BinsSet(bins_by="r", bins_area="annulus", bins_type="lin", nbins=30)
+            bins1 = factory(sim1)
+            bins2 = factory(sim2)
+
+        safe: `bins1 is not bins2` and both remain independent.
+
+        Backward-compatible mode (inplace=True)
+        ---------------------------------------
+        Retains previous semantics: mutates `self` in place and returns it.
 
         Steps
         -----
@@ -397,28 +413,49 @@ class BinsSet:
         ----------
         sim : SimSnap
             Simulation snapshot.
+        inplace : bool, default False
+            If True, mutate and return `self`. If False, return a new
+            materialized instance.
 
         Returns
         -------
         BinsSet
-            Self (populated with computed attributes).
+            A materialized bin set (new object unless `inplace=True`).
 
         Notes
         -----
-        If edges are invalid after construction, a fallback of ``[0.0, 1.0]``
-        is used to avoid exceptions.
+        - When `inplace=False`, the original instance remains a pure
+          configuration (no data-dependent attributes set).
+        - A safety clamp ensures edges are valid; if not, `[0.0, 1.0]` is used.
         """
-        self.x = self._resolve_x(sim)
-        self.bin_edges = self._build_edges(self.x)
+        target: BinsSet
+        if inplace:
+            target = self
+        else:
+            # Create a fresh instance carrying over configuration
+            target = BinsSet(
+                bins_by=self._bins_by,
+                bins_area=self._bins_area,
+                bins_type=self._bins_type,
+                nbins=self._nbins,
+                bin_min=self._bin_min,
+                bin_max=self._bin_max,
+                **self._kwargs,
+            )
+
+        target.x = target._resolve_x(sim)
+        target.bin_edges = target._build_edges(target.x)
 
         # Safety clamp: ensure valid edges
-        if self.bin_edges.ndim != 1 or self.bin_edges.shape[0] < 2:
-            self.bin_edges = np.asarray([0.0, 1.0])
-        self.rbins = self._calc_binmid(self.bin_edges)
-        self.dr = np.gradient(self.rbins)   # approx. half-widths for non-uniform bins
-        self.binind, self.npart_bins = self._assign_particles(self.x, self.bin_edges)
-        self.binsize = self._calc_area_or_volume(self.bin_edges)
-        return self
+        if target.bin_edges.ndim != 1 or target.bin_edges.shape[0] < 2:
+            target.bin_edges = np.asarray([0.0, 1.0])
+
+        target.rbins = target._calc_binmid(target.bin_edges)
+        target.dr = np.gradient(target.rbins)   # approx. half-widths
+        target.binind, target.npart_bins = target._assign_particles(target.x, target.bin_edges)
+        target.binsize = target._calc_area_or_volume(target.bin_edges)
+
+        return target
 
 
     def spawn_with_same_edges(self, sim: SimSnap) -> "BinsSet":
