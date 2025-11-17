@@ -1,57 +1,187 @@
+"""
+Profile-array utilities for binned profiles built on top of pynbody's SimArray.
+
+This module provides:
+
+- ProfileArray: a lightweight wrapper around :class:`pynbody.array.SimArray`
+  representing a 1D profile sampled over profile bins. It understands how to
+  compute per-bin statistics (mean, median, percentiles, dispersion, etc.)
+  from a per-particle source field.
+- A tiny statistic plug-in system based on :class:`StatisticBase`, with several
+  built-ins: :class:`Mean`, :class:`Median`, :class:`Percentile`, :class:`RMS`,
+  and :class:`Dispersion`. New statistics can be added by subclassing
+  :class:`StatisticBase`.
+
+Concepts
+--------
+
+- Two "sources" exist for a :class:`ProfileArray`:
+
+  - "per_particle": created from a per-particle field (length = number of
+    particles). In this case, the default profile stored in the array is the
+    mean per bin, and additional statistics can be requested on demand, e.g.
+    ``profile_array["median"]`` or ``profile_array["p84"]``.
+  - "per_bin": created from an already aggregated per-bin array (length =
+    number of bins). In this case, further statistics based on the original
+    per-particle data are disabled, because per-particle inputs are not known.
+    If a per-bin array is provided together with a ``mode`` (e.g., ``"mean"``),
+    the instance is tagged as if it originated from a per-particle field so
+    the label is preserved for representation; computation still refers back
+    to the named field in the simulation.
+
+- Units: if a :class:`~pynbody.array.SimArray` per-particle field is used as input,
+  the computed per-bin profile inherits its units and simulation context.
+
+- Caching: statistics may be cached by the owning profile object (see
+  ``ProfileBase.is_cached`` / ``ProfileBase.cache``), so repeated queries like
+  ``profile_array["median"]`` are fast.
+
+Quick example
+-------------
+
+>>> # Given a ProfileBase instance `prof` with bins and access to `prof.sim[...]`
+>>> v_rad = ProfileArray(prof, name="vr")       # mean radial velocity per bin
+>>> v_med = v_rad["median"]                     # median per bin, recomputed
+>>> v_p16 = v_rad["p16"]                        # weighted/unweighted 16th percentile
+>>> v_disp = v_rad["dispersion"]                # dispersion (sqrt(E[v^2] - E[v]^2))
+
+New statistics
+--------------
+
+Subclass :class:`StatisticBase` and implement ``__call__`` and optionally
+override ``valid`` to control the matching key. See :class:`Percentile`
+for a pattern-based matcher.
+
+"""
 
 import re
-from typing import Literal, Union, cast
+from typing import TYPE_CHECKING, Literal, Optional, Union, cast, overload
 
 import numpy as np
-from pynbody.array import SimArray
-from pynbody.snapshot import SimSnap
+from pynbody.array import IndexedSimArray, SimArray
 
-#if TYPE_CHECKING:
-#    from .profile import Profile
+from .bins import SimOrNpArray
 
+if TYPE_CHECKING:
+    from .profile import ProfileBase
 
-class Profile:
-
-    nbins: int
-    _weight: np.ndarray | None
-    binind: list[np.ndarray]
-    sim: SimSnap
-
-    def cache(self,pro_arr: "ProfileArray") -> None:
-        pass
-
-    def is_cached(self, key: str, item: str) -> bool:
-        return True
-
-    def get_cached(self, key: str, item: str) -> "ProfileArray":
-        return ProfileArray(self, key=key, mode=item)
-
+__all__ = [
+    "ProfileArray",
+    "StatisticBase",
+    "Mean",
+    "Percentile",
+    "RMS",
+    "Median",
+    "Dispersion",
+]
 
 class ProfileArray(SimArray):
+    """
+    A profile-valued 1D array bound to a specific profile definition and source field.
 
-    __slots__ = ["_profile","_key","_source","_arr", "_mode"]
-    _registry: list[type["StatisticBase"]] = []
+    This class extends :class:`~pynbody.array.SimArray` and behaves like a
+    standard NumPy/pynbody array. It also carries enough context to compute
+    per-bin statistics from a per-particle source field on demand.
 
-    _profile: Profile | None
-    _key: str | None
-    _source: Literal["per_particle", "per_bin"]
-    _arr: SimArray | np.ndarray | None
-    _mode: str | None
+    Construction rules (array shape):
+    - If ``array`` is ``None``, the per-particle field ``profile.sim[name]`` is used.
+    - If the array length equals the number of particles in ``profile.sim``,
+      the instance is considered "per_particle": the base values stored are,
+      by default, the mean per bin unless ``mode`` specifies a different
+      statistic to precompute.
+    - If the array length equals the number of bins in ``profile``, the array
+      is treated as already per-bin ("per_bin") and used as-is. If ``mode`` is
+      not ``None``, it serves as a label describing which statistic was used.
+
+    Indexing rules:
+    - Numeric/slice/boolean indexing behaves like on :class:`~pynbody.array.SimArray`.
+      Views created by slicing are marked as views in the representation and
+      do not recompute statistics.
+    - String indexing is overloaded to request a statistic by name, e.g.,
+      ``arr["median"]``, ``arr["mean"]``, ``arr["rms"]``, or ``arr["p16"]``.
+      This returns a new :class:`ProfileArray` with per-bin values computed
+      from the per-particle source field.
+
+    Parameters
+    ----------
+    profile : ProfileBase
+        The owning profile that defines bins, weights, and access to the
+        per-particle simulation arrays (via ``profile.sim[name]``).
+    name : str
+        The name of the per-particle field in ``profile.sim`` (e.g., "vr",
+        "rho", etc.). Also used as the label for per-bin arrays.
+    array : SimOrNpArray, optional
+        Input array. If ``None``, uses ``profile.sim[name]``. If provided, it
+        must be either a per-particle array (length = number of particles) or
+        a per-bin array (length = ``profile.nbins``).
+    mode : str, optional
+        The statistic key to precompute when ``array`` is per-particle
+        (default: "mean"). When ``array`` is per-bin, ``mode`` acts as a label
+        describing which statistic produced the per-bin values.
+
+    Notes
+    -----
+    - Units and simulation binding: when the per-particle input is a
+      :class:`~pynbody.array.SimArray`, the computed per-bin values inherit
+      the units and simulation binding.
+    - Weighting: weights are taken from the profile via ``profile._weight``.
+      A weight sum of zero in a bin results in ``nan`` for that bin.
+    - Caching: If the owning profile supports caching, repeated requests for
+      the same statistic are answered from cache.
+
+    Examples
+    --------
+    Compute basic statistics per bin:
+
+    >>> sigma_r = ProfileArray(prof, name="vr")     # mean per bin
+    >>> sigma_r_med = sigma_r["median"]             # median per bin
+    >>> sigma_r_p84 = sigma_r["p84"]                # 84th percentile per bin
+
+    Per-bin array as input:
+
+    >>> precomputed = some_np_array_of_length_nbins
+    >>> sigma_r_mean = ProfileArray(prof, name="vr", array=precomputed, mode="mean")
+    """
+
+    __slots__ = ["_profile","_name","_source","_arr", "_mode","_is_view"]
+    _registry: list[type["StatisticBase"]] = [] # Registered statistic calculators
+
+    _profile: Optional["ProfileBase"]   # The owning profile that defines bins, weights, and access to per-particle simulation arrays
+    _name: str                          # The name of the per-particle field in the profile's simulation
+    _source: Literal["per_particle", "per_bin"] # Indicates whether the array is per-particle or per-bin
+    _arr: SimOrNpArray | None           # The underlying array data, either per-particle or per-bin
+    _mode: str | None                   # The statistic key used for computation or labeling
+    _is_view: bool                      # Indicates if this is a view of another ProfileArray
+
 
     def __new__(cls,
-                profile: "Profile",
-                *,
-                key: str,
-                array: np.ndarray | SimArray | None = None,
-                mode: str | None = None,
-                ) -> "ProfileArray":
-        if not isinstance(key, str):
-            raise ValueError("key must be a string")
+        profile: "ProfileBase",
+        *,
+        name: str,
+        array: SimOrNpArray | None = None,
+        mode: str | None = None,
+    ) -> "ProfileArray":
+        """
+        Allocate and construct a new ProfileArray instance.
 
-        array = profile.sim[key] if array is None else array
+        See the class docstring for full semantics. The object is created via
+        ``__new__`` because :class:`~pynbody.array.SimArray` requires array-like
+        construction at allocation time.
 
-        if not (isinstance(array, (np.ndarray, SimArray))):
-            raise ValueError("array must be a numpy ndarray or SimArray")
+        Raises
+        ------
+        ValueError
+            If ``name`` is not a string, or ``array`` is neither a numpy array
+            nor a :class:`~pynbody.array.SimArray`-like object, or if the length
+            of ``array`` does not match the particle count or bin count.
+        """
+        if not isinstance(name, str):
+            raise ValueError("name must be a string")
+
+        array = profile.sim[name] if array is None else array
+
+        if not (isinstance(array, (np.ndarray, SimArray, IndexedSimArray))):
+            raise ValueError("array must be a numpy ndarray or SimArray, got " + str(type(array)))
 
         n_particles = len(profile.sim)
         n_bins = profile.nbins
@@ -59,22 +189,22 @@ class ProfileArray(SimArray):
 
 
         if arr_len == n_particles:
-            # per-particle → compute mean as default
+            # per-particle → compute mean as default (or `mode` if provided)
             arr_pp = array
             compute_mode = mode if mode is not None else "mean"
-            base = cls._compute(profile, arr_pp, compute_mode=compute_mode)
+            base, mode = cls._compute(profile, arr_pp, compute_mode=compute_mode)
             obj = super().__new__(cls, base)
             obj._source = "per_particle"
             obj._arr = arr_pp
-            obj._key = key
-            obj._mode = compute_mode
+            obj._name = name
+            obj._mode = mode
         elif arr_len == n_bins:
             # per-bin → use as-is, but source depends on mode
             base = array
             obj = super().__new__(cls, base)
             obj._source = "per_bin" if mode is None else "per_particle"
             obj._arr = array
-            obj._key = key
+            obj._name = name
             obj._mode = mode
         else:
             raise ValueError(
@@ -90,22 +220,50 @@ class ProfileArray(SimArray):
 
     def __init__(
         self,
-        profile: "Profile",
+        profile: "ProfileBase",
         *,
-        key: str,
-        array: np.ndarray | SimArray | None = None,
+        name: str,
+        array: SimOrNpArray | None = None,
         mode: str | None = None,
         ):
-        """ """
+        """Initialize the instance (no-op; all logic lives in __new__)."""
+        # Intentionally empty: initialization handled in __new__.
 
     @classmethod
     def _compute(
         cls,
-        profile: "Profile",
-        arr: SimArray | np.ndarray | str,
+        profile: "ProfileBase",
+        arr: SimOrNpArray | str,
         compute_mode: str,
-        ) -> SimArray:
+        ) -> tuple[SimArray, str]:
+        """
+        Compute a per-bin statistic from a per-particle array.
 
+        This is a low-level routine used by the constructor and by the
+        statistic-dispatching ``__getitem__`` logic.
+
+        Parameters
+        ----------
+        profile : ProfileBase
+            The owning profile defining bins and (optional) weights.
+        arr : SimOrNpArray or str
+            The per-particle array. If a string is provided, it is treated as a
+            field name into ``profile.sim``.
+        compute_mode : str
+            The statistic key to compute (e.g., "mean", "median", "rms", "p16").
+
+        Returns
+        -------
+        SimArray
+            Per-bin values as a 1D :class:`~pynbody.array.SimArray`. Units and
+            simulation context are propagated if ``arr`` (or the looked-up field)
+            is a :class:`~pynbody.array.SimArray`.
+
+        Raises
+        ------
+        ValueError
+            If no registered statistic matches ``compute_mode``.
+        """
         calculator = cls.get_statistic(compute_mode)
         if calculator is None:
             raise ValueError(f"Statistic '{compute_mode}' not found")
@@ -130,11 +288,29 @@ class ProfileArray(SimArray):
         if isinstance(arr_pp, SimArray):
             res_val.units = arr_pp.units
             res_val.sim = arr_pp.sim
-        return res_val
+        return res_val, calculator.key
 
 
     @classmethod
     def get_statistic(cls, key: str) -> Union["StatisticBase", None]:
+        """
+        Return the first registered statistic that claims the given key.
+
+        Parameters
+        ----------
+        key : str
+            The lookup key, e.g. "mean", "median", "rms", or "p84".
+
+        Returns
+        -------
+        StatisticBase or None
+            An instance of a matching statistic, or ``None`` if no match exists.
+
+        Notes
+        -----
+        Matching order is the registration order, which follows subclass import
+        order due to ``StatisticBase.__init_subclass__``.
+        """
         for stat in cls._registry:
             res = stat.valid(key)
             if res is not None:
@@ -142,41 +318,112 @@ class ProfileArray(SimArray):
         return None
 
     def __array_finalize__(self, obj: Union["ProfileArray", None]) -> None:
+        """
+        NumPy/pynbody subclass hook for view creation.
+
+        Ensures that when a view is created (e.g., slicing), the profile context
+        is carried over, and the instance is marked as a view. Units and sim
+        binding are handled by :class:`~pynbody.array.SimArray`.
+
+        Parameters
+        ----------
+        obj : ProfileArray or None
+            The source object from which the view is created.
+        """
         # Let SimArray handle its own finalize first (units/sim)
         super().__array_finalize__(obj)
         if obj is None:
-            # Default init when created from buffer – set safe defaults
-            self._profile = None
-            self._key = None
-            self._source = "per_bin"
-            self._arr = None
-            self._mode = None
+            return
         else:
-            # This is a view/slice of an existing ProfileData – disable stats on views
+            # This is a view/slice of an existing ProfileData
             self._profile = getattr(obj, "_profile", None)
-            self._key = getattr(obj, "_key", None)
+            self._name = getattr(obj, "_name", "None")
             self._source = getattr(obj, "_source", "per_bin")
-            self._arr = getattr(obj, "_arr", None)
+            self._arr = getattr(obj,"_arr", None)
             self._mode = getattr(obj, "_mode", None)
+            self._is_view = True
 
     # ---- public API ----
 
     def _ensure_base_for_stats(self):
+        """
+        Guard that the instance can compute further statistics.
+
+        Raises
+        ------
+        TypeError
+            If the instance is detached from any profile.
+        RuntimeError
+            If the instance was built from per-bin values (no per-particle source),
+            or if the name is not set.
+        """
         if self._profile is None:
             raise TypeError("Statistics are only available on the base ProfileData.")
         if self._source == "per_bin":
             raise RuntimeError("Per-bin array cannot be used for per-particle statistics")
+        if self._name is None:
+            raise RuntimeError("Name is not set for this ProfileArray")
 
-    def __getitem__(self, item: str | int | slice | np.ndarray) -> Union["ProfileArray", SimArray, np.ndarray]:
+    @property
+    def profile(self) -> Union["ProfileBase", None]:
+        """
+        The owning profile providing binning and optional weights.
+
+        Returns
+        -------
+        ProfileBase
+        """
+        return self._profile
+
+    @profile.setter
+    def profile(self, value: "ProfileBase") -> None:
+        """Set the owning profile."""
+        self._profile = value
+
+
+    @overload
+    def __getitem__(self, item: str | slice | np.ndarray) -> "ProfileArray":
+        ...
+    @overload
+    def __getitem__(self, item: int) -> np.dtype:
+        ...
+    def __getitem__(self, item: str | int | slice | np.ndarray) -> Union["ProfileArray", np.dtype]:
+        """
+        Overloaded indexing.
+
+        - If ``item`` is a string, treat it as a statistic key and compute the
+          corresponding per-bin values from the per-particle field (e.g.
+          ``arr["median"]``, ``arr["p84"]``). A new :class:`ProfileArray` is
+          returned, possibly served from cache.
+        - Otherwise, forward to standard array indexing and return a view with
+          the appropriate type.
+
+        Parameters
+        ----------
+        item : str or int or slice or ndarray
+            Statistic key or standard indexer.
+
+        Returns
+        -------
+        ProfileArray or np.dtype
+            A new per-bin statistic array (when string key is used), or a view
+            of the underlying array for standard indexing.
+
+        Raises
+        ------
+        TypeError, RuntimeError
+            If a statistic is requested on an instance that cannot compute
+            further statistics (see :meth:`_ensure_base_for_stats`).
+        """
         # dispatch on stats name vs normal indexing
         if isinstance(item, str):
             self._ensure_base_for_stats()
-            profile = cast("Profile", self._profile)
-            key = cast("str", self._key)
-            if profile.is_cached(key,item):
-                return profile.get_cached(key,item)
-            out = self._compute(profile, key, compute_mode=item)
-            res = ProfileArray(profile, key=key, array=out, mode=item)
+            profile = cast("ProfileBase", self._profile)
+            name = self._name
+            if profile.is_cached(name,item):
+                return profile.get_cached(name,item)
+            out,mode = self._compute(profile, name, compute_mode=item)
+            res = ProfileArray(profile, name=name, array=out, mode=mode)
             profile.cache(res)
             return res
         # normal ndarray-like indexing
@@ -184,42 +431,114 @@ class ProfileArray(SimArray):
 
 
     def __repr__(self):
-        x = SimArray.__repr__(self)
-        return x[:-1] + ", '" + str(self._source)+"::" + str(self._key) + "')"
+        """
+        Return a representation including provenance.
 
+        The representation appends a tag of the form
+        ``'source::name[::mode][::View]'``, where:
+
+        - ``source`` is either ``per_particle`` or ``per_bin``,
+        - ``name`` is the source field name, and
+        - ``mode`` is the statistic used for the stored values (if any).
+        - ``View`` indicates that the object is a view/slice.
+
+        Returns
+        -------
+        str
+        """
+        x = SimArray.__repr__(self)
+        flag = ", '" + str(self._source)+"::" + str(self._name)
+        if self._mode is not None:
+            flag += "::" + str(self._mode)
+        if self._is_view:
+            flag += "::View"
+        return x[:-1] + flag + "')"
 
 
 class StatisticBase:
+    """
+    Abstract base class for per-bin statistics.
+
+    Each subclass automatically registers itself with :class:`ProfileArray` so
+    that :meth:`ProfileArray.get_statistic` can discover and dispatch to it.
+
+    Subclassing
+    -----------
+    Implement ``__call__(arr, weight)`` to return a scalar value given the
+    values and optional weights for one bin. Optionally override
+    :meth:`valid` to match one or more string keys, returning an instance of
+    your statistic when matched, or ``None`` otherwise.
+
+    Notes
+    -----
+    - ``arr`` and ``weight`` are arrays corresponding to values and weights of
+      the particles that fall into a single bin.
+    - Implementations should return ``numpy.nan`` when an empty bin is given.
+    """
 
     def __init_subclass__(cls) -> None:
+        """Register subclasses for discovery."""
         ProfileArray._registry.append(cls)
 
     def __init__(self, key:str):
+        """
+        Parameters
+        ----------
+        key : str
+            The key that matched this statistic (useful for display or reuse).
+        """
         self.key = key
 
     def __call__(
         self,
-        arr: SimArray | np.ndarray,
-        weight: SimArray | np.ndarray | None,
+        arr: SimOrNpArray,
+        weight: SimOrNpArray | None,
     )-> float | int | np.floating:
+        """
+        Compute the statistic for a single bin.
+
+        Parameters
+        ----------
+        arr : array-like
+            Per-particle values in a bin.
+        weight : array-like or None
+            Optional weights aligned with ``arr``. If ``None``, treat all
+            entries equally.
+
+        Returns
+        -------
+        float
+            The statistic value for the bin.
+        """
         raise NotImplementedError
     @classmethod
     def valid(cls, key:str)-> Union["StatisticBase", None]:
+        """
+        Return an instance of this statistic if ``key`` matches, else ``None``.
+
+        Default behavior only matches the class name. Subclasses typically
+        override this to match more user-friendly keys.
+
+        Parameters
+        ----------
+        key : str
+            The lookup key.
+
+        Returns
+        -------
+        StatisticBase or None
+        """
         if key == cls.__name__:
             return cls(key)
         else:
             return None
 
-    @classmethod
-    def name(cls) -> str:
-        raise NotImplementedError
-
 class Mean(StatisticBase):
 
     def __call__(
         self,
-        arr: SimArray | np.ndarray,
-        weight: SimArray | np.ndarray | None,
+        arr: SimOrNpArray,
+        weight: SimOrNpArray | None,
     )-> float | int | np.floating:
         if weight is not None:
             return (arr * weight).sum() / weight.sum()
@@ -229,14 +548,9 @@ class Mean(StatisticBase):
     @classmethod
     def valid(cls, key: str) -> Union["StatisticBase", None]:
         if key.lower() == "mean":
-            return cls(key)
+            return cls("mean")
         else:
             return None
-
-    @classmethod
-    def name(cls):
-        return "mean"
-
 
 class Percentile(StatisticBase):
 
@@ -247,8 +561,8 @@ class Percentile(StatisticBase):
 
     def __call__(
         self,
-        arr: SimArray | np.ndarray,
-        weight: SimArray | np.ndarray | None,
+        arr: SimOrNpArray,
+        weight: SimOrNpArray | None,
     )-> float | int | np.floating:
 
         if len(arr) == 0:
@@ -278,7 +592,7 @@ class Percentile(StatisticBase):
             return None
         pct = int(m.group(1))
         if 0 <= pct <= 100:
-            inst = cls(key, pct)
+            inst = cls(k, pct)
             return inst
         return None
 
@@ -291,8 +605,8 @@ class RMS(StatisticBase):
 
     def __call__(
         self,
-        arr: SimArray | np.ndarray,
-        weight: SimArray | np.ndarray | None,
+        arr: SimOrNpArray,
+        weight: SimOrNpArray | None,
     )-> float | int | np.floating:
         if len(arr) == 0:
             return np.nan
@@ -304,20 +618,16 @@ class RMS(StatisticBase):
     @classmethod
     def valid(cls, key: str) -> Union["StatisticBase", None]:
         if key.lower() == "rms":
-            return cls(key)
+            return cls("rms")
         else:
             return None
-
-    @classmethod
-    def name(cls):
-        return "rms"
 
 class Median(StatisticBase):
 
     def __call__(
         self,
-        arr: SimArray | np.ndarray,
-        weight: SimArray | np.ndarray | None,
+        arr: SimOrNpArray,
+        weight: SimOrNpArray | None,
     )-> float | int | np.floating:
 
         return Percentile(self.key, 50)(arr, weight)
@@ -325,20 +635,16 @@ class Median(StatisticBase):
     @classmethod
     def valid(cls, key: str) -> Union["StatisticBase", None]:
         if key.lower() in ["med", "median"]:
-            return cls(key)
+            return cls("median")
         else:
             return None
-
-    @classmethod
-    def name(cls):
-        return "med"
 
 class Dispersion(StatisticBase):
 
     def __call__(
         self,
-        arr: SimArray | np.ndarray,
-        weight: SimArray | np.ndarray | None,
+        arr: SimOrNpArray,
+        weight: SimOrNpArray | None,
     )-> float | int | np.floating:
         if len(arr) == 0:
             return np.nan
@@ -361,10 +667,6 @@ class Dispersion(StatisticBase):
     @classmethod
     def valid(cls, key: str) -> Union["StatisticBase", None]:
         if key.lower() in ["dispersion","disp"]:
-            return cls(key)
+            return cls("disp")
         else:
             return None
-
-    @classmethod
-    def name(cls):
-        return "disp"
