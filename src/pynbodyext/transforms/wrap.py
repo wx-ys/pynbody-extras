@@ -50,7 +50,9 @@ class WrapTransformation(transformation.Transformation):
         description = convention + "_wrap"
         super().__init__(f, description=description)
 
-    def _resolve_boxsize_float(self, f: SimSnap) -> float | None:
+    def _resolve_boxsize_float(self, f: SimSnap | None) -> float | None:
+        if f is None:
+            return None
         L = self.boxsize
         if L is None:
             try:
@@ -188,6 +190,10 @@ class WrapTransformation(transformation.Transformation):
 
 
 class WrapBox(TransformBase[WrapTransformation]):
+    """Wraps particle positions to lie within a periodic box.
+
+    This transform can be applied temporarily using a `with` statement.
+    """
 
     def __init__(
         self,
