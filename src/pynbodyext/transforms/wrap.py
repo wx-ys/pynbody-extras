@@ -47,7 +47,8 @@ class WrapTransformation(transformation.Transformation):
         self.convention = convention
         self._k_dtype = k_dtype
         self._k_offsets: np.ndarray | None = None  # shape (N, 3), ints
-        super().__init__(f, description=convention + "_wrap")
+        description = convention + "_wrap"
+        super().__init__(f, description=description)
 
     def _resolve_boxsize_float(self, f: SimSnap) -> float | None:
         L = self.boxsize
@@ -190,7 +191,7 @@ class WrapBox(TransformBase[WrapTransformation]):
 
     def __init__(
         self,
-        boxsize: float | units.UnitBase | None=None,
+        boxsize: float | units.UnitBase | None = None,
         convention: Literal["center", "upper"]="center"):
         """
 
@@ -204,7 +205,8 @@ class WrapBox(TransformBase[WrapTransformation]):
             - 'center': wraps particles to the range [-boxsize/2, boxsize/2). (Default)
             - 'upper': wraps particles to the range [0, boxsize).
         """
-
+        if convention not in ("center", "upper"):
+            raise ValueError("Unknown wrapping convention, must be 'center' or 'upper'")
 
         self.boxsize = boxsize
         self.convention = convention
@@ -226,4 +228,5 @@ class WrapBox(TransformBase[WrapTransformation]):
         WrapTransformation
             A transformation object suitable for use in a `with` block.
         """
-        return WrapTransformation(sim, boxsize=self.boxsize, convention=self.convention)
+        boxsize = self._in_sim_units(self.boxsize, "pos", sim) if self.boxsize is not None else None
+        return WrapTransformation(sim, boxsize=boxsize, convention=self.convention)
