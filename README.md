@@ -2,6 +2,9 @@
 
 `pynbodyext` provides a set of extensions and utilities based on [pynbody](https://github.com/pynbody/pynbody) library.
 
+**Note: This project is under active development. Feedback and contributions are welcome!**
+
+
 ## Installation
 
 Clone the repository and install in editable (-e) mode:
