@@ -1,6 +1,7 @@
 
 
 import functools
+import inspect
 import operator
 from collections.abc import Callable, Sequence
 from contextvars import ContextVar
@@ -41,10 +42,41 @@ def _extract_numeric(x: Any) -> float | np.ndarray | Any:
         return x.item()
     return x
 
+def _canon(value: Any) -> Any:
+    """
+    Canonicalize a value to a hashable, lightweight representation for signature.
+    - Numbers/bools/str: keep (cast numpy scalars to Python scalars).
+    - PropertyBase: use its signature.
+    - np.ndarray / SimArray: use object id to avoid heavy hashing.
+    - Sequences: tuple of canonicalized items.
+    - Dicts: sorted items, canonicalized.
+    - Callables: ("CALLABLE", id(func)).
+    - Others: ("ID", id(obj)).
+    """
+    result: Any
+    if isinstance(value, np.generic):
+        result = value.item()
+    elif isinstance(value, (int, float, bool, str)):
+        result = value
+    elif isinstance(value, PropertyBase):
+        result = ("PROP", value.signature())
+    elif isinstance(value, (np.ndarray, SimArray)):
+        result = ("ARR", id(value))
+    elif isinstance(value, (list, tuple)):        # type: ignore
+        result = tuple(_canon(v) for v in value)
+    elif isinstance(value, dict):
+        result = ("DICT", tuple(sorted((k, _canon(v)) for k, v in value.items())))
+    elif callable(value):
+        result = ("CALLABLE", id(value))
+    else:
+        result = ("ID", id(value))
+    return result
 # ---------------- Base class with evaluation caching ----------------
 
 class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
     """A lazily evaluated calculator: SimSnap -> TProp."""
+
+    _init_sig: tuple
 
     def __call__(self, sim: SimSnap) -> TProp:
         raise NotImplementedError
@@ -53,13 +85,44 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)  # let CalculatorBase wrap first (filter/transforms)
 
+        # ---- wrap __init__ to capture a canonical _init_sig ----
+        orig_init = cls.__dict__.get("__init__", None)
+        if orig_init is None:
+            # No __init__ defined in subclass: still create a wrapper that records empty init sig
+            def _default_init(self: "PropertyBase[Any]", *args: Any, **kw: Any) -> None:
+                self._init_sig = ()
+                super(cls, self).__init__()  # call up the MRO if needed
+            _default_init.__init_sig_wrapper__ = True  # type: ignore[attr-defined]
+            cls.__init__ = _default_init  # type: ignore
+        elif not getattr(orig_init, "__init_sig_wrapper__", False):
+            sig = inspect.signature(orig_init)
+            @functools.wraps(orig_init)
+            def _wrapped_init(self: "PropertyBase[Any]", *args: Any, **kw: Any) -> None:
+                bound = sig.bind_partial(self, *args, **kw)
+                bound.apply_defaults()
+                # preserve declared parameter order; skip 'self'
+                items: list[tuple[str, Any]] = []
+                for name, _param in sig.parameters.items():
+                    if name == "self":
+                        continue
+                    if name in bound.arguments:
+                        items.append((name, _canon(bound.arguments[name])))
+                    else:
+                        # not passed and no default applied; keep a placeholder
+                        items.append((name, ("MISSING",)))
+                self._init_sig = tuple(items)
+                return orig_init(self, *args, **kw)
+            _wrapped_init.__init_sig_wrapper__ = True  # type: ignore[attr-defined]
+            cls.__init__ = _wrapped_init  # type: ignore
+
+
+        # ---- wrap __call__ for per-eval caching ----
         user_call = cls.__dict__.get("__call__", None)
         if user_call is None:
             return
         # Avoid double-wrapping
         if getattr(user_call, "__evalctx_wrapper__", False):
             return
-
         @functools.wraps(user_call)
         def _wrapped_call(self: "PropertyBase[Any]", sim: SimSnap, *args: Any, **kw: Any) -> Any:
             token = id(sim)
@@ -93,11 +156,20 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
     # ----- signature for caching -----
     def signature(self) -> tuple:
         """
-        Structural identity for intra-evaluation caching.
-        Subclasses should override for a more stable signature.
-        Fallback uses object identity to avoid false sharing.
+        Unified structural signature:
+          (class_name,
+           ("init", self._init_sig or ()),
+           ("filter", id(self._filter)), ("trans", id(self._transformation)), ("rev", bool(self._revert_transformation)))
+        Subclasses don't need to override this in most cases.
         """
-        raise NotImplementedError("Property calculator subclass must implement signature")
+        init_sig = getattr(self, "_init_sig", ())
+        return (
+            self.__class__.__name__,
+            ("init", init_sig),
+            ("filter", id(getattr(self, "_filter", None))),
+            ("trans", id(getattr(self, "_transformation", None))),
+            ("rev", bool(getattr(self, "_revert_transformation", True))),
+        )
 
 
     # -------- composition helpers --------
@@ -331,14 +403,6 @@ class ParamSum(PropertyBase[SimArray]):
         """
         self.parameter = parameter
 
-    def signature(self) -> tuple:
-        # Include filter/transformation identity to avoid cross-config collisions
-        return ("ParamSum",
-                self.parameter,
-                id(getattr(self, "_filter", None)),
-                id(getattr(self, "_transformation", None)),
-                bool(getattr(self, "_revert_transformation", True)))
-
     def __call__(self, sim : SimSnap) -> SimArray:
         """
         Calculate the sum of the specified parameter for the given simulation snapshot.
@@ -393,16 +457,6 @@ class ParameterContain(PropertyBase[SimArray]):
             self._frac_is_scalar = False
         else:
             raise TypeError("frac must be a float or a sequence of floats")
-
-    def signature(self) -> tuple:
-        frac_sig = tuple(map(float, self._frac_array.tolist()))
-        return ("ParameterContain",
-                self.cal_key,
-                frac_sig,
-                self.parameter,
-                id(getattr(self, "_filter", None)),
-                id(getattr(self, "_transformation", None)),
-                bool(getattr(self, "_revert_transformation", True)))
 
     def __call__(self, sim: SimSnap) -> SimArray:
         """
