@@ -2,6 +2,16 @@
 
 `pynbodyext` provides a set of extensions and utilities based on [pynbody](https://github.com/pynbody/pynbody) library.
 
+## Installation
+
+Clone the repository and install in editable (-e) mode:
+
+```bash
+git clone https://github.com/wx-ys/pynbody-extras.git
+cd pynbody-extras
+pip install -e .
+```
+
 ---
 
 ## Examples
