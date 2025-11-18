@@ -2,25 +2,32 @@
 Generic calculation interface for pynbody snapshots.
 """
 
+import functools
 from abc import ABC, abstractmethod
-from typing import Any, Generic, TypeAlias, TypeVar
+from collections.abc import Callable
+from typing import Any, Generic, Protocol, TypeAlias, TypeVar  #Protocol need python version >3.8
 
 import numpy as np
 from numpy.typing import NDArray
-from pynbody import units
+from pynbody import filt as _pyn_filt, units
 from pynbody.array import SimArray
+from pynbody.family import Family
 from pynbody.snapshot import SimSnap
+from pynbody.transformation import Transformation
 
 try:
-    from typing import Protocol
-except ImportError:  # pragma: no cover
-    from typing_extensions import Protocol  # type: ignore
+    from typing import Self  # type: ignore  # python >= 3.11
+except ImportError:
+    from typing_extensions import Self
+
 
 SingleElementSimArray: TypeAlias = SimArray          # size == 1
 SingleElementNDArray: TypeAlias = NDArray[Any]       # size == 1
 
 ReturnT = TypeVar("ReturnT",covariant=True)
 
+FilterLike: TypeAlias = _pyn_filt.Filter | np.ndarray | Family | slice | int | np.int32 | np.int64
+TransformLike: TypeAlias = Callable[[SimSnap], Transformation]
 
 class SimCallable(Protocol[ReturnT]):
     def __call__(self, sim: SimSnap, *args: Any, **kwargs: Any) -> ReturnT: ...
@@ -28,15 +35,77 @@ class SimCallable(Protocol[ReturnT]):
 class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
     """An abstract base class for performing calculations on particle data."""
 
+    _filter: FilterLike | None
+    _transformation: TransformLike | None
+    _revert_transformation: bool
+
+    def __new__(cls: type[Self], *args: Any, **kwargs: Any) -> Self:
+        # initialize per-instance filter and transformation settings
+        self = super().__new__(cls)
+        self._filter = None
+        self._transformation = None
+        self._revert_transformation = True
+        return self
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """
+        Automatically wrap subclass __call__ so that:
+          - optional filter is applied to sim
+          - optional transformation(sim) is applied and later reverted (if enabled)
+          - the subclass's __call__ runs on the filtered/transformed snapshot
+        """
+        super().__init_subclass__(**kwargs)
+
+        # Only wrap if the subclass defines its own __call__
+        user_call = cls.__dict__.get("__call__", None)
+        if user_call is None:
+            return
+        # Avoid double-wrapping if a subclass of a subclass is created
+        if getattr(user_call, "__calculator_wrapper__", False):
+            return
+
+        @functools.wraps(user_call)
+        def _wrapped_call(self: "CalculatorBase[ReturnT]", sim: SimSnap, *args: Any, **kwargs: Any) -> ReturnT:
+            simnew: SimSnap
+            simnew = sim
+
+            trans_obj = None
+            if self._transformation is not None:
+                # Expect a callable transformation: trans_obj = transformation(simnew)
+                trans_obj = self._transformation(simnew)
+
+            if self._filter is not None:
+                simnew = sim[self._filter]
+
+            try:
+                result: ReturnT = user_call(self, simnew, *args, **kwargs)
+            finally:
+                if trans_obj is not None and self._revert_transformation:
+                    trans_obj.revert()
+
+            return result
+
+        _wrapped_call.__calculator_wrapper__ = True # type: ignore[attr-defined]
+        cls.__call__ = _wrapped_call                # type: ignore[method-assign]
+
     @abstractmethod
     def __call__(self, sim: SimSnap, *args: Any, **kwargs: Any) -> ReturnT:
         """Executes the calculation on a given simulation snapshot."""
 
         raise NotImplementedError(
-            f"{self.__class__.__name__} must implement __call__(self, sim: SimSnap) -> ReturnT"
+            f"{self.__class__.__name__} must implement __call__"
         )
 
+    def with_filter(self, filt: FilterLike) -> Self:
+        """Return a new CalculatorBase instance with the given filter applied."""
+        self._filter = filt
+        return self
 
+    def with_transformation(self, transformation: TransformLike, revert: bool = True) -> Self:
+        """Return a new CalculatorBase instance with the given transformation applied."""
+        self._transformation = transformation
+        self._revert_transformation = revert
+        return self
 
     def _in_sim_units(
         self,
