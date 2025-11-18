@@ -74,6 +74,7 @@ class ProfileBuilderBase(CalculatorBase[TProf], Generic[TProf]):
 
 
 class RadialProfileBuilder(ProfileBuilderBase[RadialProfile]):
+    """ Radial profile builder. """
     def __init__(
         self,
         ndim: Literal[2,3] = 3,
@@ -85,6 +86,24 @@ class RadialProfileBuilder(ProfileBuilderBase[RadialProfile]):
         bins_set: BinsSet | None = None,
         **kwargs: Any
     ):
+        """
+        Parameters
+        ----------
+        ndim : int
+            Number of dimensions (2 or 3).
+        weight : AllArray, str, callable, or None
+            Weighting scheme for the profile.
+        bins_type : RegistBinAlgorithmString or BinsAlgorithmFunc
+            Binning algorithm type or function.
+        nbins : AllArray or int
+            Number of bins.
+        bin_min : str, float, UnitBase, callable, or None
+            Minimum bin edge.
+        bin_max : str, float, UnitBase, callable, or None
+            Maximum bin edge.
+        bins_set : BinsSet or None
+            Predefined set of bins.
+        """
         if ndim not in [2,3]:
             raise ValueError("ndim must be either 2 or 3")
         self.ndim = ndim
