@@ -31,7 +31,7 @@ from pynbodyext.filters import FamilyFilter
 # 're' and 'StarMass' are calculators.
 # Use re(sim) to get the corresponding value for a simulation 'sim'.
 
-re = ParameterContain().with_filter(FamilyFilter("star"))
+re = ParameterContain("r",0.5,"mass").with_filter(FamilyFilter("star"))
 StarMass = ParamSum("mass").with_filter(FamilyFilter("star"))
 
 # Combine calculators, e.g., to compute density:
