@@ -1,28 +1,39 @@
 
 
-from typing import Protocol, runtime_checkable
-
 import numpy as np
-from numpy.typing import NDArray
 from pynbody.snapshot import SimSnap
 
-from pynbodyext.calculate import SimCallable
+from pynbodyext.calculate import CalculatorBase
 
-BoolMask = NDArray[np.bool_]
-
-@runtime_checkable
-class FilterLike(SimCallable[BoolMask], Protocol):
-    def where(self, sim: SimSnap) -> tuple[np.ndarray, ...]: ...
-
-    def __and__(self, other: "FilterLike") -> "FilterLike": ...
-    def __or__(self, other: "FilterLike") -> "FilterLike": ...
-    def __invert__(self) -> "FilterLike": ...
-
-    def cubic_cell_intersection(self, centroids: np.ndarray) -> BoolMask: ...
-
-    def __repr__(self) -> str: ...
-    def __hash__(self) -> int: ...
-    def __eq__(self, other: object) -> bool: ...
+from .pynfilt import _And, _Filter, _Not, _Or
 
 
+class FilterBase(CalculatorBase[np.ndarray],_Filter):
+    """
+    Base class for filters.
+
+    Connect pynbody filters with CalculatorBase.
+    """
+
+
+    def calculate(self, sim: SimSnap)-> np.ndarray:
+        return np.ones(len(sim), dtype=bool)
+
+    def __and__(self, f2):
+        return And(self, f2)
+
+    def __invert__(self):
+        return Not(self)
+
+    def __or__(self, f2):
+        return Or(self, f2)
+
+class And(FilterBase,_And):
+    calculate = _And.__call__
+
+class Or(FilterBase,_Or):
+    calculate = _Or.__call__
+
+class Not(FilterBase,_Not):
+    calculate = _Not.__call__
 
