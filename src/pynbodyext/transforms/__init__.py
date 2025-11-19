@@ -11,6 +11,8 @@ which can be used within a `with` statement for temporary transformations.
 
 """
 from .base import TransformBase
+from .rotate import AlignAngMomVec
+from .shift import PosToCenter, VelToCenter
 from .wrap import WrapBox
 
-__all__ = ["WrapBox","TransformBase"]
+__all__ = ["WrapBox","AlignAngMomVec","TransformBase","PosToCenter","VelToCenter"]

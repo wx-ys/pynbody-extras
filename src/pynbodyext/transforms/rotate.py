@@ -4,7 +4,7 @@ from collections.abc import Sequence
 
 from pynbody.analysis.angmom import calc_faceon_matrix
 from pynbody.snapshot.simsnap import SimSnap
-from pynbody.transformation import Rotation
+from pynbody.transformation import Rotation, Transformation
 
 from pynbodyext.properties.generic import AngMomVec
 
@@ -33,7 +33,7 @@ class AlignAngMomVec(TransformBase[Rotation]):
         self.up = up
         self.move_all = move_all
 
-    def __call__(self, sim: SimSnap) -> Rotation:
+    def calculate(self, sim: SimSnap, previous: Transformation | None = None) -> Rotation:
         """
         Rotate the simulation snapshot to align the angular momentum vector with the z-axis.
 
@@ -49,9 +49,7 @@ class AlignAngMomVec(TransformBase[Rotation]):
         """
         ang = AngMomVec()(sim)
         trans = calc_faceon_matrix(ang, up=self.up)
-        if self.move_all:
-            target_sim = sim.ancestor
-        else:
-            target_sim = sim
-        rota = target_sim.rotate(trans,description="AlignAngMomVec")
+
+        target = self.get_target(sim, previous)
+        rota = target.rotate(trans,description="AlignAngMomVec")
         return rota

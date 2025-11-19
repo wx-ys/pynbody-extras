@@ -217,7 +217,7 @@ class WrapBox(TransformBase[WrapTransformation]):
         self.convention = convention
         self.move_all = move_all
 
-    def __call__(self, sim: SimSnap) -> WrapTransformation:
+    def calculate(self, sim: SimSnap, previous: transformation.Transformation | None = None) -> WrapTransformation:
         """
         Wraps particle positions to lie within a periodic box.
 
@@ -235,8 +235,5 @@ class WrapBox(TransformBase[WrapTransformation]):
             A transformation object suitable for use in a `with` block.
         """
         boxsize = self._in_sim_units(self.boxsize, "pos", sim) if self.boxsize is not None else None
-        if self.move_all:
-            target_sim = sim.ancestor
-        else:
-            target_sim = sim
+        target_sim = self.get_target(sim, previous)
         return WrapTransformation(target_sim, boxsize=boxsize, convention=self.convention)
