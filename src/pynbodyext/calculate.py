@@ -2,7 +2,6 @@
 Generic calculation interface for pynbody snapshots.
 """
 
-import functools
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any, Generic, Protocol, TypeAlias, TypeVar  #Protocol need python version >3.8
@@ -47,59 +46,33 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         self._revert_transformation = True
         return self
 
-    def __init_subclass__(cls, **kwargs: Any) -> None:
-        """
-        Automatically wrap subclass __call__ so that:
-          - optional filter is applied to sim
-          - optional transformation(sim) is applied and later reverted (if enabled)
-          - the subclass's __call__ runs on the filtered/transformed snapshot
-        """
-        super().__init_subclass__(**kwargs)
-
-        # Only wrap if the subclass defines its own __call__
-        user_call = cls.__dict__.get("__call__", None)
-        if user_call is None:
-            return
-        # Avoid double-wrapping if a subclass of a subclass is created
-        if getattr(user_call, "__calculator_wrapper__", False):
-            return
-
-        @functools.wraps(user_call)
-        def _wrapped_call(self: "CalculatorBase[ReturnT]", sim: SimSnap, *args: Any, **kwargs: Any) -> ReturnT:
-            simnew: SimSnap
-            simnew = sim
-
-            trans_obj = None
-            if self._transformation is not None:
-                # Expect a callable transformation: trans_obj = transformation(simnew)
-                trans_obj = self._transformation(simnew)
-
-            if self._filter is not None:
-                simnew = sim[self._filter]
-
-            try:
-                result: ReturnT = user_call(self, simnew, *args, **kwargs)
-            finally:
-                if trans_obj is not None and self._revert_transformation:
-                    trans_obj.revert()
-
-            return result
-
-        _wrapped_call.__calculator_wrapper__ = True # type: ignore[attr-defined]
-        cls.__call__ = _wrapped_call                # type: ignore[method-assign]
+    def __call__(self, sim: SimSnap) -> ReturnT:
+        """Executes the calculation on a given simulation snapshot."""
+        trans_obj = None
+        if self._transformation is not None:
+            trans_obj = self._transformation(sim)
+        if self._filter is not None:
+            sim = sim[self._filter]
+        try:
+            result = self.calculate(sim)
+        finally:
+            if trans_obj is not None and self._revert_transformation:
+                trans_obj.revert()
+        return result
 
     @abstractmethod
-    def __call__(self, sim: SimSnap, *args: Any, **kwargs: Any) -> ReturnT:
-        """Executes the calculation on a given simulation snapshot."""
-
+    def calculate(self, sim: SimSnap, *args: Any, **kwargs: Any) -> ReturnT:
         raise NotImplementedError(
-            f"{self.__class__.__name__} must implement __call__"
+            f"{self.__class__.__name__} must implement calculate"
         )
 
     def with_filter(self, filt: FilterLike) -> Self:
         """Return a new CalculatorBase instance with the given filter applied."""
         self._filter = filt
         return self
+
+    def __getitem__(self, key: FilterLike) -> Self:
+        return self.with_filter(key)
 
     def with_transformation(self, transformation: TransformLike, revert: bool = True) -> Self:
         """Return a new CalculatorBase instance with the given transformation applied."""
