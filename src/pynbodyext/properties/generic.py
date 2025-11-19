@@ -8,10 +8,10 @@ from pynbody.snapshot import SimSnap
 
 from .base import PropertyBase
 
-
+__all__ = ["AngMomVec", "KappaRot"]
 class AngMomVec(PropertyBase[SimArray]):
     """Angular momentum vector property"""
-    def __call__(self, sim: SimSnap) -> SimArray:
+    def calculate(self, sim: SimSnap) -> SimArray:
         return ang_mom_vec(sim)
 
 
@@ -27,7 +27,7 @@ class KappaRot(PropertyBase[float]):
     ----------
     .. [1] Sales, L. V., et al. 2010, MNRAS, 409, 1541
     """
-    def __call__(self, sim: SimSnap) -> float:
+    def calculate(self, sim: SimSnap) -> float:
         Krot = np.sum(0.5 * sim["mass"] * (sim["vcxy"] ** 2))
         K = np.sum(sim["mass"] * sim["ke"])
         return float(Krot / K)
