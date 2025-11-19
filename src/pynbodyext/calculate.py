@@ -66,7 +66,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
             f"{self.__class__.__name__} must implement calculate"
         )
 
-    def with_filter(self, filt: FilterLike) -> Self:
+    def with_filter(self: Self, filt: FilterLike) -> Self:
         """Return a new CalculatorBase instance with the given filter applied."""
         self._filter = filt
         return self
@@ -74,7 +74,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
     def __getitem__(self, key: FilterLike) -> Self:
         return self.with_filter(key)
 
-    def with_transformation(self, transformation: TransformLike, revert: bool = True) -> Self:
+    def with_transformation(self: Self, transformation: TransformLike, revert: bool = True) -> Self:
         """Return a new CalculatorBase instance with the given transformation applied."""
         self._transformation = transformation
         self._revert_transformation = revert
