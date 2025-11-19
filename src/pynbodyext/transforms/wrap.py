@@ -194,7 +194,8 @@ class WrapBox(TransformBase[WrapTransformation]):
     def __init__(
         self,
         boxsize: float | units.UnitBase | None = None,
-        convention: Literal["center", "upper"]="center"):
+        convention: Literal["center", "upper"]="center",
+        move_all: bool = True):
         """
 
         Parameters
@@ -206,12 +207,15 @@ class WrapBox(TransformBase[WrapTransformation]):
             The wrapping convention.
             - 'center': wraps particles to the range [-boxsize/2, boxsize/2). (Default)
             - 'upper': wraps particles to the range [0, boxsize).
+        move_all: bool, default True
+            Whether to perform the wrapping on ancestors (all particles).
         """
         if convention not in ("center", "upper"):
             raise ValueError("Unknown wrapping convention, must be 'center' or 'upper'")
 
         self.boxsize = boxsize
         self.convention = convention
+        self.move_all = move_all
 
     def __call__(self, sim: SimSnap) -> WrapTransformation:
         """
@@ -231,4 +235,8 @@ class WrapBox(TransformBase[WrapTransformation]):
             A transformation object suitable for use in a `with` block.
         """
         boxsize = self._in_sim_units(self.boxsize, "pos", sim) if self.boxsize is not None else None
-        return WrapTransformation(sim, boxsize=boxsize, convention=self.convention)
+        if self.move_all:
+            target_sim = sim.ancestor
+        else:
+            target_sim = sim
+        return WrapTransformation(target_sim, boxsize=boxsize, convention=self.convention)
