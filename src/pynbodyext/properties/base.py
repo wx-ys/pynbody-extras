@@ -1,9 +1,9 @@
 
 
-import functools
-import inspect
+
 import operator
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Generator, Sequence
+from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Generic, TypeVar, Union
 
@@ -13,17 +13,31 @@ from pynbody.snapshot import SimSnap
 
 from pynbodyext.calculate import CalculatorBase
 
-__all__ = ["PropertyBase", "ParamSum", "ParameterContain", "ConstantProperty", "LambdaProperty", "OpProperty"]
+__all__ = ["PropertyBase", "ParamSum", "ParameterContain", "ConstantProperty", "LambdaProperty", "OpProperty","eval_cache"]
 
 
 # Ephemeral per-top-level-call evaluation cache (sim-local, auto-cleared)
-_EVAL_CTX: ContextVar[dict[tuple[int, tuple], Any] | None] = ContextVar("_EVAL_CTX", default=None)
+_EVAL_CTX: ContextVar[dict[tuple[int, tuple[Any, ...]], Any] | None] = ContextVar("_EVAL_CTX", default=None)
 _EVAL_SIM_TOKEN: ContextVar[int | None] = ContextVar("_EVAL_SIM_TOKEN", default=None)
 
 
 TProp = TypeVar("TProp", bound=SimArray | float | np.ndarray | int, covariant=True)
 
 Addable = Union[ SimArray, float, np.ndarray, int, "PropertyBase[TProp]"]
+
+
+@contextmanager
+def eval_cache(sim: SimSnap) -> Generator[None, None, None]:
+    """Manage a temporary evaluation cache for multiple top-level calls."""
+    prev_ctx = _EVAL_CTX.get()
+    prev_tok = _EVAL_SIM_TOKEN.get()
+    try:
+        _EVAL_CTX.set({})
+        _EVAL_SIM_TOKEN.set(id(sim))
+        yield
+    finally:
+        _EVAL_CTX.set(prev_ctx)
+        _EVAL_SIM_TOKEN.set(prev_tok)
 
 # ---------------- Utility helpers ----------------
 
@@ -78,79 +92,39 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
 
     _init_sig: tuple
 
-    def __call__(self, sim: SimSnap) -> TProp:
+    def calculate(self, sim: SimSnap) -> TProp:
         raise NotImplementedError
 
     # Automatically add a per-call evaluation cache wrapper to any subclass __call__
-    def __init_subclass__(cls, **kwargs: Any) -> None:
-        super().__init_subclass__(**kwargs)  # let CalculatorBase wrap first (filter/transforms)
+    def __call__(self, sim: SimSnap) -> TProp:
+        token = id(sim)
+        ctx = _EVAL_CTX.get()
+        cur_token = _EVAL_SIM_TOKEN.get()
+        owner = False
 
-        # ---- wrap __init__ to capture a canonical _init_sig ----
-        orig_init = cls.__dict__.get("__init__", None)
-        if orig_init is None:
-            # No __init__ defined in subclass: still create a wrapper that records empty init sig
-            def _default_init(self: "PropertyBase[Any]", *args: Any, **kw: Any) -> None:
-                self._init_sig = ()
-                super(cls, self).__init__()  # call up the MRO if needed
-            _default_init.__init_sig_wrapper__ = True  # type: ignore[attr-defined]
-            cls.__init__ = _default_init  # type: ignore
-        elif not getattr(orig_init, "__init_sig_wrapper__", False):
-            sig = inspect.signature(orig_init)
-            @functools.wraps(orig_init)
-            def _wrapped_init(self: "PropertyBase[Any]", *args: Any, **kw: Any) -> None:
-                bound = sig.bind_partial(self, *args, **kw)
-                bound.apply_defaults()
-                # preserve declared parameter order; skip 'self'
-                items: list[tuple[str, Any]] = []
-                for name, _param in sig.parameters.items():
-                    if name == "self":
-                        continue
-                    if name in bound.arguments:
-                        items.append((name, _canon(bound.arguments[name])))
-                    else:
-                        # not passed and no default applied; keep a placeholder
-                        items.append((name, ("MISSING",)))
-                self._init_sig = tuple(items)
-                return orig_init(self, *args, **kw)
-            _wrapped_init.__init_sig_wrapper__ = True  # type: ignore[attr-defined]
-            cls.__init__ = _wrapped_init  # type: ignore
+        if ctx is None or cur_token != token:
+            ctx = {}
+            _EVAL_CTX.set(ctx)
+            _EVAL_SIM_TOKEN.set(token)
+            owner = True
 
+        flt = getattr(self, "_filter", None)
+        trans = getattr(self, "_transformation", None)
+        rev = bool(getattr(self, "_revert_transformation", True))
+        # Key type: tuple[int, tuple[Any, ...]]
+        key: tuple[int, tuple[Any, ...]] = (token, (id(self), id(flt), id(trans), rev))
 
-        # ---- wrap __call__ for per-eval caching ----
-        user_call = cls.__dict__.get("__call__", None)
-        if user_call is None:
-            return
-        # Avoid double-wrapping
-        if getattr(user_call, "__evalctx_wrapper__", False):
-            return
-        @functools.wraps(user_call)
-        def _wrapped_call(self: "PropertyBase[Any]", sim: SimSnap, *args: Any, **kw: Any) -> Any:
-            token = id(sim)
-            ctx = _EVAL_CTX.get()
-            cur_token = _EVAL_SIM_TOKEN.get()
-            owner = False
-            if ctx is None or cur_token != token:
-                # start a new ephemeral context for this top-level call
-                ctx = {}
-                _EVAL_CTX.set(ctx)
-                _EVAL_SIM_TOKEN.set(token)
-                owner = True
+        if key in ctx:
+            result = ctx[key]
+        else:
+            result = super().__call__(sim)
+            ctx[key] = result
 
-            key = (token, self.signature())
-            if key in ctx:
-                result = ctx[key]
-            else:
-                result = user_call(self, sim, *args, **kw)
-                ctx[key] = result
+        if owner:
+            _EVAL_CTX.set(None)
+            _EVAL_SIM_TOKEN.set(None)
 
-            if owner:
-                # auto-clear after this top-level call finishes
-                _EVAL_CTX.set(None)
-                _EVAL_SIM_TOKEN.set(None)
-            return result
-
-        _wrapped_call.__evalctx_wrapper__ = True  # type: ignore[attr-defined]
-        cls.__call__ = _wrapped_call  # type: ignore[method-assign]
+        return result
 
 
     # ----- signature for caching -----
@@ -170,7 +144,9 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
             ("trans", id(getattr(self, "_transformation", None))),
             ("rev", bool(getattr(self, "_revert_transformation", True))),
         )
-
+    def __repr__(self) -> str:
+        init_sig = getattr(self, "_init_sig", ())
+        return f"<{self.__class__.__name__} {init_sig}>"
 
     # -------- composition helpers --------
     def _as_property(self, other: Addable) -> "PropertyBase":
@@ -250,16 +226,16 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
         return OpProperty("abs", [self])
 
     # Comparisons return PropertyBase (OpProperty) (structural CSE applies)
-    def __lt__(self, other: Addable) -> "PropertyBase":
-        return OpProperty("lt", [self, self._as_property(other)])
-    def __le__(self, other: Addable) -> "PropertyBase":
-        return OpProperty("le", [self, self._as_property(other)])
-    def __gt__(self, other: Addable) -> "PropertyBase":
-        return OpProperty("gt", [self, self._as_property(other)])
-    def __ge__(self, other: Addable) -> "PropertyBase":
-        return OpProperty("ge", [self, self._as_property(other)])
-    def __eq__(self, other: Addable) -> "PropertyBase":  # type: ignore[override]
-        return OpProperty("eq", [self, self._as_property(other)])
+    #def __lt__(self, other: Addable) -> "PropertyBase":
+    #    return OpProperty("lt", [self, self._as_property(other)])
+    #def __le__(self, other: Addable) -> "PropertyBase":
+    #    return OpProperty("le", [self, self._as_property(other)])
+    #def __gt__(self, other: Addable) -> "PropertyBase":
+    #   return OpProperty("gt", [self, self._as_property(other)])
+    #def __ge__(self, other: Addable) -> "PropertyBase":
+    #    return OpProperty("ge", [self, self._as_property(other)])
+    #def __eq__(self, other: Addable) -> "PropertyBase":  # type: ignore[override]
+    #    return OpProperty("eq", [self, self._as_property(other)])
     def __ne__(self, other: Addable) -> "PropertyBase":  # type: ignore[override]
         return OpProperty("ne", [self, self._as_property(other)])
 
@@ -292,9 +268,10 @@ class ConstantProperty(PropertyBase[TProp]):
             return ("Const", float(v))
         return ("ConstObj", id(v))
 
-    def __call__(self, sim: SimSnap) -> TProp:
+    def calculate(self, sim: SimSnap) -> TProp:
         return self._value
-
+    def __repr__(self) -> str:
+        return f"Const({repr(self._value)})"
 
 class LambdaProperty(PropertyBase[Any]):
     """
@@ -313,7 +290,7 @@ class LambdaProperty(PropertyBase[Any]):
         # Conservative: function object id + cache flag
         return ("Lambda", id(self._func), self._cache_enabled)
 
-    def __call__(self, sim: SimSnap) -> Any:
+    def calculate(self, sim: SimSnap) -> Any:
         if not self._cache_enabled:
             return self._func(sim)
         key = id(sim)
@@ -322,7 +299,8 @@ class LambdaProperty(PropertyBase[Any]):
         val = self._func(sim)
         self._cache[key] = val
         return val
-
+    def __repr__(self) -> str:
+        return f"LambdaProperty(func={self._func}, cache={self._cache_enabled})"
 # ---------------- OpProperty expression tree ----------------
 
 class OpProperty(PropertyBase[Any]):
@@ -345,7 +323,7 @@ class OpProperty(PropertyBase[Any]):
                 self.op_name,
                 tuple(child.signature() for child in self.operands))
 
-    def __call__(self, sim: SimSnap) -> Any:
+    def calculate(self, sim: SimSnap) -> Any:
         # Evaluate operands; thanks to evaluation wrapper + signatures, identical subtrees
         # within this top-level call are computed once.
         func_map: dict[str, Callable[[Any, Any], Any]] = {
@@ -388,7 +366,45 @@ class OpProperty(PropertyBase[Any]):
 
         raise ValueError(f"Unknown op_name {self.op_name}")
 
-
+    def __repr__(self) -> str:
+        # Operator symbols for infix display
+        infix = {
+            "add": "+",
+            "sub": "-",
+            "mul": "*",
+            "truediv": "/",
+            "pow": "**",
+            "lt": "<",
+            "le": "<=",
+            "gt": ">",
+            "ge": ">=",
+            "eq": "==",
+            "ne": "!=",
+        }
+        unary = {
+            "neg": "-",
+            "pos": "+",
+            "abs": "abs",
+        }
+        def get_repr(o):
+            if isinstance(o, OpProperty):
+                return repr(o)
+            return o.__class__.__name__
+        # Infix n-ary
+        if self.op_name in ("add", "mul"):
+            op = infix[self.op_name]
+            return f"({op.join(get_repr(o) for o in self.operands)})"
+        # Binary infix
+        if self.op_name in infix and len(self.operands) == 2:
+            left, right = self.operands
+            return f"({get_repr(left)} {infix[self.op_name]} {get_repr(right)})"
+        # Unary
+        if self.op_name in unary:
+            if self.op_name == "abs":
+                return f"abs({get_repr(self.operands[0])})"
+            return f"({unary[self.op_name]}{get_repr(self.operands[0])})"
+        # Fallback: function style
+        return f"{self.op_name}({', '.join(get_repr(o) for o in self.operands)})"
 # ---------------- Domain-specific leaves ----------------
 
 class ParamSum(PropertyBase[SimArray]):
@@ -403,7 +419,7 @@ class ParamSum(PropertyBase[SimArray]):
         """
         self.parameter = parameter
 
-    def __call__(self, sim : SimSnap) -> SimArray:
+    def calculate(self, sim : SimSnap) -> SimArray:
         """
         Calculate the sum of the specified parameter for the given simulation snapshot.
         """
@@ -458,7 +474,7 @@ class ParameterContain(PropertyBase[SimArray]):
         else:
             raise TypeError("frac must be a float or a sequence of floats")
 
-    def __call__(self, sim: SimSnap) -> SimArray:
+    def calculate(self, sim: SimSnap) -> SimArray:
         """
         Parameters
         ----------
