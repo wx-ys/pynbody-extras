@@ -53,13 +53,9 @@ class WrapTransformation(transformation.Transformation):
     def _resolve_boxsize_float(self, f: SimSnap | None) -> float | None:
         if f is None:
             return None
-        L = self.boxsize
-        if L is None:
-            try:
-                L = f.ancestor.properties["boxsize"]
-            except (AttributeError, KeyError):
-                L = None
-        if L is None:
+        try:
+            L = f.ancestor.properties["boxsize"]
+        except (AttributeError, KeyError):
             return None
         if isinstance(L, units.UnitBase):
             L = L.ratio(f["pos"].units, **f.conversion_context())
