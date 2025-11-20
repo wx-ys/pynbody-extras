@@ -66,7 +66,7 @@ BinsAlgorithmFunc: TypeAlias = Callable[["BinsSet", SimOrNpArray], SimOrNpArray]
 
 
 RegistBinByString: TypeAlias = str | Literal["r","rxy"]
-RegistBinAreaString: TypeAlias = str | Literal["annulus","cylindrical_shell","spherical_shell"]
+RegistBinAreaString: TypeAlias = str | Literal["length","annulus","cylindrical_shell","spherical_shell"]
 RegistBinAlgorithmString: TypeAlias = str | Literal["lin","log","equaln"]
 
 
@@ -705,6 +705,15 @@ def equal_number_bins_algorithm(
     return np.array(edges)
 
 # ------------------- bins area/volume calculators -------------------------#
+
+@BinsSet.bins_area_register(name="length")
+def length_area(
+    self: "BinsSet", bin_edges: SimOrNpArray
+    ) -> SimOrNpArray:
+    """
+    Length of 1D bins: ``r_{i+1} - r_i`` for each bin.
+    """
+    return bin_edges[1:] - bin_edges[:-1]
 
 @BinsSet.bins_area_register(name="annulus")
 def annulus_area(
