@@ -1,18 +1,40 @@
 """
 Generic calculation interface for pynbody snapshots.
 """
+from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
-from typing import Any, Generic, TypeVar  #Protocol need python version >3.8
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 
 import numpy as np
 from pynbody import units
 from pynbody.array import SimArray
-from pynbody.snapshot import SimSnap
 
-from .util._type import FilterLike, Self, SimCallable, SingleElementArray, TransformLike, UnitLike
+from pynbodyext.log import logger
+
+from .util._type import (
+    FilterLike,
+    Self,
+    SimCallable,
+    SingleElementArray,
+    TransformLike,
+    TypeVarTuple,
+    UnitLike,
+    Unpack,
+)
+
+if TYPE_CHECKING:
+    from pynbody.snapshot import SimSnap
+    from pynbody.transformation import Transformation
+
 
 ReturnT = TypeVar("ReturnT",covariant=True)
+
+Ts = TypeVarTuple("Ts")
+Us = TypeVarTuple("Us")
+U = TypeVar("U")
+T = TypeVar("T")
 
 class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
     """An abstract base class for performing calculations on particle data."""
@@ -20,6 +42,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
     _filter: FilterLike | None
     _transformation: TransformLike | None
     _revert_transformation: bool
+    _time_enabled: bool
 
     def __new__(cls: type[Self], *args: Any, **kwargs: Any) -> Self:
         # initialize per-instance filter and transformation settings
@@ -27,20 +50,95 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         self._filter = None
         self._transformation = None
         self._revert_transformation = True
+        self._time_enabled = False
         return self
+
+    def _do_pre_transform(self, sim: SimSnap) -> tuple[float | None, Transformation | None]:
+        t_pre_transform = None
+        trans_obj = None
+        if self._transformation is not None:
+            t_pre_transform_start = time.perf_counter()
+            try:
+                logger.debug(f"[{self}] transformation: {self._transformation}")
+                trans_obj = self._transformation(sim)
+            except Exception as e:
+                logger.error(f"Error applying pre-transformation: {e}, when calculating {self}")
+                raise RuntimeError(f"Error applying pre-transformation {self._transformation}") from e
+            t_pre_transform = time.perf_counter() - t_pre_transform_start
+        return t_pre_transform, trans_obj
+
+    def _do_pre_filter(self, sim: SimSnap) -> tuple[float | None, SimSnap]:
+        t_filter = None
+        if self._filter is not None:
+            t_filter_start = time.perf_counter()
+            try:
+                logger.debug(f"[{self}] filter: {self._filter}")
+                sim = sim[self._filter]
+            except Exception as e:
+                logger.error(f"Error applying pre-filter: {e}, when calculating {self}")
+                raise RuntimeError(f"Error applying pre-filter {self._filter}") from e
+            t_filter = time.perf_counter() - t_filter_start
+        return t_filter, sim
+
+    def _time_stats(
+        self,
+        t_pre_transform: float | None,
+        t_filter: float | None,
+        t_cal: float,
+        t_revert: float | None,
+        t_total: float
+        ) -> None:
+        stats_lines = []
+        if t_pre_transform is not None:
+            stats_lines.append(f"pre_transform : {t_pre_transform:.3f}s")
+        if t_filter is not None:
+            stats_lines.append(f"filter : {t_filter:.3f}s")
+        stats_lines.append(f"calculate : {t_cal:.3f}s")
+        if t_revert is not None:
+            stats_lines.append(f"revert : {t_revert:.3f}s")
+
+        stats_table = " | ".join(stats_lines)
+
+        if self._time_enabled:
+            old_level = logger.level
+            logger.setLevel(20)
+            logger.info(f"[{self}] \n Total : {t_total:.3f}s  <| {stats_table} |>")
+            logger.setLevel(old_level)
+        else:
+            logger.debug(f"[{self}] \n Total : {t_total:.3f}s  <| {stats_table} |>")
 
     def __call__(self, sim: SimSnap) -> ReturnT:
         """Executes the calculation on a given simulation snapshot."""
+
+        logger.debug(f"[{self}] Starting: {sim}")
+        t0 = time.perf_counter()
         trans_obj = None
-        if self._transformation is not None:
-            trans_obj = self._transformation(sim)
-        if self._filter is not None:
-            sim = sim[self._filter]
+
+        # pre-transform
+        t_pre_transform, trans_obj = self._do_pre_transform(sim)
+
+        # filter
+        t_filter, sim = self._do_pre_filter(sim)
+
+        # calculate
+        t_cal_start = time.perf_counter()
         try:
+            logger.debug(f"[{self}] calculating ...")
             result = self.calculate(sim)
         finally:
+            t_cal = time.perf_counter() - t_cal_start
+            # revert
+            t_revert = None
             if trans_obj is not None and self._revert_transformation:
+                t_revert_start = time.perf_counter()
+                logger.debug(f"[{self}] reverting transformation: {self._transformation}")
                 trans_obj.revert()
+                t_revert = time.perf_counter() - t_revert_start
+
+        t_total = time.perf_counter() - t0
+
+        # stats
+        self._time_stats(t_pre_transform, t_filter, t_cal, t_revert, t_total)
         return result
 
     @abstractmethod
@@ -49,8 +147,14 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
             f"{self.__class__.__name__} must implement calculate"
         )
 
+    def enable_timing(self: Self, enabled: bool = True) -> Self:
+        """Enable or disable timing for this calculator."""
+        self._time_enabled = enabled
+        return self
+
     def with_filter(self: Self, filt: FilterLike) -> Self:
         """Return a new CalculatorBase instance with the given filter applied."""
+        logger.debug(f"Applying filter: {filt} to {self}")
         self._filter = filt
         return self
 
@@ -59,6 +163,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
     def with_transformation(self: Self, transformation: TransformLike, revert: bool = True) -> Self:
         """Return a new CalculatorBase instance with the given transformation applied."""
+        logger.debug(f"Applying transformation: {transformation} with revert={revert} to {self}")
         self._transformation = transformation
         self._revert_transformation = revert
         return self
@@ -119,8 +224,38 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
             f"{type(value)}"
         )
 
+    # ------- combinators --------
+    def __and__(self: CalculatorBase[T], other: CalculatorBase[U]) -> CombinedCalculator[T, U]:
+        return CombinedCalculator(self, other)
 
     def __repr__(self):
         if hasattr(self,"name"):
             return f"<Calculator {self.name}()>"
         return f"<Calculator {self.__class__.__name__}()>"
+
+
+class CombinedCalculator(CalculatorBase[tuple[Unpack[Ts]]], Generic[Unpack[Ts]]):
+    props: tuple[CalculatorBase[Any], ...]
+    def __init__(self, *props: CalculatorBase[Unpack[Ts]]) -> None: # type: ignore
+        self.props = props
+
+    def calculate(self, sim: SimSnap) -> tuple[Unpack[Ts]]:
+        return tuple(p(sim) for p in self.props)
+
+    @overload   # type: ignore
+    def __and__(self: CombinedCalculator[Unpack[Ts]],
+                other: CalculatorBase[U]) -> CombinedCalculator[Unpack[Ts], U]: ...
+    @overload
+    def __and__(self: CombinedCalculator[Unpack[Ts]],     # type: ignore
+                other: CombinedCalculator[Unpack[Us]]) -> CombinedCalculator[Unpack[Ts], Unpack[Us]]: ...   # type: ignore
+
+    def __and__(self, other: Any) -> Any:
+        if isinstance(other, CombinedCalculator):
+            return CombinedCalculator(*self.props, *other.props)
+        elif isinstance(other, CalculatorBase):
+            return CombinedCalculator(*self.props, other)
+        else:
+            raise TypeError(f"Unsupported operand type(s) for &: 'CombinedCalculator' and '{type(other).__name__}'")
+
+    def __repr__(self) -> str:
+        return f"CombinedCalculator({', '.join(repr(p) for p in self.props)})"

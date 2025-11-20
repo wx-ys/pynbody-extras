@@ -13,13 +13,7 @@ from pynbody.snapshot import SimSnap
 
 from pynbodyext.calculate import CalculatorBase
 
-try:
-    from typing import TypeVarTuple, Unpack  # type: ignore  # python >= 3.11
-except ImportError:
-    from typing_extensions import TypeVarTuple, Unpack
-
-
-__all__ = ["PropertyBase", "ConstantProperty", "LambdaProperty", "OpProperty","CombinedProperty",
+__all__ = ["PropertyBase", "ConstantProperty", "LambdaProperty", "OpProperty",
            "ParamSum", "ParameterContain", "eval_cache"]
 
 
@@ -29,7 +23,6 @@ _EVAL_SIM_TOKEN: ContextVar[int | None] = ContextVar("_EVAL_SIM_TOKEN", default=
 
 
 TProp = TypeVar("TProp", bound=SimArray | float | np.ndarray | int | tuple | bool, covariant=True)
-TProps = TypeVarTuple("TProps")
 
 Addable = Union[ SimArray, float, np.ndarray, int, "PropertyBase[TProp]"]
 
@@ -154,7 +147,7 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
         )
     def __repr__(self) -> str:
         init_sig = getattr(self, "_init_sig", ())
-        return f"<{self.__class__.__name__} {init_sig}>"
+        return f"<Prop {self.__class__.__name__} {init_sig}>"
 
     # -------- composition helpers --------
     @classmethod
@@ -247,10 +240,6 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
     #    return OpProperty("eq", [self, self._as_property(other)])
     def __ne__(self, other: Addable) -> "PropertyBase":  # type: ignore[override]
         return OpProperty("ne", [self, self._as_property(other)])
-
-    # ------- combinators --------
-    def __and__(self, other: Addable) -> "CombinedProperty":
-        return CombinedProperty(self, self._as_property(other))
 
     # Make instances hashable by identity even though __eq__ is overridden symbolically
     __hash__ = object.__hash__
@@ -401,22 +390,6 @@ class OpProperty(PropertyBase[Any]):
         return (f"OpProperty(op='{self.op_name}', operands={len(self.operands)}, "
                 f"basic={num_basic}, ops={num_ops}, depth={depth})")
 
-
-class CombinedProperty(CalculatorBase[tuple[Unpack[TProps]]]):
-
-    def __init__(self, *props: PropertyBase[Unpack[TProps]]):
-        self.props = props
-
-    def calculate(self, sim: SimSnap) -> tuple[Unpack[TProps]]:
-        return tuple(prop(sim) for prop in self.props)
-
-    def __and__(self, other: Addable) -> "CombinedProperty":
-        if isinstance(other, CombinedProperty):
-            return CombinedProperty(*self.props, *other.props)
-        return CombinedProperty(*self.props, PropertyBase._as_property(other))
-
-    def __repr__(self) -> str:
-        return f"CombinedProperty({', '.join(repr(p) for p in self.props)})"
 
 # ---------------- Domain-specific leaves ----------------
 
