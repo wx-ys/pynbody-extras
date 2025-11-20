@@ -3,10 +3,11 @@ from collections.abc import Callable
 from typing import Literal, TypeAlias
 
 import numpy as np
-from pynbody.analysis.halo import hybrid_center, shrink_sphere_center
 from pynbody.array import SimArray
 from pynbody.snapshot import SimSnap
 from pynbody.transformation import GenericTranslation, Transformation
+
+from pynbodyext.properties import CenPos, CenVel
 
 from .base import TransformBase
 
@@ -49,21 +50,7 @@ class PosToCenter(TransformBase[GenericTranslation]):
 
     @classmethod
     def get_center(cls, sim: SimSnap, mode: Literal["ssc", "com", "pot", "hyb"]) -> _CenArr:
-        if mode == "com":
-            cen = sim.mean_by_mass("pos")
-        elif mode == "pot":
-            i = sim["phi"].argmin()
-            cen = sim["pos"][i].copy()
-        elif mode == "ssc":
-            cen = shrink_sphere_center(sim)
-        elif mode == "hyb":
-            cen = hybrid_center(sim)
-        else:
-            raise ValueError(f"Invalid mode: {mode}. Expected one of ['ssc', 'com', 'pot', 'hyb'].")
-
-        if isinstance(cen, SimArray):
-            cen.sim = sim
-        return cen
+        return CenPos(mode=mode).calculate(sim)
 
 
 class VelToCenter(TransformBase[GenericTranslation]):
@@ -89,7 +76,4 @@ class VelToCenter(TransformBase[GenericTranslation]):
 
     @classmethod
     def get_center(cls, sim: SimSnap, mode: Literal["com"]) -> _CenArr:
-        vcen = (sim["vel"].transpose() * sim["mass"]).sum(axis=1) / sim["mass"].sum()
-        vcen.units = sim["vel"].units
-        vcen.sim = sim
-        return vcen
+        return CenVel(mode=mode).calculate(sim)
