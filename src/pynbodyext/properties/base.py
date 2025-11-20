@@ -13,7 +13,14 @@ from pynbody.snapshot import SimSnap
 
 from pynbodyext.calculate import CalculatorBase
 
-__all__ = ["PropertyBase", "ParamSum", "ParameterContain", "ConstantProperty", "LambdaProperty", "OpProperty","eval_cache"]
+try:
+    from typing import TypeVarTuple, Unpack  # type: ignore  # python >= 3.11
+except ImportError:
+    from typing_extensions import TypeVarTuple, Unpack
+
+
+__all__ = ["PropertyBase", "ConstantProperty", "LambdaProperty", "OpProperty","CombinedProperty",
+           "ParamSum", "ParameterContain", "eval_cache"]
 
 
 # Ephemeral per-top-level-call evaluation cache (sim-local, auto-cleared)
@@ -21,7 +28,8 @@ _EVAL_CTX: ContextVar[dict[tuple[int, tuple[Any, ...]], Any] | None] = ContextVa
 _EVAL_SIM_TOKEN: ContextVar[int | None] = ContextVar("_EVAL_SIM_TOKEN", default=None)
 
 
-TProp = TypeVar("TProp", bound=SimArray | float | np.ndarray | int, covariant=True)
+TProp = TypeVar("TProp", bound=SimArray | float | np.ndarray | int | tuple | bool, covariant=True)
+TProps = TypeVarTuple("TProps")
 
 Addable = Union[ SimArray, float, np.ndarray, int, "PropertyBase[TProp]"]
 
@@ -149,7 +157,8 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
         return f"<{self.__class__.__name__} {init_sig}>"
 
     # -------- composition helpers --------
-    def _as_property(self, other: Addable) -> "PropertyBase":
+    @classmethod
+    def _as_property(cls, other: Addable) -> "PropertyBase":
         """
         Convert `other` to a PropertyBase. If it's already a PropertyBase, return it;
         otherwise wrap it into ConstantProperty.
@@ -238,6 +247,10 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
     #    return OpProperty("eq", [self, self._as_property(other)])
     def __ne__(self, other: Addable) -> "PropertyBase":  # type: ignore[override]
         return OpProperty("ne", [self, self._as_property(other)])
+
+    # ------- combinators --------
+    def __and__(self, other: Addable) -> "CombinedProperty":
+        return CombinedProperty(self, self._as_property(other))
 
     # Make instances hashable by identity even though __eq__ is overridden symbolically
     __hash__ = object.__hash__
@@ -405,6 +418,19 @@ class OpProperty(PropertyBase[Any]):
             return f"({unary[self.op_name]}{get_repr(self.operands[0])})"
         # Fallback: function style
         return f"{self.op_name}({', '.join(get_repr(o) for o in self.operands)})"
+class CombinedProperty(CalculatorBase[tuple[Unpack[TProps]]]):
+
+    def __init__(self, *props: PropertyBase[Unpack[TProps]]):
+        self.props = props
+
+    def calculate(self, sim: SimSnap) -> tuple[Unpack[TProps]]:
+        return tuple(prop(sim) for prop in self.props)
+
+    def __and__(self, other: Addable) -> "CombinedProperty":
+        if isinstance(other, CombinedProperty):
+            return CombinedProperty(*self.props, *other.props)
+        return CombinedProperty(*self.props, PropertyBase._as_property(other))
+
 # ---------------- Domain-specific leaves ----------------
 
 class ParamSum(PropertyBase[SimArray]):
