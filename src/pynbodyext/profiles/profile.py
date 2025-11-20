@@ -19,39 +19,31 @@ from __future__ import annotations
 
 import warnings
 from collections import defaultdict
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, cast, overload
 
-import numpy as np
-from pynbody import filt as _pyn_filt
-from pynbody.family import Family
 from pynbody.snapshot import SimSnap
 
-from .bins import (
-    BinByFunc,
-    BinsAlgorithmFunc,
-    BinsAreaFunc,
-    BinsSet,
-    RegistBinAlgorithmString,
-    RegistBinAreaString,
-    RegistBinByString,
-    SimOrNpArray,
-)
+from .bins import BinsSet
 from .proarray import ProfileArray
 
 if TYPE_CHECKING:
-    from pynbody.array import SimArray
+    from collections.abc import Callable
 
-# ------------------------------------------------------------------
-# Assumptions / light shims (remove if already defined elsewhere)
-# ------------------------------------------------------------------
-FilterLike: TypeAlias = _pyn_filt.Filter | np.ndarray | Family | slice | int | np.int32 | np.int64
+    import numpy as np
 
-AllArray: TypeAlias = ProfileArray | SimOrNpArray
-
-ProType = TypeVar("ProType",bound="ProfileBase")
-ProFunc: TypeAlias = Callable[[ProType], AllArray]
-SimFunc: TypeAlias = Callable[[SimSnap], AllArray]
+    from pynbodyext.util._type import (
+        BinByFunc,
+        BinsAlgorithmFunc,
+        BinsAreaFunc,
+        FilterLike,
+        RegistBinAlgorithmString,
+        RegistBinAreaString,
+        RegistBinByString,
+        SimNpArray,
+        SimNpPrArray,
+        SimNpPrArrayFunc,
+        SimNpPrArrayPrFunc,
+    )
 
 
 _PARENT_KEYS = ("rbins", "dr", "binsize")  # not changed keys
@@ -86,20 +78,20 @@ class ProfileBase:
         Optional per-particle weights aligned with ``sim``.
     """
 
-    _profile_property_registry: defaultdict[type, dict[str, ProFunc]] = defaultdict(dict)
+    _profile_property_registry: defaultdict[type, dict[str, SimNpPrArrayPrFunc]] = defaultdict(dict)
 
 
     def __init__(self,
                  sim: SimSnap,
                  bins_set: BinsSet,
-                 weight: AllArray | None = None,
+                 weight: SimNpPrArray | None = None,
                  parent: Profile | None = None):
         self.sim: SimSnap = sim
         self._bins: BinsSet = bins_set if bins_set.is_defined() else bins_set(sim)
         self._parent: Profile | None = parent
 
         # Weight handling: if key provided, materialize array; else None
-        self._weight: SimArray | np.ndarray | None = weight
+        self._weight: SimNpPrArray | None = weight
         if self._weight is not None:
             assert len(self._weight) == len(sim), "Weight array length must match simulation length."
 
@@ -171,22 +163,22 @@ class ProfileBase:
         return self._bins.binind or []
 
     @property
-    def rbins(self) -> SimArray | np.ndarray | None:
+    def rbins(self) -> SimNpArray | None:
         """Bin centers from :class:`~pynbodyext.profiles.bins.BinsSet`."""
         return self._bins.rbins
 
     @property
-    def bin_edges(self) -> SimArray | np.ndarray | None:
+    def bin_edges(self) -> SimNpArray | None:
         """Bin edges from :class:`~pynbodyext.profiles.bins.BinsSet`."""
         return self._bins.bin_edges
 
     @property
-    def binsize(self) -> SimArray | np.ndarray | None:
+    def binsize(self) -> SimNpArray | None:
         """Area/volume per bin from :class:`~pynbodyext.profiles.bins.BinsSet`."""
         return self._bins.binsize
 
     @property
-    def dr(self) -> SimArray | np.ndarray | None:
+    def dr(self) -> SimNpArray | None:
         """Approximate half-widths computed from :attr:`rbins`."""
         return self._bins.dr
 
@@ -272,7 +264,7 @@ class ProfileBase:
         )
 
     # ---- Field resolution ----
-    def _get_property_func(self, key: str) -> ProFunc | None:
+    def _get_property_func(self, key: str) -> SimNpPrArrayPrFunc | None:
         """
         Look up a registered profile-property function for ``key`` on the root class hierarchy.
         """
@@ -393,22 +385,22 @@ class ProfileBase:
     @overload
     def profile_property(
         cls,
-        fn: ProFunc,
+        fn: SimNpPrArrayPrFunc,
         name: str | None = None,
-    ) -> ProFunc: ...
+    ) -> SimNpPrArrayPrFunc: ...
     @classmethod
     @overload
     def profile_property(
         cls,
         fn: None = None,
         name: str | None = None,
-    ) -> Callable[[ProFunc], ProFunc]: ...
+    ) -> Callable[[SimNpPrArrayPrFunc], SimNpPrArrayPrFunc]: ...
     @classmethod
     def profile_property(cls,
-        fn: ProFunc | None = None,
+        fn: SimNpPrArrayPrFunc | None = None,
         name: str | None = None
-    ) -> ProFunc | Callable[[ProFunc], ProFunc]:
-        def decorator(func: ProFunc) -> ProFunc:
+    ) -> SimNpPrArrayPrFunc | Callable[[SimNpPrArrayPrFunc], SimNpPrArrayPrFunc]:
+        def decorator(func: SimNpPrArrayPrFunc) -> SimNpPrArrayPrFunc:
             bucket = cls._profile_property_registry[cls]
             bucket[name or func.__name__] = func
             return func
@@ -443,11 +435,11 @@ class Profile(ProfileBase):
         self,
         sim: SimSnap,
         *,
-        weight: str | AllArray | Callable[[SimSnap], AllArray] | None = None,
+        weight: str | SimNpPrArray | SimNpPrArrayFunc | None = None,
         bins_by: RegistBinByString | BinByFunc = "r",
         bins_area: RegistBinAreaString | BinsAreaFunc = "spherical_shell",
         bins_type: RegistBinAlgorithmString | BinsAlgorithmFunc = "lin",
-        nbins: int | AllArray = 100,
+        nbins: int | SimNpPrArray = 100,
         bin_min: float | None = None,
         bin_max: float | None = None,
         bins_set: BinsSet | None = None,
@@ -459,7 +451,7 @@ class Profile(ProfileBase):
             bset = BinsSet(
                 bins_by=bins_by, bins_area=bins_area, bins_type=bins_type,
                 nbins=nbins, bin_min=bin_min, bin_max=bin_max,**kwargs)
-        weight_arr: AllArray | None
+        weight_arr: SimNpPrArray | None
         if weight is None:
             weight_arr = None
         elif isinstance(weight, str):

@@ -46,29 +46,21 @@ See Also
 """
 
 from collections.abc import Callable
-from typing import Any, Literal, TypeAlias, overload
+from typing import Any, overload
 
 import numpy as np
-from pynbody.array import IndexedSimArray, SimArray
+from pynbody.array import SimArray
 from pynbody.snapshot import SimSnap
 
-SimOrNpArray: TypeAlias = SimArray | np.ndarray | IndexedSimArray
-"""Type alias for arrays accepted or returned by binning routines."""
-
-BinByFunc: TypeAlias = Callable[[SimSnap], SimOrNpArray]
-"""Callable extracting a 1D array from a simulation."""
-
-BinsAreaFunc: TypeAlias = Callable[["BinsSet", SimOrNpArray], SimOrNpArray]
-"""Callable computing per-bin area or volume given bin edges."""
-
-BinsAlgorithmFunc: TypeAlias = Callable[["BinsSet", SimOrNpArray], SimOrNpArray]
-"""Callable constructing bin edges from raw data (returns length nbins+1)."""
-
-
-RegistBinByString: TypeAlias = str | Literal["r","rxy"]
-RegistBinAreaString: TypeAlias = str | Literal["length","annulus","cylindrical_shell","spherical_shell"]
-RegistBinAlgorithmString: TypeAlias = str | Literal["lin","log","equaln"]
-
+from pynbodyext.util._type import (
+    BinByFunc,
+    BinsAlgorithmFunc,
+    BinsAreaFunc,
+    RegistBinAlgorithmString,
+    RegistBinAreaString,
+    RegistBinByString,
+    SimNpArray,
+)
 
 __all__ = ["BinsSet"]
 
@@ -115,20 +107,20 @@ class BinsSet:
 
     Attributes
     ----------
-    x : :data:`~pynbodyext.profiles.bins.SimOrNpArray` or None
+    x : :data:`~pynbodyext.profiles.bins.SimNpArray` or None
         The resolved data array being binned.
-    bin_edges : :data:`~pynbodyext.profiles.bins.SimOrNpArray` or None
+    bin_edges : :data:`~pynbodyext.profiles.bins.SimNpArray` or None
         Array of bin edges (length ``nbins + 1``).
-    rbins : :data:`~pynbodyext.profiles.bins.SimOrNpArray` or None
+    rbins : :data:`~pynbodyext.profiles.bins.SimNpArray` or None
         Bin centers (midpoints) (length ``nbins``).
-    dr : :data:`~pynbodyext.profiles.bins.SimOrNpArray` or None
+    dr : :data:`~pynbodyext.profiles.bins.SimNpArray` or None
         Approximate half-widths computed via :func:`numpy.gradient`.
         For exact widths use :func:`numpy.diff` on :attr:`bin_edges`.
     binind : list[:class:`~numpy.ndarray`] or None
         List of index arrays per bin (particle indices).
     npart_bins : :class:`~numpy.ndarray` or None
         Number of particles in each bin (length ``nbins``).
-    binsize : :data:`~pynbodyext.profiles.bins.SimOrNpArray` or None
+    binsize : :data:`~pynbodyext.profiles.bins.SimNpArray` or None
         Area or volume per bin (depends on ``bins_area`` implementation).
     """
     _bins_by_registry: dict[str, BinByFunc] = {}
@@ -178,7 +170,7 @@ class BinsSet:
                 and self.npart_bins is not None
                 and self.binsize is not None)
 
-    def _resolve_x(self, sim: SimSnap) -> SimOrNpArray:
+    def _resolve_x(self, sim: SimSnap) -> SimNpArray:
         """
         Resolve the data array to bin from ``self._bins_by``.
 
@@ -195,7 +187,7 @@ class BinsSet:
 
         Returns
         -------
-        :data:`~pynbodyext.profiles.bins.SimOrNpArray`
+        :data:`~pynbodyext.profiles.bins.SimNpArray`
             The resolved 1D data array.
 
         Raises
@@ -217,7 +209,7 @@ class BinsSet:
             )
         return x
 
-    def _coerce_edges_units(self, edges: np.ndarray, x: SimOrNpArray) -> SimOrNpArray:
+    def _coerce_edges_units(self, edges: np.ndarray, x: SimNpArray) -> SimNpArray:
         """
         Attach units and simulation reference to edges if ``x`` is a :class:`~pynbody.array.SimArray`.
 
@@ -225,12 +217,12 @@ class BinsSet:
         ----------
         edges : :class:`~numpy.ndarray`
             Raw bin edges.
-        x : :data:`~pynbodyext.profiles.bins.SimOrNpArray`
+        x : :data:`~pynbodyext.profiles.bins.SimNpArray`
             The source data array.
 
         Returns
         -------
-        :data:`~pynbodyext.profiles.bins.SimOrNpArray`
+        :data:`~pynbodyext.profiles.bins.SimNpArray`
             Either the original edges array or a :class:`~pynbody.array.SimArray` clone
             with units/sim copied.
         """
@@ -241,7 +233,7 @@ class BinsSet:
             return out
         return edges
 
-    def _build_edges(self, x: SimOrNpArray) -> SimOrNpArray:
+    def _build_edges(self, x: SimNpArray) -> SimNpArray:
         """
         Construct bin edges from explicit array or using the registered algorithm.
 
@@ -253,12 +245,12 @@ class BinsSet:
 
         Parameters
         ----------
-        x : :data:`~pynbodyext.profiles.bins.SimOrNpArray`
+        x : :data:`~pynbodyext.profiles.bins.SimNpArray`
             Data array used to determine domain and quantiles.
 
         Returns
         -------
-        :data:`~pynbodyext.profiles.bins.SimOrNpArray`
+        :data:`~pynbodyext.profiles.bins.SimNpArray`
             Array of bin edges (length ``nbins + 1``).
 
         Raises
@@ -285,18 +277,18 @@ class BinsSet:
 
         return self._coerce_edges_units(edges, x)
 
-    def _calc_area_or_volume(self, bin_edges: SimOrNpArray) -> SimOrNpArray:
+    def _calc_area_or_volume(self, bin_edges: SimNpArray) -> SimNpArray:
         """
         Compute per-bin area or volume using ``self._bins_area``.
 
         Parameters
         ----------
-        bin_edges : :data:`~pynbodyext.profiles.bins.SimOrNpArray`
+        bin_edges : :data:`~pynbodyext.profiles.bins.SimNpArray`
             Bin edge array (length ``nbins + 1``).
 
         Returns
         -------
-        :data:`~pynbodyext.profiles.bins.SimOrNpArray`
+        :data:`~pynbodyext.profiles.bins.SimNpArray`
             Area/volume per bin (length ``nbins``).
 
         Raises
@@ -312,24 +304,24 @@ class BinsSet:
             raise ValueError(f"Invalid bins_area: {self._bins_area}, required callable or registry keys: {list(self._bins_area_registry)}")
 
     @staticmethod
-    def _calc_binmid(bin_edges: SimOrNpArray) -> SimOrNpArray:
+    def _calc_binmid(bin_edges: SimNpArray) -> SimNpArray:
         """
         Compute bin centers (midpoints) from edges.
 
         Parameters
         ----------
-        bin_edges : :data:`~pynbodyext.profiles.bins.SimOrNpArray`
+        bin_edges : :data:`~pynbodyext.profiles.bins.SimNpArray`
             Edge array (length ``nbins + 1``).
 
         Returns
         -------
-        :data:`~pynbodyext.profiles.bins.SimOrNpArray`
+        :data:`~pynbodyext.profiles.bins.SimNpArray`
             Midpoints (length ``nbins``).
         """
         return 0.5 * (bin_edges[:-1] + bin_edges[1:])
 
 
-    def _assign_particles(self, x: SimOrNpArray, bin_edges: SimOrNpArray) -> tuple[list[np.ndarray], np.ndarray]:
+    def _assign_particles(self, x: SimNpArray, bin_edges: SimNpArray) -> tuple[list[np.ndarray], np.ndarray]:
         """
         Assign particle indices to bins via :func:`numpy.digitize`.
 
@@ -337,9 +329,9 @@ class BinsSet:
 
         Parameters
         ----------
-        x : :data:`~pynbodyext.profiles.bins.SimOrNpArray`
+        x : :data:`~pynbodyext.profiles.bins.SimNpArray`
             Data array being binned.
-        bin_edges : :data:`~pynbodyext.profiles.bins.SimOrNpArray`
+        bin_edges : :data:`~pynbodyext.profiles.bins.SimNpArray`
             Edge array (length ``nbins + 1``).
 
         Returns
@@ -502,11 +494,11 @@ class BinsSet:
         Register a function that extracts a 1D array from a simulation.
 
         The decorated function must accept ``sim: SimSnap`` and return a
-        1D `SimOrNpArray`.
+        1D `SimNpArray`.
 
         Parameters
         ----------
-        fn : Callable[[SimSnap], SimOrNpArray], optional
+        fn : Callable[[SimSnap], SimNpArray], optional
             Function to register. If omitted, used as a decorator factory.
         name : str, optional
             Registry key. Defaults to ``fn.__name__``.
@@ -561,12 +553,12 @@ class BinsSet:
         """
         Register an area/volume calculator.
 
-        The function must accept ``(self: BinsSet, bin_edges: SimOrNpArray)``
+        The function must accept ``(self: BinsSet, bin_edges: SimNpArray)``
         and return an array of length nbins.
 
         Parameters
         ----------
-        fn : Callable[[BinsSet, SimOrNpArray], SimOrNpArray], optional
+        fn : Callable[[BinsSet, SimNpArray], SimNpArray], optional
             Function to register or omitted for decorator usage.
         name : str, optional
             Registry key; defaults to the function name.
@@ -614,11 +606,11 @@ class BinsSet:
         """
         Register a bin edges construction algorithm.
 
-        Signature: ``(self: BinsSet, x: SimOrNpArray) -> SimOrNpArray`` (edges).
+        Signature: ``(self: BinsSet, x: SimNpArray) -> SimNpArray`` (edges).
 
         Parameters
         ----------
-        fn : Callable[[BinsSet, SimOrNpArray], SimOrNpArray], optional
+        fn : Callable[[BinsSet, SimNpArray], SimNpArray], optional
             Function to register or omitted for decorator usage.
         name : str, optional
             Registry key; defaults to function name.
@@ -647,8 +639,8 @@ class BinsSet:
 # ------------------- bins algorithms --------------------------------------#
 @BinsSet.bins_algorithm_register(name="lin")
 def linear_bins_algorithm(
-    self: "BinsSet", x: SimOrNpArray
-    ) -> SimOrNpArray:
+    self: "BinsSet", x: SimNpArray
+    ) -> SimNpArray:
     """
     Build linearly spaced bin edges over the domain.
 
@@ -662,8 +654,8 @@ def linear_bins_algorithm(
 
 @BinsSet.bins_algorithm_register(name="log")
 def logarithmic_bins_algorithm(
-    self: "BinsSet", x: SimOrNpArray
-    ) -> SimOrNpArray:
+    self: "BinsSet", x: SimNpArray
+    ) -> SimNpArray:
     """
     Build logarithmically spaced bin edges over the positive domain.
 
@@ -678,8 +670,8 @@ def logarithmic_bins_algorithm(
 
 @BinsSet.bins_algorithm_register(name="equaln")
 def equal_number_bins_algorithm(
-    self: "BinsSet", x: SimOrNpArray
-    ) -> SimOrNpArray:
+    self: "BinsSet", x: SimNpArray
+    ) -> SimNpArray:
     """
     Build edges so that each bin contains approximately the same number of particles.
 
@@ -708,8 +700,8 @@ def equal_number_bins_algorithm(
 
 @BinsSet.bins_area_register(name="length")
 def length_area(
-    self: "BinsSet", bin_edges: SimOrNpArray
-    ) -> SimOrNpArray:
+    self: "BinsSet", bin_edges: SimNpArray
+    ) -> SimNpArray:
     """
     Length of 1D bins: ``r_{i+1} - r_i`` for each bin.
     """
@@ -717,8 +709,8 @@ def length_area(
 
 @BinsSet.bins_area_register(name="annulus")
 def annulus_area(
-    self: "BinsSet", bin_edges: SimOrNpArray
-    ) -> SimOrNpArray:
+    self: "BinsSet", bin_edges: SimNpArray
+    ) -> SimNpArray:
     """
     Area of 2D circular annuli: ``pi * (r_{i+1}^2 - r_i^2)`` for each bin.
     """
@@ -726,8 +718,8 @@ def annulus_area(
 
 @BinsSet.bins_area_register(name="spherical_shell")
 def spherical_shell_area(
-    self: "BinsSet", bin_edges: SimOrNpArray
-    ) -> SimOrNpArray:
+    self: "BinsSet", bin_edges: SimNpArray
+    ) -> SimNpArray:
     """
     Volume of 3D spherical shells: ``4/3 * pi * (r_{i+1}^3 - r_i^3)`` for each bin.
     """
@@ -735,8 +727,8 @@ def spherical_shell_area(
 
 @BinsSet.bins_area_register(name="cylindrical_shell")
 def cylindrical_shell_area(
-    self: "BinsSet", bin_edges: SimOrNpArray
-    ) -> SimOrNpArray:
+    self: "BinsSet", bin_edges: SimNpArray
+    ) -> SimNpArray:
     """
     Lateral surface area or volume proxy for cylindrical shells.
 

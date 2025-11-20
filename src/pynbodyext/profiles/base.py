@@ -24,20 +24,13 @@ from collections.abc import Callable
 from typing import Any, Generic, Literal, TypeVar
 
 from pynbody.snapshot import SimSnap
-from pynbody.units import UnitBase
 
 from pynbodyext.calculate import CalculatorBase
+from pynbodyext.util._type import BinsAlgorithmFunc, RegistBinAlgorithmString, SimNpPrArray, SimNpPrArrayFunc, UnitLike
 
-from .bins import (
-    BinsSet,
-    RegistBinAlgorithmString,
-)
+from .bins import BinsSet
 from .profile import ProfileBase
-from .spatial_profile import (
-    AllArray,
-    BinsAlgorithmFunc,
-    RadialProfile,
-)
+from .spatial_profile import RadialProfile
 
 __all__ = ["ProfileBuilderBase", "RadialProfileBuilder"]
 
@@ -78,11 +71,11 @@ class RadialProfileBuilder(ProfileBuilderBase[RadialProfile]):
     def __init__(
         self,
         ndim: Literal[2,3] = 3,
-        weight: AllArray | str | Callable[[SimSnap], AllArray] | None = None,
+        weight: SimNpPrArray | str | SimNpPrArrayFunc | None = None,
         bins_type: RegistBinAlgorithmString | BinsAlgorithmFunc = "lin",
-        nbins: AllArray | int = 100,
-        bin_min: str | float | UnitBase | Callable[[SimSnap], float] | None = None,
-        bin_max: str | float | UnitBase | Callable[[SimSnap], float] | None = None,
+        nbins: SimNpPrArray | int = 100,
+        bin_min: UnitLike | float | Callable[[SimSnap], float] | None = None,
+        bin_max: UnitLike | float | Callable[[SimSnap], float] | None = None,
         bins_set: BinsSet | None = None,
         **kwargs: Any
     ):

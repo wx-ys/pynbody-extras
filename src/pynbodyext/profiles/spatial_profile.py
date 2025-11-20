@@ -4,7 +4,10 @@ from typing import Any, Literal
 
 from pynbody.snapshot import SimSnap
 
-from .profile import AllArray, BinsAlgorithmFunc, BinsSet, Callable, Profile, RegistBinAlgorithmString
+from pynbodyext.util._type import BinsAlgorithmFunc, RegistBinAlgorithmString, SimNpPrArray, SimNpPrArrayFunc
+
+from .bins import BinsSet
+from .profile import Profile
 
 __all__ = ["SpatialProfile", "RadialProfile"]
 
@@ -16,9 +19,9 @@ class RadialProfile(SpatialProfile):
         sim: SimSnap,
         *,
         ndim: Literal[2, 3] = 3,
-        weight: str | AllArray | Callable[[SimSnap], AllArray] | None = None,
+        weight: str | SimNpPrArray | SimNpPrArrayFunc | None = None,
         bins_type: RegistBinAlgorithmString | BinsAlgorithmFunc = "lin",
-        nbins: int | AllArray = 100,
+        nbins: int | SimNpPrArray = 100,
         bin_min: float | None = None,
         bin_max: float | None = None,
         bins_set: BinsSet | None = None,
@@ -46,5 +49,5 @@ class RadialProfile(SpatialProfile):
         )
 
 @SpatialProfile.profile_property
-def density(pro: SpatialProfile) -> AllArray:
+def density(pro: SpatialProfile) -> SimNpPrArray:
     return pro["mass"]["sum"] / pro["binsize"]

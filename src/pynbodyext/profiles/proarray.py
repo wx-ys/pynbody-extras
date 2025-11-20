@@ -74,7 +74,7 @@ from typing import TYPE_CHECKING, Literal, Optional, Union, cast, overload
 import numpy as np
 from pynbody.array import IndexedSimArray, SimArray
 
-from .bins import SimOrNpArray
+from pynbodyext.util._type import SimNpArray
 
 if TYPE_CHECKING:
     from .profile import ProfileBase
@@ -126,7 +126,7 @@ class ProfileArray(SimArray):
     name : str
         The name of the per-particle field in ``profile.sim`` (e.g., ``"vr"``,
         ``"rho"``, etc.). Also used as the label for per-bin arrays.
-    array : :data:`~pynbodyext.profiles.bins.SimOrNpArray`, optional
+    array : :data:`~pynbodyext.profiles.bins.SimNpArray`, optional
         Input array. If ``None``, uses ``profile.sim[name]``. If provided, it must be
         either a per-particle array (length = number of particles) or a per-bin array
         (length = ``profile.nbins``).
@@ -166,7 +166,7 @@ class ProfileArray(SimArray):
     _profile: Optional["ProfileBase"]   # The owning profile that defines bins, weights, and access to per-particle simulation arrays
     _name: str                          # The name of the per-particle field in the profile's simulation
     _source: Literal["per_particle", "per_bin"] # Indicates whether the array is per-particle or per-bin
-    _arr: SimOrNpArray | None           # The underlying array data, either per-particle or per-bin
+    _arr: SimNpArray | None           # The underlying array data, either per-particle or per-bin
     _mode: str | None                   # The statistic key used for computation or labeling
     _is_view: bool                      # Indicates if this is a view of another ProfileArray
 
@@ -175,7 +175,7 @@ class ProfileArray(SimArray):
         profile: "ProfileBase",
         *,
         name: str,
-        array: SimOrNpArray | None = None,
+        array: SimNpArray | None = None,
         mode: str | None = None,
     ) -> "ProfileArray":
         """
@@ -236,7 +236,7 @@ class ProfileArray(SimArray):
         profile: "ProfileBase",
         *,
         name: str,
-        array: SimOrNpArray | None = None,
+        array: SimNpArray | None = None,
         mode: str | None = None,
         ):
         """Initialize the instance (no-op; all logic lives in __new__)."""
@@ -246,7 +246,7 @@ class ProfileArray(SimArray):
     def _compute(
         cls,
         profile: "ProfileBase",
-        arr: SimOrNpArray | str,
+        arr: SimNpArray | str,
         compute_mode: str,
         ) -> tuple[SimArray, str]:
         """
@@ -256,7 +256,7 @@ class ProfileArray(SimArray):
         ----------
         profile : :class:`~pynbodyext.profiles.profile.ProfileBase`
             The owning profile providing bin membership and optional weights.
-        arr : :data:`~pynbodyext.profiles.bins.SimOrNpArray` or str
+        arr : :data:`~pynbodyext.profiles.bins.SimNpArray` or str
             Source array. If a string, it is interpreted as ``profile.sim[arr]``.
             If array-like, it is treated as a per-particle field and binned.
         compute_mode : str
@@ -531,17 +531,17 @@ class StatisticBase:
 
     def __call__(
         self,
-        arr: SimOrNpArray,
-        weight: SimOrNpArray | None,
+        arr: SimNpArray,
+        weight: SimNpArray | None,
     )-> float | int | np.floating:
         """
         Evaluate the statistic for a single bin.
 
         Parameters
         ----------
-        arr : :data:`~pynbodyext.profiles.bins.SimOrNpArray`
+        arr : :data:`~pynbodyext.profiles.bins.SimNpArray`
             The per-particle values in this bin.
-        weight : :data:`~pynbodyext.profiles.bins.SimOrNpArray` or None
+        weight : :data:`~pynbodyext.profiles.bins.SimNpArray` or None
             Optional per-particle weights aligned with ``arr``.
 
         Returns
@@ -577,8 +577,8 @@ class Mean(StatisticBase):
     example_name: str = "mean"
     def __call__(
         self,
-        arr: SimOrNpArray,
-        weight: SimOrNpArray | None,
+        arr: SimNpArray,
+        weight: SimNpArray | None,
     )-> float | int | np.floating:
         if weight is not None:
             return (arr * weight).sum() / weight.sum()
@@ -597,8 +597,8 @@ class Sum(StatisticBase):
     example_name: str = "sum"
     def __call__(
         self,
-        arr: SimOrNpArray,
-        weight: SimOrNpArray | None,
+        arr: SimNpArray,
+        weight: SimNpArray | None,
     )-> float | int | np.floating:
         return arr.sum()
 
@@ -614,8 +614,8 @@ class Sum_w(StatisticBase):
     example_name: str = "sum_w"
     def __call__(
         self,
-        arr: SimOrNpArray,
-        weight: SimOrNpArray | None,
+        arr: SimNpArray,
+        weight: SimNpArray | None,
     )-> float | int | np.floating:
         if weight is not None:
             return (arr * weight).sum()
@@ -643,8 +643,8 @@ class Percentile(StatisticBase):
 
     def __call__(
         self,
-        arr: SimOrNpArray,
-        weight: SimOrNpArray | None,
+        arr: SimNpArray,
+        weight: SimNpArray | None,
     )-> float | int | np.floating:
 
         if len(arr) == 0:
@@ -688,8 +688,8 @@ class RMS(StatisticBase):
     example_name: str = "rms"
     def __call__(
         self,
-        arr: SimOrNpArray,
-        weight: SimOrNpArray | None,
+        arr: SimNpArray,
+        weight: SimNpArray | None,
     )-> float | int | np.floating:
         if len(arr) == 0:
             return np.nan
@@ -710,8 +710,8 @@ class Median(StatisticBase):
     example_name: str = "median"
     def __call__(
         self,
-        arr: SimOrNpArray,
-        weight: SimOrNpArray | None,
+        arr: SimNpArray,
+        weight: SimNpArray | None,
     )-> float | int | np.floating:
 
         return Percentile(self.key, 50)(arr, weight)
@@ -743,8 +743,8 @@ class Abs(StatisticBase):
 
     def __call__(
         self,
-        arr: SimOrNpArray,
-        weight: SimOrNpArray | None,
+        arr: SimNpArray,
+        weight: SimNpArray | None,
     ) -> float | int | np.floating:
         return self._substat(np.abs(arr), weight)
 
@@ -774,8 +774,8 @@ class Dispersion(StatisticBase):
     example_name: str = "disp"
     def __call__(
         self,
-        arr: SimOrNpArray,
-        weight: SimOrNpArray | None,
+        arr: SimNpArray,
+        weight: SimNpArray | None,
     )-> float | int | np.floating:
         if len(arr) == 0:
             return np.nan
