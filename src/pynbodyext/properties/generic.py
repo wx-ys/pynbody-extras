@@ -11,7 +11,7 @@ from pynbody.snapshot import SimSnap
 
 from .base import PropertyBase
 
-__all__ = ["AngMomVec", "KappaRot", "VirialRadius", "SpinParam"]
+__all__ = ["CenPos","CenVel","AngMomVec", "KappaRot", "VirialRadius", "SpinParam"]
 
 
 
