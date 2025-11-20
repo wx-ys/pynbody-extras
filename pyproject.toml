@@ -56,7 +56,7 @@ version = {attr = "pynbodyext.__version__"}
 # ======================================================================================
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py311"
 fix = true
 exclude = [
     "tests/",
@@ -124,7 +124,7 @@ convention = "numpy"
 # mypy configuration
 # ======================================================================================
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 
 ignore_missing_imports = true
 
