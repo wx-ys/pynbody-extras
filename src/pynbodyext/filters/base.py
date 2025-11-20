@@ -26,6 +26,9 @@ class FilterBase(CalculatorBase[np.ndarray],_Filter):
     def __invert__(self):
         return Not(self)
 
+    def __repr__(self):
+        return f"<Filter {self.__class__.__name__}>"
+
     def __or__(self, f2):
         return Or(self, f2)
 

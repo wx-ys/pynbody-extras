@@ -49,7 +49,7 @@ class ProfileBuilderBase(CalculatorBase[TProf], Generic[TProf]):
     - Implementations should avoid mutating ``sim`` and return a fresh profile instance.
     """
 
-    def __call__(self, sim: SimSnap) -> TProf:
+    def calculate(self, sim: SimSnap) -> TProf:
         """
         Create and return a concrete :class:`~pynbodyext.profiles.profile.ProfileBase`.
 
@@ -64,6 +64,9 @@ class ProfileBuilderBase(CalculatorBase[TProf], Generic[TProf]):
             The constructed profile (concrete subclass).
         """
         raise NotImplementedError
+
+    def __repr__(self) -> str:
+        return f"ProfBuilder {self.__class__.__name__}()"
 
 
 class RadialProfileBuilder(ProfileBuilderBase[RadialProfile]):
@@ -108,7 +111,7 @@ class RadialProfileBuilder(ProfileBuilderBase[RadialProfile]):
         self.bins_set = bins_set
         self.kwargs = kwargs
 
-    def __call__(self, sim: SimSnap) -> RadialProfile:
+    def calculate(self, sim: SimSnap) -> RadialProfile:
         if self.bin_min is not None:
             bin_min = self.bin_min(sim) if callable(self.bin_min) else self.bin_min
             bin_min = self._in_sim_units(bin_min, "pos", sim)
