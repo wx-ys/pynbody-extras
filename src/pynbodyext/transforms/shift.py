@@ -1,6 +1,5 @@
 
-from collections.abc import Callable
-from typing import Literal, TypeAlias
+from typing import Literal
 
 import numpy as np
 from pynbody.array import SimArray
@@ -8,18 +7,16 @@ from pynbody.snapshot import SimSnap
 from pynbody.transformation import GenericTranslation, Transformation
 
 from pynbodyext.properties import CenPos, CenVel
+from pynbodyext.util._type import SimNpArray, SimNpArrayFunc
 
 from .base import TransformBase
 
 __all__ = ["PosToCenter", "VelToCenter"]
 
-_CenArr: TypeAlias = np.ndarray | SimArray
-_CenFunc: TypeAlias = Callable[[SimSnap], _CenArr]
-
 
 class PosToCenter(TransformBase[GenericTranslation]):
 
-    def __init__(self, mode: Literal["ssc", "com", "pot", "hyb"] | _CenFunc | _CenArr= "ssc", move_all: bool = True):
+    def __init__(self, mode: Literal["ssc", "com", "pot", "hyb"] | SimNpArray | SimNpArrayFunc= "ssc", move_all: bool = True):
         if isinstance(mode, str):
             if mode not in ["ssc", "com", "pot","hyb"]:
                 raise ValueError(f"Invalid mode: {mode}. Expected one of ['ssc', 'com', 'pot', 'hyb'].")
@@ -49,7 +46,7 @@ class PosToCenter(TransformBase[GenericTranslation]):
         return GenericTranslation(target, "pos", -cen, description=f"PosToCenter_{description}")
 
     @classmethod
-    def get_center(cls, sim: SimSnap, mode: Literal["ssc", "com", "pot", "hyb"]) -> _CenArr:
+    def get_center(cls, sim: SimSnap, mode: Literal["ssc", "com", "pot", "hyb"]) -> SimNpArray:
         return CenPos(mode=mode).calculate(sim)
 
 
@@ -57,7 +54,7 @@ class VelToCenter(TransformBase[GenericTranslation]):
 
 
 
-    def __init__(self,mode: Literal["com"] | _CenFunc | _CenArr = "com", move_all: bool = True):
+    def __init__(self,mode: Literal["com"] | SimNpArrayFunc | SimNpArray = "com", move_all: bool = True):
         self.mode = mode
         self.move_all = move_all
 
@@ -75,5 +72,5 @@ class VelToCenter(TransformBase[GenericTranslation]):
         return GenericTranslation(target, "vel", -vcen, description="VelToCenter")
 
     @classmethod
-    def get_center(cls, sim: SimSnap, mode: Literal["com"]) -> _CenArr:
+    def get_center(cls, sim: SimSnap, mode: Literal["com"]) -> SimNpArray:
         return CenVel(mode=mode).calculate(sim)

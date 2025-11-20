@@ -19,7 +19,10 @@ class TransformBase(CalculatorBase[TTrans], Generic[TTrans]):
         if self._transformation is not None:
             trans_obj = self._transformation(sim)
         if self._filter is not None:
-            sim = sim[self._filter]
+            try:
+                sim = sim[self._filter]
+            except Exception as e:
+                raise RuntimeError(f"Error applying filter {self._filter}") from e
         try:
             result = self.calculate(sim, trans_obj)
         except Exception as e:
