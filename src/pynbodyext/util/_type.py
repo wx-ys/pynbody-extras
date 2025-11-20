@@ -1,8 +1,9 @@
 """ Some type utilities for pynbodyext """
 
-from collections.abc import Callable  #Protocol need python version >3.8
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, TypeVar, Union
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, Self, TypeAlias, TypeVar, Union
 
+#Protocol need python version >3.8
 import numpy as np
 from pynbody.array import IndexedSimArray, SimArray
 from pynbody.family import Family
@@ -12,16 +13,16 @@ from pynbody.transformation import Transformation
 from pynbody.units import UnitBase
 
 try:
-    from typing import Self  # type: ignore  # python >= 3.11
+    from typing import TypeVarTuple, Unpack  # python >= 3.11
 except ImportError:
-    from typing_extensions import Self
+    from typing_extensions import TypeVarTuple, Unpack  # type: ignore
 
 if TYPE_CHECKING:
     from pynbodyext.profiles.bins import BinsSet
     from pynbodyext.profiles.proarray import ProfileArray
     from pynbodyext.profiles.profile import ProfileBase
 
-__all__ = ["Self"]
+__all__ = ["Self","TypeVarTuple","Unpack"]
 
 
 __all__ += ["UnitLike","SingleElementArray","SimNpArray","FilterLike","TransformLike","SimCallable","SimNpArrayFunc"]
