@@ -23,7 +23,7 @@ class WrapTransformation(transformation.Transformation):
     """
     def __init__(
         self,
-        f: SimSnap,
+        f: SimSnap | transformation.Transformation,
         boxsize: float | units.UnitBase | None=None,
         convention: Literal["center", "upper"] = "center",
         k_dtype: DTypeLike = np.int8):
