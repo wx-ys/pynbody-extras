@@ -3,33 +3,16 @@ Generic calculation interface for pynbody snapshots.
 """
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
-from typing import Any, Generic, Protocol, TypeAlias, TypeVar  #Protocol need python version >3.8
+from typing import Any, Generic, TypeVar  #Protocol need python version >3.8
 
 import numpy as np
-from numpy.typing import NDArray
-from pynbody import filt as _pyn_filt, units
+from pynbody import units
 from pynbody.array import SimArray
-from pynbody.family import Family
 from pynbody.snapshot import SimSnap
-from pynbody.transformation import Transformation
 
-try:
-    from typing import Self  # type: ignore  # python >= 3.11
-except ImportError:
-    from typing_extensions import Self
-
-
-SingleElementSimArray: TypeAlias = SimArray          # size == 1
-SingleElementNDArray: TypeAlias = NDArray[Any]       # size == 1
+from .util._type import FilterLike, Self, SimCallable, SingleElementArray, TransformLike, UnitLike
 
 ReturnT = TypeVar("ReturnT",covariant=True)
-
-FilterLike: TypeAlias = _pyn_filt.Filter | np.ndarray | Family | slice | int | np.int32 | np.int64
-TransformLike: TypeAlias = Callable[[SimSnap], Transformation]
-
-class SimCallable(Protocol[ReturnT]):
-    def __call__(self, sim: SimSnap, *args: Any, **kwargs: Any) -> ReturnT: ...
 
 class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
     """An abstract base class for performing calculations on particle data."""
@@ -82,7 +65,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
     def _in_sim_units(
         self,
-        value: str | units.UnitBase | float | int | SingleElementSimArray | SingleElementNDArray,
+        value:  UnitLike | float | int | SingleElementArray,
         sim_parameter: str,
         sim: SimSnap,
     ) -> float:
