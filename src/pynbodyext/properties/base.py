@@ -379,45 +379,29 @@ class OpProperty(PropertyBase[Any]):
 
         raise ValueError(f"Unknown op_name {self.op_name}")
 
+    def _expr_stats(self):
+        """Return (num_basic, num_ops, depth) for this expression tree."""
+        def helper(node, depth=1):
+            if isinstance(node, OpProperty):
+                ops = 1
+                basics = 0
+                max_depth = depth
+                for child in node.operands:
+                    b, o, d = helper(child, depth + 1)
+                    basics += b
+                    ops += o
+                    max_depth = max(max_depth, d)
+                return basics, ops, max_depth
+            else:
+                return 1, 0, depth
+        return helper(self)
+
     def __repr__(self) -> str:
-        # Operator symbols for infix display
-        infix = {
-            "add": "+",
-            "sub": "-",
-            "mul": "*",
-            "truediv": "/",
-            "pow": "**",
-            "lt": "<",
-            "le": "<=",
-            "gt": ">",
-            "ge": ">=",
-            "eq": "==",
-            "ne": "!=",
-        }
-        unary = {
-            "neg": "-",
-            "pos": "+",
-            "abs": "abs",
-        }
-        def get_repr(o):
-            if isinstance(o, OpProperty):
-                return repr(o)
-            return o.__class__.__name__
-        # Infix n-ary
-        if self.op_name in ("add", "mul"):
-            op = infix[self.op_name]
-            return f"({op.join(get_repr(o) for o in self.operands)})"
-        # Binary infix
-        if self.op_name in infix and len(self.operands) == 2:
-            left, right = self.operands
-            return f"({get_repr(left)} {infix[self.op_name]} {get_repr(right)})"
-        # Unary
-        if self.op_name in unary:
-            if self.op_name == "abs":
-                return f"abs({get_repr(self.operands[0])})"
-            return f"({unary[self.op_name]}{get_repr(self.operands[0])})"
-        # Fallback: function style
-        return f"{self.op_name}({', '.join(get_repr(o) for o in self.operands)})"
+        num_basic, num_ops, depth = self._expr_stats()
+        return (f"OpProperty(op='{self.op_name}', operands={len(self.operands)}, "
+                f"basic={num_basic}, ops={num_ops}, depth={depth})")
+
+
 class CombinedProperty(CalculatorBase[tuple[Unpack[TProps]]]):
 
     def __init__(self, *props: PropertyBase[Unpack[TProps]]):
@@ -430,6 +414,9 @@ class CombinedProperty(CalculatorBase[tuple[Unpack[TProps]]]):
         if isinstance(other, CombinedProperty):
             return CombinedProperty(*self.props, *other.props)
         return CombinedProperty(*self.props, PropertyBase._as_property(other))
+
+    def __repr__(self) -> str:
+        return f"CombinedProperty({', '.join(repr(p) for p in self.props)})"
 
 # ---------------- Domain-specific leaves ----------------
 
