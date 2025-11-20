@@ -7,6 +7,7 @@ from pynbodyext.calculate import CalculatorBase
 
 from .pynfilt import _And, _Filter, _Not, _Or
 
+__all__ = ["FilterBase", "And", "Or", "Not"]
 
 class FilterBase(CalculatorBase[np.ndarray],_Filter):
     """

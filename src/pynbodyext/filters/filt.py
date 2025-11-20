@@ -21,6 +21,8 @@ from .pynfilt import (
     _Sphere,
 )
 
+__all__ = ["Sphere","FamilyFilter","Cuboid","Disc","Annulus","BandPass","HighPass","LowPass","SolarNeighborhood"]
+
 ValueLike: TypeAlias = float | str | UnitBase
 ValueLikeFunc: TypeAlias = Callable[[SimSnap], ValueLike]
 
@@ -31,7 +33,6 @@ FamilyLike: TypeAlias = Family | str
 FamilyLikeFunc: TypeAlias = Callable[[SimSnap], FamilyLike]
 
 
-__all__ = ["Sphere"]
 class Sphere(FilterBase,_Sphere):
 
     def __init__(self,
