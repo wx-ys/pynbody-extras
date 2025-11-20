@@ -10,7 +10,7 @@ from pynbodyext.properties.generic import AngMomVec
 
 from .base import TransformBase
 
-
+__all__ = ["AlignAngMomVec"]
 class AlignAngMomVec(TransformBase[Rotation]):
     """
     A transformation class to rotate a simulation snapshot such that the angular momentum vector
