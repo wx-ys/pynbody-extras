@@ -154,8 +154,8 @@ class ProfileBase:
 
     @property
     def nbins(self) -> int:
-        """Number of bins (:func:`len` of :attr:`~pynbodyext.profiles.bins.BinsSet.rbins`)."""
-        return len(self._bins.rbins) if self._bins.rbins is not None else 0
+        """Number of bins"""
+        return self._bins.nbins
 
     @property
     def binind(self) -> list[np.ndarray]:
@@ -358,7 +358,9 @@ class ProfileBase:
 
         # FilterLike → subset
         subset = self.sim[key]
-        return self.get_subprofile(subset)
+        if isinstance(subset, SimSnap):
+            return self.get_subprofile(subset)
+        raise ValueError(f"ProfileBase.__getitem__: key type {type(key)} is not supported for indexing. Key: {key!r}")
 
     def __getattr__(self, name: str) -> SubProfile:
         """
@@ -439,7 +441,7 @@ class Profile(ProfileBase):
         bins_by: RegistBinByString | BinByFunc = "r",
         bins_area: RegistBinAreaString | BinsAreaFunc = "spherical_shell",
         bins_type: RegistBinAlgorithmString | BinsAlgorithmFunc = "lin",
-        nbins: int | SimNpPrArray = 100,
+        nbins: int | SimNpArray = 100,
         bin_min: float | None = None,
         bin_max: float | None = None,
         bins_set: BinsSet | None = None,

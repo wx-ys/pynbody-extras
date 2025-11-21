@@ -46,7 +46,7 @@ See Also
 """
 
 from collections.abc import Callable
-from typing import Any, overload
+from typing import Any, cast, overload
 
 import numpy as np
 from pynbody.array import SimArray
@@ -132,7 +132,7 @@ class BinsSet:
         bins_by: RegistBinByString | BinByFunc,
         bins_area: RegistBinAreaString | BinsAreaFunc,
         bins_type: RegistBinAlgorithmString | BinsAlgorithmFunc,
-        nbins: int | np.ndarray | SimArray,
+        nbins: int | SimNpArray,
         bin_min:float | None = None,
         bin_max:float | None = None,
         **kwargs: Any,
@@ -146,13 +146,13 @@ class BinsSet:
         self._kwargs = kwargs
 
         # Computed attributes (populated after __call__)
-        self.x: SimArray | np.ndarray | None = None
-        self.bin_edges: SimArray | np.ndarray | None = None
-        self.rbins: SimArray | np.ndarray | None = None
-        self.dr: SimArray | np.ndarray | None = None
+        self.x: SimNpArray | None = None
+        self.bin_edges: SimNpArray | None = None
+        self.rbins: SimNpArray | None = None
+        self.dr: SimNpArray | None = None
         self.binind: list[np.ndarray] | None = None
         self.npart_bins: np.ndarray | None = None
-        self.binsize: SimArray | np.ndarray | None = None  # area or volume
+        self.binsize: SimNpArray | None = None  # area or volume
 
     def is_defined(self) -> bool:
         """
@@ -166,6 +166,7 @@ class BinsSet:
         return (self.bin_edges is not None
                 and self.rbins is not None
                 and self.dr is not None
+                and self.x is not None
                 and self.binind is not None
                 and self.npart_bins is not None
                 and self.binsize is not None)
@@ -196,7 +197,7 @@ class BinsSet:
             If ``_bins_by`` is neither a callable nor a string.
         """
         if callable(self._bins_by):
-            x = self._bins_by(sim)
+            x: SimNpArray = self._bins_by(sim)
         elif isinstance(self._bins_by, str):
             try:
                 x = self._bins_by_registry[self._bins_by](sim)
@@ -209,7 +210,7 @@ class BinsSet:
             )
         return x
 
-    def _coerce_edges_units(self, edges: np.ndarray, x: SimNpArray) -> SimNpArray:
+    def _coerce_edges_units(self, edges: SimNpArray, x: SimNpArray) -> SimNpArray:
         """
         Attach units and simulation reference to edges if ``x`` is a :class:`~pynbody.array.SimArray`.
 
@@ -226,7 +227,7 @@ class BinsSet:
             Either the original edges array or a :class:`~pynbody.array.SimArray` clone
             with units/sim copied.
         """
-        if isinstance(x, SimArray):
+        if isinstance(x, SimArray) and not isinstance(edges, SimArray):
             out = SimArray(edges)
             out.units = x.units
             out.sim = x.sim
@@ -341,11 +342,17 @@ class BinsSet:
         npart_bins : :class:`~numpy.ndarray`
             Number of particles per bin.
         """
-        partbin = np.digitize(np.asarray(x), np.asarray(bin_edges), right=True) - 1
+        arr_x = np.asarray(x)
+        arr_edges = np.asarray(bin_edges)
+        partbin = np.digitize(arr_x, arr_edges, right=True) - 1
         nbins = len(bin_edges) - 1
         if nbins <= 0:
             return [], np.array([], dtype=int)
 
+        # Correct assignment of extrema affected by floating-point rounding errors
+        xmin, xmax = arr_edges[0], arr_edges[-1]
+        partbin[arr_x == xmin] = 0
+        partbin[arr_x == xmax] = nbins - 1
 
         # keep only values that fell into a valid bin
         valid_mask = (partbin >= 0) & (partbin < nbins)
@@ -434,17 +441,20 @@ class BinsSet:
         Create a new :class:`~pynbodyext.profiles.bins.BinsSet` for ``sim``, reusing
         the already-computed edges/centers/widths, and recomputing bin assignments.
         """
+        if not self.is_defined():
+            raise ValueError("Cannot spawn with same edges: parent BinsSet is not materialized. "
+                             "Call the instance with a simulation first.")
         child = BinsSet(
             bins_by=self._bins_by,
             bins_area=self._bins_area,
             bins_type=self._bins_type,
-            nbins=self.bin_edges,   # explicit edges
+            nbins=cast("SimNpArray", self.bin_edges),   # explicit edges
             bin_min=self._bin_min,
             bin_max=self._bin_max,
             **self._kwargs
         )
         child.x = child._resolve_x(sim)
-        child.bin_edges = self.bin_edges
+        child.bin_edges = cast("SimNpArray", self.bin_edges)
         child.rbins = self.rbins
         child.dr = self.dr
         child.binind, child.npart_bins = child._assign_particles(child.x, child.bin_edges)
@@ -459,12 +469,28 @@ class BinsSet:
             "bins_type": list(cls._bins_algorithm_registry.keys()),
         }
 
+    @property
+    def nbins(self) -> int:
+        if isinstance(self._nbins, (int,np.integer)):
+            return int(self._nbins)
+        else:
+            return len(self._nbins)-1
+
     def __repr__(self)->str:
-        return (
-            f"BinsSet(bins_by={self._bins_by}, bins_area={self._bins_area}, "
-            f"bins_type={self._bins_type}, nbins={self._nbins}, "
-            f"bin_min={self._bin_min}, bin_max={self._bin_max})"
-        )
+        if self.is_defined():
+            x_len = len(self.x) if self.x is not None else "None"
+            return (
+                f"BinsSet(materialized: bins_by={self._bins_by}, bins_area={self._bins_area}, "
+                f"bins_type={self._bins_type}, nbins={self.nbins}, "
+                f"bin_min={self._bin_min}, bin_max={self._bin_max}, "
+                f"x len={x_len}, "
+            )
+        else:
+            return (
+                f"BinsSet(config: bins_by={self._bins_by}, bins_area={self._bins_area}, "
+                f"bins_type={self._bins_type}, nbins={self._nbins}, "
+                f"bin_min={self._bin_min}, bin_max={self._bin_max})"
+            )
 
 
     # ------------------- registry helpers ---------------------------------#
@@ -647,9 +673,9 @@ def linear_bins_algorithm(
     Uses ``self._bin_min`` / ``self._bin_max`` when provided, else the min/max of ``x``.
     Returns an array of length ``nbins + 1``.
     """
-    nbins = int(self._nbins)
-    xmin = float(np.min(x)) if self._bin_min is None else self._bin_min
-    xmax = float(np.max(x)) if self._bin_max is None else self._bin_max
+    nbins = self.nbins
+    xmin = np.min(x) if self._bin_min is None else self._bin_min
+    xmax = np.max(x) if self._bin_max is None else self._bin_max
     return np.linspace(xmin, xmax, nbins + 1)
 
 @BinsSet.bins_algorithm_register(name="log")
@@ -661,9 +687,9 @@ def logarithmic_bins_algorithm(
 
     Requires strictly positive lower bound. Returns an array of length ``nbins + 1``.
     """
-    nbins = int(self._nbins)
-    xmin = float(np.min(x)) if self._bin_min is None else self._bin_min
-    xmax = float(np.max(x)) if self._bin_max is None else self._bin_max
+    nbins = self.nbins
+    xmin = np.min(x) if self._bin_min is None else self._bin_min
+    xmax = np.max(x) if self._bin_max is None else self._bin_max
     if xmin <= 0:
         raise ValueError("Logarithmic bins require xmin to be non-negative")
     return np.logspace(np.log10(xmin), np.log10(xmax), nbins + 1)
@@ -677,7 +703,7 @@ def equal_number_bins_algorithm(
 
     Typically implemented via quantiles of ``x``. Returns an array of length ``nbins + 1``.
     """
-    nbins = int(self._nbins)
+    nbins = self.nbins
 
     sorted_x = np.sort(x)
     if sorted_x.size == 0:
