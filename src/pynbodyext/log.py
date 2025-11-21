@@ -15,6 +15,12 @@ class DuplicateFilter(logging.Filter):
             return True
         return False
 
+class BlankLineFormatter(logging.Formatter):
+    def format(self, record):
+        if record.msg == "" and not record.args:
+            return ""
+        return super().format(record)
+
 ufstring = "%(name)-3s: [%(levelname)-9s] %(asctime)s %(message)s"
 cfstring = "%(name)-3s: [%(levelname)-18s] %(asctime)s %(message)s"
 
@@ -22,7 +28,7 @@ cfstring = "%(name)-3s: [%(levelname)-18s] %(asctime)s %(message)s"
 logger.setLevel(logging.INFO)
 logger.addFilter(DuplicateFilter())
 
-f = logging.Formatter(ufstring)
+f = BlankLineFormatter(ufstring)
 
 def stream_handler():
     handler = logging.StreamHandler(sys.stdout)

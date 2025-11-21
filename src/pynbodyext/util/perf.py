@@ -345,7 +345,7 @@ class PerfStats(StatsTool):
             self.steps.append((name, info))
 
 
-    def report(self, logger: logging.Logger | None = None) -> str:
+    def report(self, logger: logging.Logger | None = None, title: str = "") -> str:
         """
         Print or log a report of profiling statistics.
 
@@ -359,7 +359,8 @@ class PerfStats(StatsTool):
         header = (
             f"{'Step':<15} | {'Time':>12} | {'Mem Used':>15} | {'Peak Mem':>15}"
         )
-        lines = ["-" * len(header), header, "-" * len(header)]
+        lines = [title] if title else []
+        lines.extend(["-" * len(header), header, "-" * len(header)])
 
         for name, info in self.steps:
             time_str = self._format_time(info.time)

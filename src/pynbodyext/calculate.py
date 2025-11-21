@@ -268,8 +268,9 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
     def __call__(self, sim: SimSnap) -> ReturnT:
         """Executes the calculation on a given simulation snapshot."""
-
-        logger.debug(f"[{self}] Starting: {sim}")
+        logger.debug("")
+        title = repr(self) + " : " + repr(sim)
+        #logger.debug(f"[{self}] Starting: {sim}")
 
         with self._perf_stats as stats:
             # pre-transform
@@ -283,8 +284,8 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
             # calculate
             result = self._do_calculate(sim, trans_obj, stats)
         # stats
-        self._perf_stats.report(logger)
-        logger.debug(f"[{self}] Finished: {sim} \n")
+        #logger.debug(f"[{self}] Finished: {sim}")
+        self._perf_stats.report(logger,title=title)
         return result
 
     @abstractmethod
