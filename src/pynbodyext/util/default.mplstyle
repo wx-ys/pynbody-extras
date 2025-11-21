@@ -20,7 +20,7 @@ xtick.minor.width: 0.5
 
 
 
-# ytick.right: True
+ytick.right: True
 ytick.direction: in
 ytick.minor.visible: True
 
