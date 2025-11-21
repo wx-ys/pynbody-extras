@@ -126,7 +126,8 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
             _EVAL_SIM_TOKEN.set(None)
 
         return result
-
+    def children(self) -> list[CalculatorBase[Any]]:
+        return super().children()
 
     # ----- signature for caching -----
     def signature(self) -> tuple:
@@ -324,6 +325,14 @@ class OpProperty(PropertyBase[Any]):
         return ("Op",
                 self.op_name,
                 tuple(child.signature() for child in self.operands))
+
+    def children(self) -> list[CalculatorBase[Any]]:
+        # For structure tree: operands + parent's filter/transformation
+        return [*self.operands, *super().children()]
+
+    def calculate_children(self) -> list[CalculatorBase[Any]]:
+        # In semantic flow, under "3) calculate", show expression operands
+        return list(self.operands)
 
     def calculate(self, sim: SimSnap) -> Any:
         # Evaluate operands; thanks to evaluation wrapper + signatures, identical subtrees
