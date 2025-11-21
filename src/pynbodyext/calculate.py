@@ -3,8 +3,12 @@ Generic calculation interface for pynbody snapshots.
 """
 from __future__ import annotations
 
-import time
+import itertools
+import json
+import os
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 
 import numpy as np
@@ -12,6 +16,7 @@ from pynbody import units
 from pynbody.array import SimArray
 
 from pynbodyext.log import logger
+from pynbodyext.util.perf import PerfStats
 
 from .util._type import (
     FilterLike,
@@ -25,6 +30,8 @@ from .util._type import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from pynbody.snapshot import SimSnap
     from pynbody.transformation import Transformation
 
@@ -36,13 +43,74 @@ Us = TypeVarTuple("Us")
 U = TypeVar("U")
 T = TypeVar("T")
 
+# --- runtime trace context (run-level id + call path) ---
+_CALC_PATH: ContextVar[tuple[str, ...]] = ContextVar("_CALC_PATH", default=())
+_CALC_RUN_ID: ContextVar[int | None] = ContextVar("_CALC_RUN_ID", default=None)
+_RUN_COUNTER = itertools.count(1)
+_TRACE_JSON = bool(int(os.getenv("PYNBODYEXT_TRACE_JSON", "0")))
+
+def _node_label(node: Any) -> str:
+    # Prefer an explicit `.name` if provided, fall back to class name
+    return getattr(node, "name", node.__class__.__name__)
+
+@contextmanager
+def _trace_phase(node: Any, phase: str) -> Iterator[None]:
+    """
+    Push node into the calc-path, log enter/leave with run-id and full path.
+    If PYNBODYEXT_TRACE_JSON=1, also emit JSON lines for machine parsing.
+    """
+    path = _CALC_PATH.get()
+    run_id = _CALC_RUN_ID.get()
+    owner = False
+    if run_id is None:
+        run_id = next(_RUN_COUNTER)
+        _CALC_RUN_ID.set(run_id)
+        owner = True
+
+    new_path = (*path, _node_label(node))
+    token = _CALC_PATH.set(new_path)
+    prefix = f"calc#{run_id} {' > '.join(new_path)}"
+
+    if _TRACE_JSON:
+        logger.debug("TRACE %s", json.dumps({
+            "event": "enter",
+            "run": run_id,
+            "phase": phase,
+            "node": _node_label(node),
+            "class": node.__class__.__name__,
+            "id": id(node),
+            "depth": len(new_path)-1
+        }, ensure_ascii=False))
+    else:
+        logger.debug("%s | enter: %s", prefix, phase)
+
+    try:
+        yield
+    finally:
+        if _TRACE_JSON:
+            logger.debug("TRACE %s", json.dumps({
+                "event": "leave",
+                "run": run_id,
+                "phase": phase,
+                "node": _node_label(node),
+                "class": node.__class__.__name__,
+                "id": id(node),
+                "depth": len(new_path)-1
+            }, ensure_ascii=False))
+        else:
+            logger.debug("%s | leave: %s", prefix, phase)
+
+        _CALC_PATH.reset(token)
+        if owner:
+            _CALC_RUN_ID.set(None)
+
 class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
     """An abstract base class for performing calculations on particle data."""
 
     _filter: FilterLike | None
     _transformation: TransformLike | None
     _revert_transformation: bool
-    _time_enabled: bool
+    _perf_stats: PerfStats
 
     def __new__(cls: type[Self], *args: Any, **kwargs: Any) -> Self:
         # initialize per-instance filter and transformation settings
@@ -50,95 +118,173 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         self._filter = None
         self._transformation = None
         self._revert_transformation = True
-        self._time_enabled = False
+        self._perf_stats = PerfStats(time=False, memory=False)
         return self
 
-    def _do_pre_transform(self, sim: SimSnap) -> tuple[float | None, Transformation | None]:
-        t_pre_transform = None
-        trans_obj = None
-        if self._transformation is not None:
-            t_pre_transform_start = time.perf_counter()
-            try:
-                logger.debug(f"[{self}] transformation: {self._transformation}")
-                trans_obj = self._transformation(sim)
-            except Exception as e:
-                logger.error(f"Error applying pre-transformation: {e}, when calculating {self}")
-                raise RuntimeError(f"Error applying pre-transformation {self._transformation}") from e
-            t_pre_transform = time.perf_counter() - t_pre_transform_start
-        return t_pre_transform, trans_obj
+    # Calculation phase "child calculation" hook: default is none, subclasses may override
+    def calculate_children(self) -> list[CalculatorBase[Any]]:
+        return []
 
-    def _do_pre_filter(self, sim: SimSnap) -> tuple[float | None, SimSnap]:
-        t_filter = None
-        if self._filter is not None:
-            t_filter_start = time.perf_counter()
-            try:
-                logger.debug(f"[{self}] filter: {self._filter}")
-                sim = sim[self._filter]
-            except Exception as e:
-                logger.error(f"Error applying pre-filter: {e}, when calculating {self}")
-                raise RuntimeError(f"Error applying pre-filter {self._filter}") from e
-            t_filter = time.perf_counter() - t_filter_start
-        return t_filter, sim
+    def format_flow(self, indent: int = 0, short: bool = True) -> str:
+        """
+        Semantic flow rendering:
+        Node
+        ├─ 1) transform: <transform-node-or-repr>
+        ├─ 2) filter:    <filter-node-or-repr>
+        └─ 3) calculate:
+             └─ <child-calculation(s)...>
+        Note: If transform/filter is CalculatorBase, recursively expand with format_flow.
+        """
+        pad = "  " * indent
+        lines: list[str] = []
+        title = f"{pad}{_node_label(self)}"
+        lines.append(title)
 
-    def _time_stats(
-        self,
-        t_pre_transform: float | None,
-        t_filter: float | None,
-        t_cal: float,
-        t_revert: float | None,
-        t_total: float
-        ) -> None:
-        stats_lines = []
-        if t_pre_transform is not None:
-            stats_lines.append(f"pre_transform : {t_pre_transform:.3f}s")
-        if t_filter is not None:
-            stats_lines.append(f"filter : {t_filter:.3f}s")
-        stats_lines.append(f"calculate : {t_cal:.3f}s")
-        if t_revert is not None:
-            stats_lines.append(f"revert : {t_revert:.3f}s")
+        # 1) transform
+        if getattr(self, "_transformation", None) is not None:
+            tobj = self._transformation
+            if isinstance(tobj, CalculatorBase):
+                lines.append(f"{pad}├─ 1) transform:")
+                lines.append(tobj.format_flow(indent + 2, short=short))
+            else:
+                lines.append(f"{pad}├─ 1) transform: {repr(tobj)}")
+        elif not short:
+            lines.append(f"{pad}├─ 1) transform: <none>")
 
-        stats_table = " | ".join(stats_lines)
+        # 2) filter
+        if getattr(self, "_filter", None) is not None:
+            fobj = self._filter
+            if isinstance(fobj, CalculatorBase):
+                lines.append(f"{pad}├─ 2) filter:")
+                lines.append(fobj.format_flow(indent + 2))
+            else:
+                lines.append(f"{pad}├─ 2) filter: {repr(fobj)}")
+        elif not short:
+            lines.append(f"{pad}├─ 2) filter: <none>")
 
-        if self._time_enabled:
-            old_level = logger.level
-            logger.setLevel(20)
-            logger.info(f"[{self}] \n Total : {t_total:.3f}s  <| {stats_table} |>")
-            logger.setLevel(old_level)
+        # 3) calculate
+        kids = self.calculate_children()
+        if kids:
+            lines.append(f"{pad}└─ 3) calculate:")
+            last = len(kids) - 1
+            for i, ch in enumerate(kids):
+                # Child calculation also uses format_flow (they may have their own three steps)
+                rendered = ch.format_flow(indent + 2)
+                # Visual alignment: add a branch line before the first child block
+                if i < last:
+                    # Middle block
+                    lines.append(f"{pad}   ├─")
+                else:
+                    # Last block
+                    lines.append(f"{pad}   └─")
+                lines.append(rendered)
         else:
-            logger.debug(f"[{self}] \n Total : {t_total:.3f}s  <| {stats_table} |>")
+            lines.append(f"{pad}└─ 3) calculate: {self.__class__.__name__}")
+
+        return "\n".join(lines)
+
+    # children hook for tree formatting and optional traversal
+    def children(self) -> list[CalculatorBase[Any]]:
+        kids: list[CalculatorBase[Any]] = []
+        if isinstance(getattr(self, "_filter", None), CalculatorBase):
+            kids.append(self._filter)   # type: ignore[arg-type]
+        if isinstance(getattr(self, "_transformation", None), CalculatorBase):
+            kids.append(self._transformation)  # type: ignore[arg-type]
+        return kids
+
+    def format_tree(self, indent: int = 0) -> str:
+        """
+        Pretty-print the calculator tree using children() to discover subnodes.
+        Falls back to showing filter/transformation if they don't support children().
+        """
+        # box-drawing ASCII
+        def render(node: CalculatorBase[Any], prefix: str, is_last: bool) -> list[str]:
+            branch = "└─" if is_last else "├─"
+            name = _node_label(node)
+            line = f"{prefix}{branch} {name}"
+            out = [line]
+            new_prefix = f"{prefix}{'  ' if is_last else '│ '}"
+            # Use children() to traverse deeper
+            kids = []
+            if hasattr(node, "children"):
+                try:
+                    kids = list(node.children())
+                except Exception:
+                    kids = []
+            # For non-Calculator filter/transformation, still display a one-liner
+            fobj = getattr(node, "_filter", None)
+            tobj = getattr(node, "_transformation", None)
+            if fobj is not None and not isinstance(fobj, CalculatorBase):
+                out.append(f"{new_prefix}├─ filter: {repr(fobj)}")
+            if tobj is not None and not isinstance(tobj, CalculatorBase):
+                out.append(f"{new_prefix}├─ transformation: {repr(tobj)}")
+            # Recurse into calculator-like children
+            for i, ch in enumerate(kids):
+                out.extend(render(ch, new_prefix, i == len(kids)-1))
+            return out
+
+        lines = render(self, "" if indent == 0 else "  " * indent, True)
+        return "\n".join(lines)
+
+
+    def _do_pre_transform(self, sim: SimSnap) -> Transformation | None:
+        if self._transformation is not None:
+
+            with _trace_phase(self, "transform"):
+                try:
+                    logger.debug(f"[{self}] transformation: {self._transformation}")
+                    trans_obj = self._transformation(sim)
+                except Exception as e:
+                    logger.error(f"Error applying pre-transformation: {e}, when calculating {self}")
+                    raise RuntimeError(f"Error applying pre-transformation {self._transformation}") from e
+                return trans_obj
+        return None
+
+    def _do_pre_filter(self, sim: SimSnap) -> SimSnap:
+        if self._filter is not None:
+            with _trace_phase(self, "filter"):
+                try:
+                    logger.debug(f"[{self}] filter: {self._filter}")
+                    sim = sim[self._filter]
+                except Exception as e:
+                    logger.error(f"Error applying pre-filter: {e}, when calculating {self}")
+                    raise RuntimeError(f"Error applying pre-filter {self._filter}") from e
+        return sim
+
+    def _do_calculate(self, sim: SimSnap, trans_obj: Transformation | None, stats: PerfStats) -> ReturnT:
+        try:
+            with _trace_phase(self, "calculate"):
+                with stats.step("calculate"):
+                    logger.debug(f"[{self}] performing calculation ...")
+                    result = self.calculate(sim)
+        finally:
+            if trans_obj is not None and self._revert_transformation:
+                with _trace_phase(self, "revert"):
+                    with stats.step("revert"):
+                        logger.debug(f"[{self}] reverting transformation: {self._transformation}")
+                        trans_obj.revert()
+        return result
+
 
     def __call__(self, sim: SimSnap) -> ReturnT:
         """Executes the calculation on a given simulation snapshot."""
 
         logger.debug(f"[{self}] Starting: {sim}")
-        t0 = time.perf_counter()
-        trans_obj = None
 
-        # pre-transform
-        t_pre_transform, trans_obj = self._do_pre_transform(sim)
+        with self._perf_stats as stats:
+            # pre-transform
+            with stats.step("transform"):
+                trans_obj = self._do_pre_transform(sim)
 
-        # filter
-        t_filter, sim = self._do_pre_filter(sim)
+            # filter
+            with stats.step("filter"):
+                sim = self._do_pre_filter(sim)
 
-        # calculate
-        t_cal_start = time.perf_counter()
-        try:
-            logger.debug(f"[{self}] calculating ...")
-            result = self.calculate(sim)
-        finally:
-            t_cal = time.perf_counter() - t_cal_start
-            # revert
-            t_revert = None
-            if trans_obj is not None and self._revert_transformation:
-                t_revert_start = time.perf_counter()
-                logger.debug(f"[{self}] reverting transformation: {self._transformation}")
-                trans_obj.revert()
-                t_revert = time.perf_counter() - t_revert_start
-
-        t_total = time.perf_counter() - t0
-
+            # calculate
+            result = self._do_calculate(sim, trans_obj, stats)
         # stats
-        self._time_stats(t_pre_transform, t_filter, t_cal, t_revert, t_total)
+        self._perf_stats.report(logger)
+        logger.debug(f"[{self}] Finished: {sim} \n")
         return result
 
     @abstractmethod
@@ -147,9 +293,10 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
             f"{self.__class__.__name__} must implement calculate"
         )
 
-    def enable_timing(self: Self, enabled: bool = True) -> Self:
-        """Enable or disable timing for this calculator."""
-        self._time_enabled = enabled
+    def enable_perf(self: Self, time: bool = True, memory: bool = True) -> Self:
+        """Enable or disable timing and memory profiling for this calculator."""
+        self._perf_stats.time_enabled = time
+        self._perf_stats.memory_enabled = memory
         return self
 
     def with_filter(self: Self, filt: FilterLike) -> Self:
@@ -241,6 +388,14 @@ class CombinedCalculator(CalculatorBase[tuple[Unpack[Ts]]], Generic[Unpack[Ts]])
 
     def calculate(self, sim: SimSnap) -> tuple[Unpack[Ts]]:
         return tuple(p(sim) for p in self.props)
+
+    def children(self) -> list[CalculatorBase[Any]]:
+        # Expand own props and also keep parent filter/transformation expansion
+        return [*self.props, *super().children()]
+
+    def calculate_children(self) -> list[CalculatorBase[Any]]:
+        # Expand all child calculations under "3) calculate"
+        return list(self.props)
 
     @overload   # type: ignore
     def __and__(self: CombinedCalculator[Unpack[Ts]],
