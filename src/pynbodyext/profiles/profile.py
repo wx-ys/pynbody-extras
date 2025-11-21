@@ -30,6 +30,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     import numpy as np
+    from matplotlib.axes import Axes
+    from matplotlib.lines import Line2D
 
     from pynbodyext.util._type import (
         BinByFunc,
@@ -317,6 +319,27 @@ class ProfileBase:
         base_arr = ProfileArray(self, name=key, mode="mean")
         self._stats_cache[key][cast("str", base_arr._mode)] = base_arr
         return base_arr
+
+    def plot(self, y: str, x: str = "rbins", ax: Axes | None = None,
+             set_label: bool = True, y_name: str | None = None,x_name: str | None = None,
+             **kwargs: Any) -> list[Line2D]:
+        import matplotlib.pyplot as plt
+        xdata = self[x]
+        ydata = self[y]
+        with plt.style.context("pynbodyext.util.default"):
+            if ax is None:
+                _, ax = plt.subplots()
+
+            line = ax.plot(xdata, ydata, **kwargs)
+            xlabel = x if x_name is None else x_name
+            ylabel = y if y_name is None else y_name
+            if set_label:
+                xlabel += xdata.units_latex()
+                ylabel += ydata.units_latex()
+                ax.set_xlabel(xlabel)
+                ax.set_ylabel(ylabel)
+            return line
+
 
 
     def get_subprofile(self, subset: SimSnap) -> SubProfile:

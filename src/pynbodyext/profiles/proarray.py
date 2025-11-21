@@ -462,6 +462,20 @@ class ProfileArray(SimArray):
                     key.append(i.example_name)
         return key
 
+    def units_latex(self) -> str:
+        """
+        Return a latex representing the units of the array, if available.
+
+        Returns
+        -------
+        str or None
+            The units label or None if not applicable.
+        """
+        la = self.units.latex()
+        if la is not None:
+            return f" [${la}$]"
+        return ""
+
     def _ipython_key_completions_(self) -> list[str]:
         return self.keys()
 
