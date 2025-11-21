@@ -1,0 +1,44 @@
+# A combined default style based on SciencePlots and yt plot styles
+# basic usage (requires matplotlib 3.7+)
+# >>> import matplotlib.pyplot as plt
+# >>> plt.style.use("pynbodyext.util.default")
+
+
+
+figure.dpi: 150.0
+figure.figsize: 4, 3
+
+xtick.top: True
+xtick.direction: in
+xtick.minor.visible: True
+
+xtick.major.size: 3
+xtick.major.width: 0.5
+
+xtick.minor.size: 1.5
+xtick.minor.width: 0.5
+
+
+
+# ytick.right: True
+ytick.direction: in
+ytick.minor.visible: True
+
+ytick.major.size: 3
+ytick.major.width: 0.5
+ytick.minor.size: 1.5
+ytick.minor.width: 0.5
+
+
+axes.linewidth: 0.5
+grid.linewidth: 0.5
+lines.linewidth: 1.0
+savefig.bbox: tight
+savefig.pad_inches: 0.05
+
+
+
+font.family: stixgeneral
+
+mathtext.fontset: cm
+
