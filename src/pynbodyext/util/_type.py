@@ -121,10 +121,22 @@ def get_signature_safe(obj: object, *, fallback_to_id: bool = True) -> object | 
     - If calling raises, return ("id", id(obj)) when fallback_to_id True, else return None.
     - If obj has no signature(), return None or id fallback.
     """
-    sig_fn = getattr(obj, "signature", None)
-    if not callable(sig_fn):
-        return ("id", id(obj)) if fallback_to_id else None
+    # None -> None (no signature)
+    if obj is None:
+        return None
+
+    # Immutable built-ins: return as-is (value semantics)
+    if isinstance(obj, (str, bytes, bool, int, float)):
+        return obj
+
     try:
-        return sig_fn()
+        if isinstance(obj, np.generic):
+            return obj.item()
+
+        sig_fn = getattr(obj, "signature", None)
+        if callable(sig_fn):
+            return sig_fn()
+
     except Exception:
         return ("id", id(obj)) if fallback_to_id else None
+    return ("id", id(obj)) if fallback_to_id else None
