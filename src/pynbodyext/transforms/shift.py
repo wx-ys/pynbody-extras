@@ -7,7 +7,7 @@ from pynbody.snapshot import SimSnap
 from pynbody.transformation import GenericTranslation, Transformation
 
 from pynbodyext.properties import CenPos, CenVel
-from pynbodyext.util._type import SimNpArray, SimNpArrayFunc
+from pynbodyext.util._type import SimNpArray, SimNpArrayFunc, get_signature_safe
 
 from .base import TransformBase
 
@@ -25,6 +25,11 @@ class PosToCenter(TransformBase[GenericTranslation]):
 
         self.mode = mode
         self.move_all = move_all
+
+    def instance_signature(self):
+        mode_sig = get_signature_safe(self.mode, fallback_to_id=True)
+        move_all_sig = get_signature_safe(self.move_all, fallback_to_id=True)
+        return (self.__class__.__name__, mode_sig, move_all_sig)
 
     def calculate(self, sim: SimSnap, previous: Transformation | None = None) -> GenericTranslation:
 
@@ -57,6 +62,11 @@ class VelToCenter(TransformBase[GenericTranslation]):
     def __init__(self,mode: Literal["com"] | SimNpArrayFunc | SimNpArray = "com", move_all: bool = True):
         self.mode = mode
         self.move_all = move_all
+
+    def instance_signature(self):
+        mode_sig = get_signature_safe(self.mode, fallback_to_id=True)
+        move_all_sig = get_signature_safe(self.move_all, fallback_to_id=True)
+        return (self.__class__.__name__, mode_sig, move_all_sig)
 
     def calculate(self, sim: SimSnap, previous: Transformation | None = None) -> GenericTranslation:
         if isinstance(self.mode, str):

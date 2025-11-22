@@ -7,6 +7,7 @@ from pynbody.snapshot.simsnap import SimSnap
 from pynbody.transformation import Rotation, Transformation
 
 from pynbodyext.properties.generic import AngMomVec
+from pynbodyext.util._type import get_signature_safe
 
 from .base import TransformBase
 
@@ -32,6 +33,11 @@ class AlignAngMomVec(TransformBase[Rotation]):
             up = [0, 1., 0]
         self.up = up
         self.move_all = move_all
+
+    def instance_signature(self):
+        up_sig = get_signature_safe(self.up, fallback_to_id=True)
+        move_all_sig = get_signature_safe(self.move_all, fallback_to_id=True)
+        return (self.__class__.__name__, up_sig, move_all_sig)
 
     def calculate(self, sim: SimSnap, previous: Transformation | None = None) -> Rotation:
         """

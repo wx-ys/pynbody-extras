@@ -9,6 +9,8 @@ from pynbody import transformation, units
 from pynbody.array import SimArray
 from pynbody.snapshot import SimSnap
 
+from pynbodyext.util._type import get_signature_safe
+
 from .base import TransformBase
 
 __all__ = ["WrapBox"]
@@ -216,6 +218,12 @@ class WrapBox(TransformBase[WrapTransformation]):
         self.boxsize = boxsize
         self.convention = convention
         self.move_all = move_all
+
+    def instance_signature(self):
+        boxsize_sig = get_signature_safe(self.boxsize, fallback_to_id=True)
+        convention_sig = get_signature_safe(self.convention, fallback_to_id=True)
+        move_all_sig = get_signature_safe(self.move_all, fallback_to_id=True)
+        return (self.__class__.__name__, boxsize_sig, convention_sig, move_all_sig)
 
     def calculate(self, sim: SimSnap, previous: transformation.Transformation | None = None) -> WrapTransformation:
         """
