@@ -1,7 +1,7 @@
 """ Some type utilities for pynbodyext """
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal, Protocol, Self, TypeAlias, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Literal, Protocol, Self, TypeAlias, TypeVar, Union, runtime_checkable
 
 #Protocol need python version >3.8
 import numpy as np
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 __all__ = ["Self","TypeVarTuple","Unpack"]
 
 
-__all__ += ["UnitLike","SingleElementArray","SimNpArray","FilterLike","TransformLike","SimCallable","SimNpArrayFunc"]
+__all__ += ["UnitLike","SingleElementArray","SimNpArray","FilterLike","TransformLike","SimCallable","SimNpArrayFunc","SignatureProvider"]
 # ---------------- General---------------------------------
 
 # can be convert to Unit
@@ -59,7 +59,13 @@ class SimCallable(Protocol[_ReturnT]):
 SimNpArrayFunc: TypeAlias = SimCallable[SimNpArray]
 """A type alias representing a callable that takes a simulation snapshot and returns a simulation or numpy array."""
 
-
+@runtime_checkable
+class SignatureProvider(Protocol):
+    """
+    Duck-typed protocol: any object with a callable .signature() matches this.
+    Use runtime_checkable so isinstance(obj, SignatureProvider) works.
+    """
+    def signature(self) -> object: ...
 
 
 
@@ -92,3 +98,33 @@ SimNpPrArrayFunc: TypeAlias = SimCallable[SimNpPrArray]
 
 ProfileType = TypeVar("ProfileType", bound = "ProfileBase")
 SimNpPrArrayPrFunc: TypeAlias = Callable[[ProfileType], SimNpPrArray]
+
+
+
+__all__ += ["has_signature","get_signature_safe"]
+# ---------------helpful functions---------------------
+
+def has_signature(obj: object) -> bool:
+    """
+    Return True if obj appears to provide a signature() call.
+    Uses runtime Protocol check or presence of a callable attribute.
+    """
+    if isinstance(obj, SignatureProvider):
+        return True
+    # fallback: attribute exists and is callable
+    return callable(getattr(obj, "signature", None))
+
+def get_signature_safe(obj: object, *, fallback_to_id: bool = True) -> object | None:
+    """
+    Try to obtain obj.signature() in a safe way.
+    - If obj has a signature() callable, call it and return the result.
+    - If calling raises, return ("id", id(obj)) when fallback_to_id True, else return None.
+    - If obj has no signature(), return None or id fallback.
+    """
+    sig_fn = getattr(obj, "signature", None)
+    if not callable(sig_fn):
+        return ("id", id(obj)) if fallback_to_id else None
+    try:
+        return sig_fn()
+    except Exception:
+        return ("id", id(obj)) if fallback_to_id else None
