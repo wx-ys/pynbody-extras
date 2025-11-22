@@ -4,10 +4,9 @@ module for property calculations.
 """
 
 
-from .base import ParameterContain, ParamSum, PropertyBase, eval_cache
+from .base import ParameterContain, ParamSum, PropertyBase
 
 __all__ = [
-    "eval_cache",
     "PropertyBase",
     "ParamSum",
     "ParameterContain",

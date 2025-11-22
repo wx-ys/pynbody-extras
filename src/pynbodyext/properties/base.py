@@ -2,9 +2,7 @@
 
 
 import operator
-from collections.abc import Callable, Generator, Sequence
-from contextlib import contextmanager
-from contextvars import ContextVar
+from collections.abc import Callable, Sequence
 from typing import Any, Generic, TypeVar, Union
 
 import numpy as np
@@ -12,33 +10,18 @@ from pynbody.array import SimArray
 from pynbody.snapshot import SimSnap
 
 from pynbodyext.calculate import CalculatorBase
+from pynbodyext.util._type import get_signature_safe
 
 __all__ = ["PropertyBase", "ConstantProperty", "LambdaProperty", "OpProperty",
-           "ParamSum", "ParameterContain", "eval_cache"]
+           "ParamSum", "ParameterContain",]
 
 
-# Ephemeral per-top-level-call evaluation cache (sim-local, auto-cleared)
-_EVAL_CTX: ContextVar[dict[tuple[int, tuple[Any, ...]], Any] | None] = ContextVar("_EVAL_CTX", default=None)
-_EVAL_SIM_TOKEN: ContextVar[int | None] = ContextVar("_EVAL_SIM_TOKEN", default=None)
 
 
 TProp = TypeVar("TProp", bound=SimArray | float | np.ndarray | int | tuple | bool, covariant=True)
 
 Addable = Union[ SimArray, float, np.ndarray, int, "PropertyBase[TProp]"]
 
-
-@contextmanager
-def eval_cache(sim: SimSnap) -> Generator[None, None, None]:
-    """Manage a temporary evaluation cache for multiple top-level calls."""
-    prev_ctx = _EVAL_CTX.get()
-    prev_tok = _EVAL_SIM_TOKEN.get()
-    try:
-        _EVAL_CTX.set({})
-        _EVAL_SIM_TOKEN.set(id(sim))
-        yield
-    finally:
-        _EVAL_CTX.set(prev_ctx)
-        _EVAL_SIM_TOKEN.set(prev_tok)
 
 # ---------------- Utility helpers ----------------
 
@@ -57,35 +40,6 @@ def _extract_numeric(x: Any) -> float | np.ndarray | Any:
         return x.item()
     return x
 
-def _canon(value: Any) -> Any:
-    """
-    Canonicalize a value to a hashable, lightweight representation for signature.
-    - Numbers/bools/str: keep (cast numpy scalars to Python scalars).
-    - PropertyBase: use its signature.
-    - np.ndarray / SimArray: use object id to avoid heavy hashing.
-    - Sequences: tuple of canonicalized items.
-    - Dicts: sorted items, canonicalized.
-    - Callables: ("CALLABLE", id(func)).
-    - Others: ("ID", id(obj)).
-    """
-    result: Any
-    if isinstance(value, np.generic):
-        result = value.item()
-    elif isinstance(value, (int, float, bool, str)):
-        result = value
-    elif isinstance(value, PropertyBase):
-        result = ("PROP", value.signature())
-    elif isinstance(value, (np.ndarray, SimArray)):
-        result = ("ARR", id(value))
-    elif isinstance(value, (list, tuple)):        # type: ignore
-        result = tuple(_canon(v) for v in value)
-    elif isinstance(value, dict):
-        result = ("DICT", tuple(sorted((k, _canon(v)) for k, v in value.items())))
-    elif callable(value):
-        result = ("CALLABLE", id(value))
-    else:
-        result = ("ID", id(value))
-    return result
 # ---------------- Base class with evaluation caching ----------------
 
 class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
@@ -98,34 +52,8 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
 
     # Automatically add a per-call evaluation cache wrapper to any subclass __call__
     def __call__(self, sim: SimSnap) -> TProp:
-        token = id(sim)
-        ctx = _EVAL_CTX.get()
-        cur_token = _EVAL_SIM_TOKEN.get()
-        owner = False
+        return super().__call__(sim)
 
-        if ctx is None or cur_token != token:
-            ctx = {}
-            _EVAL_CTX.set(ctx)
-            _EVAL_SIM_TOKEN.set(token)
-            owner = True
-
-        flt = getattr(self, "_filter", None)
-        trans = getattr(self, "_transformation", None)
-        rev = bool(getattr(self, "_revert_transformation", True))
-        # Key type: tuple[int, tuple[Any, ...]]
-        key: tuple[int, tuple[Any, ...]] = (token, (id(self), id(flt), id(trans), rev))
-
-        if key in ctx:
-            result = ctx[key]
-        else:
-            result = super().__call__(sim)
-            ctx[key] = result
-
-        if owner:
-            _EVAL_CTX.set(None)
-            _EVAL_SIM_TOKEN.set(None)
-
-        return result
     def children(self) -> list[CalculatorBase[Any]]:
         return super().children()
 
@@ -290,8 +218,7 @@ class LambdaProperty(PropertyBase[Any]):
         self._cache.clear()
 
     def signature(self) -> tuple:
-        # Conservative: function object id + cache flag
-        return ("Lambda", id(self._func), self._cache_enabled)
+        return ("Lambda", get_signature_safe(self._func, fallback_to_id=True), self._cache_enabled)
 
     def calculate(self, sim: SimSnap) -> Any:
         if not self._cache_enabled:
@@ -414,6 +341,9 @@ class ParamSum(PropertyBase[SimArray]):
         """
         self.parameter = parameter
 
+    def instance_signature(self):
+        return (self.__class__.__name__, self.parameter)
+
     def calculate(self, sim : SimSnap) -> SimArray:
         """
         Calculate the sum of the specified parameter for the given simulation snapshot.
@@ -468,6 +398,9 @@ class ParameterContain(PropertyBase[SimArray]):
             self._frac_is_scalar = False
         else:
             raise TypeError("frac must be a float or a sequence of floats")
+
+    def instance_signature(self):
+        return (self.__class__.__name__, self.cal_key, self.parameter, get_signature_safe(self.frac, fallback_to_id=True))
 
     def calculate(self, sim: SimSnap) -> SimArray:
         """

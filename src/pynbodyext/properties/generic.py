@@ -22,6 +22,9 @@ class CenPos(PropertyBase[SimArray | np.ndarray]):
     def __init__(self, mode: Literal["ssc", "com", "pot", "hyb"] = "ssc" ):
         self.mode = mode
 
+    def instance_signature(self):
+        return (self.__class__.__name__, self.mode)
+
     def calculate(self, sim: SimSnap) -> SimArray | np.ndarray:
         if self.mode == "com":
             cen = sim.mean_by_mass("pos")
@@ -43,6 +46,9 @@ class CenVel(PropertyBase[SimArray]):
 
     def __init__(self, mode: Literal["com"] = "com" ):
         self.mode = mode
+
+    def instance_signature(self):
+        return (self.__class__.__name__, self.mode)
 
     def calculate(self, sim: SimSnap) -> SimArray:
         if self.mode == "com":
@@ -84,8 +90,11 @@ class VirialRadius(PropertyBase[float]):
         self.overdensity = overdensity
         self.rho_def = rho_def
 
+    def instance_signature(self):
+        return (self.__class__.__name__, self.overdensity, self.rho_def)
+
     def calculate(self, sim: SimSnap) -> float:
-        return virial_radius(sim, overdensity=self.overdensity, rho_def=self.rho_def)
+        return virial_radius(sim, overden=self.overdensity, rho_def=self.rho_def)
 
 class SpinParam(PropertyBase[float]):
     """The spin parameter is defined as in eq. (5) of Bullock et al. (2001) [1]_.
