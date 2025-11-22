@@ -295,7 +295,7 @@ class ProfileArray(SimArray):
             vals[i] = calculator(sub, w)
 
         res_val = vals.view(SimArray)
-        if isinstance(arr_pp, SimArray):
+        if isinstance(arr_pp, (SimArray,IndexedSimArray)):
             res_val.units = arr_pp.units
             res_val.sim = arr_pp.sim
         return res_val, calculator.key

@@ -51,3 +51,7 @@ class RadialProfile(SpatialProfile):
 @SpatialProfile.profile_property
 def density(pro: SpatialProfile) -> SimNpPrArray:
     return pro["mass"]["sum"] / pro["binsize"]
+
+@SpatialProfile.profile_property
+def mass_enc(pro: SpatialProfile) -> SimNpPrArray:
+    return pro["mass"]["sum"].cumsum()
