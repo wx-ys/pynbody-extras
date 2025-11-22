@@ -1,4 +1,4 @@
-import itertools
+import threading
 import time
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
@@ -116,11 +116,21 @@ class TraceManager:
     # stack of start times for nested phases (parallel to _CALC_PATH depth)
     _PHASE_START_TIME: ContextVar[tuple[float, ...]] = ContextVar("_PHASE_START_TIME", default=())
     _CACHE_EVENT_COUNT: ContextVar[int] = ContextVar("_CACHE_EVENT_COUNT", default=0)
-    _RUN_COUNTER = itertools.count(1)
+    _RUN_COUNTERL: int = 0
+    _RUN_COUNTER_LOCK: threading.Lock = threading.Lock()
 
     @staticmethod
     def _node_label(node: Any) -> str:
         return getattr(node, "name", node.__class__.__name__)
+
+    @classmethod
+    def _next_run_id(cls) -> int:
+        """Return a process-prefixed run id of the form '{pid}:{local_counter}'."""
+        with cls._RUN_COUNTER_LOCK:
+            cls._RUN_COUNTERL += 1
+            local = cls._RUN_COUNTERL
+
+        return local  # f"{os.getpid()}:{local}"
 
     @classmethod
     @contextmanager
@@ -136,7 +146,7 @@ class TraceManager:
         token_count = None
         root_token = None
         if run_id is None:
-            run_id = next(cls._RUN_COUNTER)
+            run_id = cls._next_run_id()
             cls._CALC_RUN_ID.set(run_id)
             owner = True
             token_count = cls._CACHE_EVENT_COUNT.set(0)
@@ -187,7 +197,7 @@ class TraceManager:
         run_id = cls._CALC_RUN_ID.get()
         owner = False
         if run_id is None:
-            run_id = next(cls._RUN_COUNTER)
+            run_id = cls._next_run_id()
             cls._CALC_RUN_ID.set(run_id)
             owner = True
 
