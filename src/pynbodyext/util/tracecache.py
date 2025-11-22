@@ -38,16 +38,32 @@ class EvalCacheManager:
         if prev_ctx is not None and prev_tok == token:
             yield
             return
-
+        created_ctx: dict = {}
+        # Use tokens so we can reset reliably
+        ctx_token = cls._CTX.set(created_ctx)
+        sim_token = cls._SIM_TOKEN.set(token)
+        ce_token = cls._CACHE_ENABLED.set(bool(enable_cache))
         try:
-            cls._CTX.set({})
-            cls._SIM_TOKEN.set(token)
-            cls._CACHE_ENABLED.set(bool(enable_cache))
             yield
         finally:
-            cls._CTX.set(prev_ctx)
-            cls._SIM_TOKEN.set(prev_tok)
-            cls._CACHE_ENABLED.set(prev_ce)
+            # clear the created context first to drop references
+            try:
+                created_ctx.clear()
+            except Exception:
+                pass
+            # reset the ContextVars to previous values using tokens
+            try:
+                cls._CTX.reset(ctx_token)
+            except Exception:
+                cls._CTX.set(prev_ctx)
+            try:
+                cls._SIM_TOKEN.reset(sim_token)
+            except Exception:
+                cls._SIM_TOKEN.set(prev_tok)
+            try:
+                cls._CACHE_ENABLED.reset(ce_token)
+            except Exception:
+                cls._CACHE_ENABLED.set(prev_ce)
     @classmethod
     def cache_enabled(cls) -> bool:
         """Return whether evaluation caching is enabled for the current ctx."""
@@ -90,9 +106,12 @@ class EvalCacheManager:
         if not cls.cache_enabled():
             return
         ctx = cls._CTX.get()
+        # IMPORTANT: do NOT create a new ctx here if none exists.
+        # Only write into an existing run-context created by `use()`.
         if ctx is None:
-            ctx = {}
-            cls._CTX.set(ctx)
+            # Optionally log a debug message here; avoid creating a context silently.
+            logger.debug("EvalCacheManager.set called with no active ctx; ignoring key=%r", key)
+            return
         ctx[key] = val
 
 @contextmanager

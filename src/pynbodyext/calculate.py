@@ -257,12 +257,15 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
          - create a single Trace run and EvalCache.use(sim) for the duration
          - use a structure-based cache key to avoid duplicate evaluate
         """
+        logger.debug("")
         token = id(sim)
 
         # detect existing ctx for this sim (fast path)
         prev_ctx = EvalCacheManager._CTX.get()
         prev_tok = EvalCacheManager._SIM_TOKEN.get()
         is_top = not (prev_ctx is not None and prev_tok == token)
+
+        title = repr(self) + " : " + repr(sim)
 
         # Convenience local refs
         eval_mgr = EvalCacheManager
@@ -288,14 +291,18 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
                 # pass instance preference once to use(); returns to previous ctx on exit
                 with eval_mgr.use(sim, enable_cache=bool(getattr(self, "_enable_eval_cache", True))):
                     if eval_mgr.cache_enabled():
-                        return _run_with_cache()
-                    # cache disabled for this run -> direct call
-                    return self._invoke(sim)
+                        result =  _run_with_cache()
+                    else:
+                        # cache disabled for this run -> direct call
+                        result = self._invoke(sim)
         else:
             # nested call: reuse existing ctx and its cache_enabled decision
             if eval_mgr.cache_enabled():
                 return _run_with_cache()
-            return self._invoke(sim)
+            result = self._invoke(sim)
+
+        self._perf_stats.report(logger, title=title)
+        return result
 
     def _invoke(self, sim: SimSnap) -> ReturnT:
         """
@@ -303,8 +310,6 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         Note: do NOT create TraceManager.trace_run or EvalCacheManager.use here;
         that is handled at the caller so we don't nest contexts.
         """
-        logger.debug("")
-        title = repr(self) + " : " + repr(sim)
         # At this point TraceManager.run and EvalCacheManager.use(sim) should already be active.
         with self._perf_stats as stats:
             with stats.step("transform"):
@@ -313,7 +318,6 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
                 sim2 = self._do_pre_filter(sim)
             # calculate (and possibly revert)
             result = self._do_calculate(sim2, trans_obj, stats)
-        self._perf_stats.report(logger, title=title)
         return result
 
     @abstractmethod

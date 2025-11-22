@@ -24,8 +24,26 @@ profile_block
 
 import contextlib
 import logging
+import os
 import time
 import tracemalloc
+
+# psutil is optional — if not present, RSS reporting is disabled but functionality remains.
+try:
+    import psutil
+    _HAS_PSUTIL = True
+except Exception:
+    psutil = None
+    _HAS_PSUTIL = False
+
+def _get_rss() -> int | None:
+    if not _HAS_PSUTIL:
+        return None
+    try:
+        process = psutil.Process(os.getpid())
+        return process.memory_info().rss
+    except Exception:
+        return None
 
 
 class StatsTool:
@@ -104,11 +122,17 @@ class ProfileInfo(StatsTool):
         Memory usage (in bytes) at the start of the block.
     memory_end : int or None
         Memory usage (in bytes) at the end of the block.
+    rss_start : int or None
+        OS-level RSS at start of step (bytes); optional if psutil absent.
+    rss_end : int or None
+        OS-level RSS at end of step (bytes); optional if psutil absent.
     """
     time: float | None
     memory_peak: int | None
     memory_start: int | None
     memory_end: int | None
+    rss_start: int | None
+    rss_end: int | None
 
     def __init__(self):
         """
@@ -118,6 +142,8 @@ class ProfileInfo(StatsTool):
         self.memory_peak = None
         self.memory_start = None
         self.memory_end = None
+        self.rss_start = None
+        self.rss_end = None
 
     def __repr__(self):
         """
@@ -130,7 +156,8 @@ class ProfileInfo(StatsTool):
         """
         return (f"ProfileInfo(Time={self._format_time(self.time)}, "
                 f"Mem={self._format_mem(self.memory_used)}, "
-                f"Peak={self._format_mem(self.max_memory_used)})")
+                f"Peak={self._format_mem(self.max_memory_used)})"
+                f"RSSΔ={self._format_mem(self.rss_used)})")
 
     @property
     def memory_used(self):
@@ -157,6 +184,15 @@ class ProfileInfo(StatsTool):
         """
         if self.memory_peak is not None and self.memory_start is not None:
             return self.memory_peak - self.memory_start
+        return None
+
+    @property
+    def rss_used(self):
+        """
+        RSS used during the block (bytes). None if rss_start or rss_end is None.
+        """
+        if self.rss_start is not None and self.rss_end is not None:
+            return self.rss_end - self.rss_start
         return None
 
 
@@ -197,6 +233,7 @@ def profile_block(measure_time=True, measure_memory=True, tracemalloc_nframe=1):
             _tracemalloc_started = True
         info.memory_start, _ = tracemalloc.get_traced_memory()
         tracemalloc.reset_peak()
+        info.rss_start = _get_rss()
     if measure_time:
         t0 = time.perf_counter()
     try:
@@ -209,7 +246,7 @@ def profile_block(measure_time=True, measure_memory=True, tracemalloc_nframe=1):
             info.memory_end, info.memory_peak = tracemalloc.get_traced_memory()
             if _tracemalloc_started:
                 tracemalloc.stop()
-
+            info.rss_end = _get_rss()
 
 class PerfStats(StatsTool):
     """
@@ -253,6 +290,8 @@ class PerfStats(StatsTool):
         self.steps = []
         self._mem_start = None
         self._mem_end = None
+        self._rss_start = None
+        self._rss_end = None
         self._step_peaks = []
         self._total_time = None
 
@@ -261,6 +300,8 @@ class PerfStats(StatsTool):
         self._step_peaks.clear()
         self._mem_start = None
         self._mem_end = None
+        self._rss_start = None
+        self._rss_end = None
         self._total_time = None
 
     def __enter__(self):
@@ -281,6 +322,7 @@ class PerfStats(StatsTool):
             else:
                 self._tracemalloc_started = False
             self._mem_start, _ = tracemalloc.get_traced_memory()
+            self._rss_start = _get_rss()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -303,7 +345,7 @@ class PerfStats(StatsTool):
             self._step_peaks.append(peak)
             if self._tracemalloc_started:
                 tracemalloc.stop()
-
+            self._rss_end = _get_rss()
     @contextlib.contextmanager
     def step(self, name):
         """
@@ -331,6 +373,7 @@ class PerfStats(StatsTool):
         if self.memory_enabled:
             info.memory_start, _ = tracemalloc.get_traced_memory()
             tracemalloc.reset_peak()
+            info.rss_start = _get_rss()
         if self.time_enabled:
             t0 = time.perf_counter()
         try:
@@ -342,6 +385,7 @@ class PerfStats(StatsTool):
             if self.memory_enabled:
                 info.memory_end, info.memory_peak = tracemalloc.get_traced_memory()
                 self._step_peaks.append(info.memory_peak)
+                info.rss_end = _get_rss()
             self.steps.append((name, info))
 
 
@@ -356,9 +400,16 @@ class PerfStats(StatsTool):
         """
         if not self.time_enabled and not self.memory_enabled:
             return ""
-        header = (
-            f"{'Step':<15} | {'Time':>12} | {'Mem Used':>15} | {'Peak Mem':>15}"
-        )
+        # choose header depending on availability of psutil
+        if _HAS_PSUTIL:
+            header = (
+                f"{'Step':<15} | {'Time':>12} | {'Mem Used':>15} | {'Peak Mem':>15} | {'RSS Δ':>10}"
+            )
+        else:
+            header = (
+                f"{'Step':<15} | {'Time':>12} | {'Mem Used':>15} | {'Peak Mem':>15}"
+            )
+
         lines = [title] if title else []
         lines.extend(["-" * len(header), header, "-" * len(header)])
 
@@ -366,7 +417,11 @@ class PerfStats(StatsTool):
             time_str = self._format_time(info.time)
             mem_used = self._format_mem(info.memory_used)
             peak_mem = self._format_mem(info.max_memory_used)
-            lines.append(f"{name:<15} | {time_str:>12} | {mem_used:>15} | {peak_mem:>15}")
+            if _HAS_PSUTIL:
+                rss_delta = self._format_mem(info.rss_used)
+                lines.append(f"{name:<15} | {time_str:>12} | {mem_used:>15} | {peak_mem:>15} | {rss_delta:>10}")
+            else:
+                lines.append(f"{name:<15} | {time_str:>12} | {mem_used:>15} | {peak_mem:>15}")
         lines.append("-" * len(header))
 
         # total memory/peak
@@ -376,7 +431,13 @@ class PerfStats(StatsTool):
         total_mem = self._format_mem(total_mem_used)
         total_peak_str = self._format_mem(total_peak)
 
-        lines.append(f"{'Total':<15} | {total_time:>12} | {total_mem:>15} | {total_peak_str:>15}")
+        if _HAS_PSUTIL:
+            total_rss_used = (self._rss_end - self._rss_start) if (self._rss_start is not None and self._rss_end is not None) else None
+            total_rss_str = self._format_mem(total_rss_used)
+            lines.append(f"{'Total':<15} | {total_time:>12} | {total_mem:>15} | {total_peak_str:>15} | {total_rss_str:>10}")
+        else:
+            lines.append(f"{'Total':<15} | {total_time:>12} | {total_mem:>15} | {total_peak_str:>15}")
+
         lines.append("-" * len(header))
 
         msg = "\n" + "\n".join(lines)
