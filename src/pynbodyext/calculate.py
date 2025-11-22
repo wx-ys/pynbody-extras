@@ -217,10 +217,10 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
             with TraceManager.trace_phase(self, "transform"):
                 try:
-                    logger.debug(f"[{self}] transformation: {self._transformation}")
+                    logger.debug("[%s] transformation: %s", self, self._transformation)
                     trans_obj = self._transformation(sim)
                 except Exception as e:
-                    logger.error(f"Error applying pre-transformation: {e}, when calculating {self}")
+                    logger.error("Error applying pre-transformation: %s, when calculating %s", e, self)
                     raise RuntimeError(f"Error applying pre-transformation {self._transformation}") from e
                 return trans_obj
         return None
@@ -229,10 +229,10 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         if self._filter is not None:
             with TraceManager.trace_phase(self, "filter"):
                 try:
-                    logger.debug(f"[{self}] filter: {self._filter}")
+                    logger.debug("[%s] filter: %s", self, self._filter)
                     sim = sim[self._filter]
                 except Exception as e:
-                    logger.error(f"Error applying pre-filter: {e}, when calculating {self}")
+                    logger.error("Error applying pre-filter: %s, when calculating %s", e, self)
                     raise RuntimeError(f"Error applying pre-filter {self._filter}") from e
         return sim
 
@@ -240,13 +240,13 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         try:
             with TraceManager.trace_phase(self, "calculate"):
                 with stats.step("calculate"):
-                    logger.debug(f"[{self}] performing calculation ...")
+                    logger.debug("[%s] performing calculation ...", self)
                     result = self.calculate(sim)
         finally:
             if trans_obj is not None and self._revert_transformation:
                 with TraceManager.trace_phase(self, "revert"):
                     with stats.step("revert"):
-                        logger.debug(f"[{self}] reverting transformation: {self._transformation}")
+                        logger.debug("[%s] reverting transformation: %s", self, self._transformation)
                         trans_obj.revert()
         return result
 
@@ -258,38 +258,44 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
          - use a structure-based cache key to avoid duplicate evaluate
         """
         token = id(sim)
-        # run-level trace id + evalcache: create only if not already present for this sim
+
+        # detect existing ctx for this sim (fast path)
         prev_ctx = EvalCacheManager._CTX.get()
         prev_tok = EvalCacheManager._SIM_TOKEN.get()
         is_top = not (prev_ctx is not None and prev_tok == token)
 
-        # Build signature we will use as cache key (use .signature() if available)
-        sig = ("sig", self.signature())
+        # Convenience local refs
+        eval_mgr = EvalCacheManager
+        trace_mgr = TraceManager
 
-        key = (token, ("calc", sig))
-
-        # Outer context: one trace_run + one eval cache for this top-level call
-        if is_top:
-            # Pass the instance preference to use() so the run-level cache flag is established once.
-            with TraceManager.trace_run(self):
-                with EvalCacheManager.use(sim, enable_cache=bool(getattr(self, "_enable_eval_cache", True))):
-                    # Use EvalCacheManager.get/set which are now noop if cache disabled.
-                    cached = EvalCacheManager.get(key)
-                    if cached is not None:
-                        TraceManager.trace_cache_event(self, "hit", {"sig": sig})
-                        return cached
-                    result = self._invoke(sim)
-                    EvalCacheManager.set(key, result)
-                    return result
-        else:
-            # nested call (someone else already created the ctx); reuse existing run-level cache flag
-            cached = EvalCacheManager.get(key)
+        # Helper to handle cached lookup/store when cache is enabled
+        def _run_with_cache() -> ReturnT:
+            # compute node signature once (fallback to struct_signature on error)
+            node_sig = self.signature()
+            # build key only when needed
+            key = (token, ("calc", ("sig", node_sig)))
+            cached = eval_mgr.get(key)
             if cached is not None:
-                TraceManager.trace_cache_event(self, "hit", {"sig": sig})
+                trace_mgr.trace_cache_event(self, "hit", {"sig": node_sig})
                 return cached
-            result = self._invoke(sim)
-            EvalCacheManager.set(key, result)
-            return result
+            res = self._invoke(sim)
+            eval_mgr.set(key, res)
+            return res
+
+        # Top-level: create trace run and evaluation context (decide enable_cache once)
+        if is_top:
+            with trace_mgr.trace_run(self):
+                # pass instance preference once to use(); returns to previous ctx on exit
+                with eval_mgr.use(sim, enable_cache=bool(getattr(self, "_enable_eval_cache", True))):
+                    if eval_mgr.cache_enabled():
+                        return _run_with_cache()
+                    # cache disabled for this run -> direct call
+                    return self._invoke(sim)
+        else:
+            # nested call: reuse existing ctx and its cache_enabled decision
+            if eval_mgr.cache_enabled():
+                return _run_with_cache()
+            return self._invoke(sim)
 
     def _invoke(self, sim: SimSnap) -> ReturnT:
         """
@@ -329,13 +335,13 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
     def with_filter(self: Self, filt: FilterLike) -> Self:
         """Return a new CalculatorBase instance with the given filter applied."""
-        logger.debug(f"Applying filter: {filt} to {self}")
+        logger.debug("Applying filter: %s to %s", filt, self)
         self._filter = filt
         return self
 
     def with_transformation(self: Self, transformation: TransformLike, revert: bool = True) -> Self:
         """Return a new CalculatorBase instance with the given transformation applied."""
-        logger.debug(f"Applying transformation: {transformation} with revert={revert} to {self}")
+        logger.debug("Applying transformation: %s with revert=%s to %s", transformation, revert, self)
         self._transformation = transformation
         self._revert_transformation = revert
         return self
@@ -413,6 +419,10 @@ class CombinedCalculator(CalculatorBase[tuple[Unpack[Ts]]], Generic[Unpack[Ts]])
     props: tuple[CalculatorBase[Any], ...]
     def __init__(self, *props: CalculatorBase[Unpack[Ts]]) -> None: # type: ignore
         self.props = props
+
+
+    def instance_signature(self):
+        return (self.__class__.__name__, tuple(p.instance_signature() for p in self.props))
 
     def calculate(self, sim: SimSnap) -> tuple[Unpack[Ts]]:
         return tuple(p(sim) for p in self.props)
