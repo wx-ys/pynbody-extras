@@ -3,12 +3,7 @@ Generic calculation interface for pynbody snapshots.
 """
 from __future__ import annotations
 
-import itertools
-import json
-import os
 from abc import ABC, abstractmethod
-from contextlib import contextmanager
-from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 
 import numpy as np
@@ -17,6 +12,7 @@ from pynbody.array import SimArray
 
 from pynbodyext.log import logger
 from pynbodyext.util.perf import PerfStats
+from pynbodyext.util.tracecache import EvalCacheManager, TraceManager
 
 from .util._type import (
     FilterLike,
@@ -27,11 +23,10 @@ from .util._type import (
     TypeVarTuple,
     UnitLike,
     Unpack,
+    get_signature_safe,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
     from pynbody.snapshot import SimSnap
     from pynbody.transformation import Transformation
 
@@ -43,66 +38,7 @@ Us = TypeVarTuple("Us")
 U = TypeVar("U")
 T = TypeVar("T")
 
-# --- runtime trace context (run-level id + call path) ---
-_CALC_PATH: ContextVar[tuple[str, ...]] = ContextVar("_CALC_PATH", default=())
-_CALC_RUN_ID: ContextVar[int | None] = ContextVar("_CALC_RUN_ID", default=None)
-_RUN_COUNTER = itertools.count(1)
-_TRACE_JSON = bool(int(os.getenv("PYNBODYEXT_TRACE_JSON", "0")))
 
-def _node_label(node: Any) -> str:
-    # Prefer an explicit `.name` if provided, fall back to class name
-    return getattr(node, "name", node.__class__.__name__)
-
-@contextmanager
-def _trace_phase(node: Any, phase: str) -> Iterator[None]:
-    """
-    Push node into the calc-path, log enter/leave with run-id and full path.
-    If PYNBODYEXT_TRACE_JSON=1, also emit JSON lines for machine parsing.
-    """
-    path = _CALC_PATH.get()
-    run_id = _CALC_RUN_ID.get()
-    owner = False
-    if run_id is None:
-        run_id = next(_RUN_COUNTER)
-        _CALC_RUN_ID.set(run_id)
-        owner = True
-
-    new_path = (*path, _node_label(node))
-    token = _CALC_PATH.set(new_path)
-    prefix = f"calc#{run_id} {' > '.join(new_path)}"
-
-    if _TRACE_JSON:
-        logger.debug("TRACE %s", json.dumps({
-            "event": "enter",
-            "run": run_id,
-            "phase": phase,
-            "node": _node_label(node),
-            "class": node.__class__.__name__,
-            "id": id(node),
-            "depth": len(new_path)-1
-        }, ensure_ascii=False))
-    else:
-        logger.debug("%s | enter: %s", prefix, phase)
-
-    try:
-        yield
-    finally:
-        if _TRACE_JSON:
-            logger.debug("TRACE %s", json.dumps({
-                "event": "leave",
-                "run": run_id,
-                "phase": phase,
-                "node": _node_label(node),
-                "class": node.__class__.__name__,
-                "id": id(node),
-                "depth": len(new_path)-1
-            }, ensure_ascii=False))
-        else:
-            logger.debug("%s | leave: %s", prefix, phase)
-
-        _CALC_PATH.reset(token)
-        if owner:
-            _CALC_RUN_ID.set(None)
 
 class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
     """An abstract base class for performing calculations on particle data."""
@@ -111,7 +47,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
     _transformation: TransformLike | None
     _revert_transformation: bool
     _perf_stats: PerfStats
-
+    _enable_eval_cache: bool = True
     def __new__(cls: type[Self], *args: Any, **kwargs: Any) -> Self:
         # initialize per-instance filter and transformation settings
         self = super().__new__(cls)
@@ -119,11 +55,60 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         self._transformation = None
         self._revert_transformation = True
         self._perf_stats = PerfStats(time=False, memory=False)
+        self._enable_eval_cache = True
         return self
 
     # Calculation phase "child calculation" hook: default is none, subclasses may override
     def calculate_children(self) -> list[CalculatorBase[Any]]:
         return []
+
+
+    def instance_signature(self) -> tuple:
+        """
+        Signature describing how *this* calculator was constructed.
+        Default: identity-based. Subclasses should override to return
+        a stable representation of constructor args if possible.
+        Example override: return (self.__class__.__name__, ("param", self.param))
+        """
+        return ("id", id(self))
+
+    def signature(self) -> tuple:
+        """
+        Full structural signature for this calculator node, including:
+          - instance init signature (instance_signature)
+          - filter signature (if filter is CalculatorBase use its signature, else id)
+          - transformation signature (same logic)
+          - revert flag
+        This is the canonical signature used for run-level caching and CSE.
+        Subclasses may override instance_signature() to provide a deterministic key.
+        """
+        # instance/init signature
+        try:
+            init_sig = self.instance_signature()
+        except Exception:
+            init_sig = ("id", id(self))
+
+        # filter signature
+        flt = getattr(self, "_filter", None)
+        if flt is None:
+            filter_sig = None
+        else:
+            filter_sig = get_signature_safe(flt, fallback_to_id=True)
+
+        # transformation signature
+        trans = getattr(self, "_transformation", None)
+        if trans is None:
+            trans_sig = None
+        else:
+            trans_sig = get_signature_safe(trans, fallback_to_id=True)
+
+        return (
+            self.__class__.__name__,
+            ("init", init_sig),
+            ("filter", filter_sig),
+            ("trans", trans_sig),
+            ("rev", bool(getattr(self, "_revert_transformation", True))),
+        )
 
     def format_flow(self, indent: int = 0, short: bool = True) -> str:
         """
@@ -137,7 +122,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         """
         pad = "  " * indent
         lines: list[str] = []
-        title = f"{pad}{_node_label(self)}"
+        title = f"{pad}{TraceManager._node_label(self)}"
         lines.append(title)
 
         # 1) transform
@@ -200,7 +185,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         # box-drawing ASCII
         def render(node: CalculatorBase[Any], prefix: str, is_last: bool) -> list[str]:
             branch = "└─" if is_last else "├─"
-            name = _node_label(node)
+            name = TraceManager._node_label(node)
             line = f"{prefix}{branch} {name}"
             out = [line]
             new_prefix = f"{prefix}{'  ' if is_last else '│ '}"
@@ -230,7 +215,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
     def _do_pre_transform(self, sim: SimSnap) -> Transformation | None:
         if self._transformation is not None:
 
-            with _trace_phase(self, "transform"):
+            with TraceManager.trace_phase(self, "transform"):
                 try:
                     logger.debug(f"[{self}] transformation: {self._transformation}")
                     trans_obj = self._transformation(sim)
@@ -242,7 +227,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
     def _do_pre_filter(self, sim: SimSnap) -> SimSnap:
         if self._filter is not None:
-            with _trace_phase(self, "filter"):
+            with TraceManager.trace_phase(self, "filter"):
                 try:
                     logger.debug(f"[{self}] filter: {self._filter}")
                     sim = sim[self._filter]
@@ -253,13 +238,13 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
     def _do_calculate(self, sim: SimSnap, trans_obj: Transformation | None, stats: PerfStats) -> ReturnT:
         try:
-            with _trace_phase(self, "calculate"):
+            with TraceManager.trace_phase(self, "calculate"):
                 with stats.step("calculate"):
                     logger.debug(f"[{self}] performing calculation ...")
                     result = self.calculate(sim)
         finally:
             if trans_obj is not None and self._revert_transformation:
-                with _trace_phase(self, "revert"):
+                with TraceManager.trace_phase(self, "revert"):
                     with stats.step("revert"):
                         logger.debug(f"[{self}] reverting transformation: {self._transformation}")
                         trans_obj.revert()
@@ -267,25 +252,62 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
 
     def __call__(self, sim: SimSnap) -> ReturnT:
-        """Executes the calculation on a given simulation snapshot."""
+        """
+        Unified top-level call:
+         - create a single Trace run and EvalCache.use(sim) for the duration
+         - use a structure-based cache key to avoid duplicate evaluate
+        """
+        token = id(sim)
+        # run-level trace id + evalcache: create only if not already present for this sim
+        prev_ctx = EvalCacheManager._CTX.get()
+        prev_tok = EvalCacheManager._SIM_TOKEN.get()
+        is_top = not (prev_ctx is not None and prev_tok == token)
+
+        # Build signature we will use as cache key (use .signature() if available)
+        sig = ("sig", self.signature())
+
+        key = (token, ("calc", sig))
+
+        # Outer context: one trace_run + one eval cache for this top-level call
+        if is_top:
+            # Pass the instance preference to use() so the run-level cache flag is established once.
+            with TraceManager.trace_run(self):
+                with EvalCacheManager.use(sim, enable_cache=bool(getattr(self, "_enable_eval_cache", True))):
+                    # Use EvalCacheManager.get/set which are now noop if cache disabled.
+                    cached = EvalCacheManager.get(key)
+                    if cached is not None:
+                        TraceManager.trace_cache_event(self, "hit", {"sig": sig})
+                        return cached
+                    result = self._invoke(sim)
+                    EvalCacheManager.set(key, result)
+                    return result
+        else:
+            # nested call (someone else already created the ctx); reuse existing run-level cache flag
+            cached = EvalCacheManager.get(key)
+            if cached is not None:
+                TraceManager.trace_cache_event(self, "hit", {"sig": sig})
+                return cached
+            result = self._invoke(sim)
+            EvalCacheManager.set(key, result)
+            return result
+
+    def _invoke(self, sim: SimSnap) -> ReturnT:
+        """
+        Perform the actual transform/filter/calculate under PerfStats.
+        Note: do NOT create TraceManager.trace_run or EvalCacheManager.use here;
+        that is handled at the caller so we don't nest contexts.
+        """
         logger.debug("")
         title = repr(self) + " : " + repr(sim)
-        #logger.debug(f"[{self}] Starting: {sim}")
-
+        # At this point TraceManager.run and EvalCacheManager.use(sim) should already be active.
         with self._perf_stats as stats:
-            # pre-transform
             with stats.step("transform"):
                 trans_obj = self._do_pre_transform(sim)
-
-            # filter
             with stats.step("filter"):
-                sim = self._do_pre_filter(sim)
-
-            # calculate
-            result = self._do_calculate(sim, trans_obj, stats)
-        # stats
-        #logger.debug(f"[{self}] Finished: {sim}")
-        self._perf_stats.report(logger,title=title)
+                sim2 = self._do_pre_filter(sim)
+            # calculate (and possibly revert)
+            result = self._do_calculate(sim2, trans_obj, stats)
+        self._perf_stats.report(logger, title=title)
         return result
 
     @abstractmethod
@@ -300,14 +322,16 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         self._perf_stats.memory_enabled = memory
         return self
 
+    def enable_cache(self: Self, enable: bool = True) -> Self:
+        """Enable/disable evaluation caching for this calculator instance."""
+        self._enable_eval_cache = bool(enable)
+        return self
+
     def with_filter(self: Self, filt: FilterLike) -> Self:
         """Return a new CalculatorBase instance with the given filter applied."""
         logger.debug(f"Applying filter: {filt} to {self}")
         self._filter = filt
         return self
-
-    def __getitem__(self, key: FilterLike) -> Self:
-        return self.with_filter(key)
 
     def with_transformation(self: Self, transformation: TransformLike, revert: bool = True) -> Self:
         """Return a new CalculatorBase instance with the given transformation applied."""
@@ -315,6 +339,9 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         self._transformation = transformation
         self._revert_transformation = revert
         return self
+
+    def __getitem__(self, key: FilterLike) -> Self:
+        return self.with_filter(key)
 
     def _in_sim_units(
         self,
