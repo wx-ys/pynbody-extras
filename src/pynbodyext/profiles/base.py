@@ -26,7 +26,14 @@ from typing import Any, Generic, Literal, TypeVar
 from pynbody.snapshot import SimSnap
 
 from pynbodyext.calculate import CalculatorBase
-from pynbodyext.util._type import BinsAlgorithmFunc, RegistBinAlgorithmString, SimNpPrArray, SimNpPrArrayFunc, UnitLike
+from pynbodyext.util._type import (
+    BinsAlgorithmFunc,
+    RegistBinAlgorithmString,
+    SimNpPrArray,
+    SimNpPrArrayFunc,
+    UnitLike,
+    get_signature_safe,
+)
 
 from .bins import BinsSet
 from .profile import ProfileBase
@@ -110,6 +117,17 @@ class RadialProfileBuilder(ProfileBuilderBase[RadialProfile]):
         self.bin_max = bin_max
         self.bins_set = bins_set
         self.kwargs = kwargs
+
+    def instance_signature(self):
+        return (self.__class__.__name__,
+            self.ndim,
+            get_signature_safe(self.weight),
+            get_signature_safe(self.bins_type),
+            id(self.nbins),
+            get_signature_safe(self.bin_min),
+            get_signature_safe(self.bin_max),
+            get_signature_safe(self.bins_set),
+        )
 
     def calculate(self, sim: SimSnap) -> RadialProfile:
         if self.bin_min is not None:

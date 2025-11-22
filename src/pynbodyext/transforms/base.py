@@ -19,14 +19,14 @@ class TransformBase(CalculatorBase[TTrans], Generic[TTrans]):
     def _do_calculate(self, sim: SimSnap, trans_obj: Transformation | None, stats: PerfStats) -> TTrans:
         try:
             with stats.step("calculate"):
-                logger.debug(f"[{self}] performing calculation ...")
+                logger.debug("[%s] performing calculation ...", self)
                 result = self.calculate(sim, trans_obj)
         except Exception as e:
             if trans_obj is not None and self._revert_transformation:
                     trans_obj.revert()
             raise e
         if trans_obj is not None and self._revert_transformation:
-            logger.debug(f"[{self}] merging pre-transformation: {self._transformation}")
+            logger.debug("[%s] merging pre-transformation: %s", self, self._transformation)
         return result
 
     def __repr__(self):
