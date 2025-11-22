@@ -81,12 +81,12 @@ class StatsTool:
         mabs = abs(m)
         if mabs < 1024:
             return f"{m:.1f} B"
-        elif mabs < 1024**2:
+        elif mabs < 1048576:        # 1024**2
             return f"{m/1024:.1f} KiB"
-        elif mabs < 1024**3:
-            return f"{m/1024**2:.2f} MiB"
+        elif mabs < 1073741824:      # 1024**3
+            return f"{m/1048576:.2f} MiB"
         else:
-            return f"{m/1024**3:.2f} GiB"
+            return f"{m/1073741824:.2f} GiB"
 
 
 
