@@ -8,6 +8,8 @@ from pynbody.family import Family, get_family
 from pynbody.snapshot import SimSnap
 from pynbody.units import UnitBase
 
+from pynbodyext.util._type import get_signature_safe
+
 from .base import FilterBase
 from .pynfilt import (
     _Annulus,
@@ -33,6 +35,7 @@ FamilyLike: TypeAlias = Family | str
 FamilyLikeFunc: TypeAlias = Callable[[SimSnap], FamilyLike]
 
 
+
 class Sphere(FilterBase,_Sphere):
 
     def __init__(self,
@@ -40,6 +43,11 @@ class Sphere(FilterBase,_Sphere):
                 cen: ArrayLike | ArrayLikeFunc = (0, 0, 0)):
         self.radius = radius
         self.cen = cen
+
+    def instance_signature(self):
+        radius = get_signature_safe(self.radius, fallback_to_id=True)
+        cen = get_signature_safe(self.cen, fallback_to_id=True)
+        return (self.__class__.__name__, radius, cen)
 
     def calculate(self, sim: SimSnap) -> np.ndarray:
         radius, cen = self._get_lazy_params(sim)
@@ -59,6 +67,10 @@ class FamilyFilter(FilterBase, _FamilyFilter):
             self.family = family
         else:
             self.family = get_family(family, False)
+
+    def instance_signature(self):
+        family = get_signature_safe(self.family, fallback_to_id=True)
+        return (self.__class__.__name__, family)
 
     def calculate(self, sim: SimSnap) -> np.ndarray:
         family = self._get_lazy_params(sim)
@@ -84,6 +96,15 @@ class Cuboid(FilterBase, _Cuboid):
             z1 = x1
         self.x1, self.y1, self.z1, self.x2, self.y2, self.z2 = x1, y1, z1, x2, y2, z2
 
+    def instance_signature(self):
+        x1 = get_signature_safe(self.x1, fallback_to_id=True)
+        y1 = get_signature_safe(self.y1, fallback_to_id=True)
+        z1 = get_signature_safe(self.z1, fallback_to_id=True)
+        x2 = get_signature_safe(self.x2, fallback_to_id=True)
+        y2 = get_signature_safe(self.y2, fallback_to_id=True)
+        z2 = get_signature_safe(self.z2, fallback_to_id=True)
+        return (self.__class__.__name__, x1, y1, z1, x2, y2, z2)
+
     def calculate(self, sim: SimSnap) -> np.ndarray:
         params = self._get_lazy_params(sim)
         return _Cuboid(*params)(sim)
@@ -105,6 +126,11 @@ class Disc(FilterBase, _Disc):
         self.height = height
         self.cen = cen
 
+    def instance_signature(self):
+        radius = get_signature_safe(self.radius, fallback_to_id=True)
+        height = get_signature_safe(self.height, fallback_to_id=True)
+        cen = get_signature_safe(self.cen, fallback_to_id=True)
+        return (self.__class__.__name__, radius, height, cen)
 
     def calculate(self, sim: SimSnap) -> np.ndarray:
         radius, height, cen = self._get_lazy_params(sim)
@@ -126,6 +152,12 @@ class BandPass(FilterBase, _BandPass):
         self._min = min
         self._max = max
 
+    def instance_signature(self):
+        prop = get_signature_safe(self._prop, fallback_to_id=True)
+        _min = get_signature_safe(self._min, fallback_to_id=True)
+        _max = get_signature_safe(self._max, fallback_to_id=True)
+        return (self.__class__.__name__, prop, _min, _max)
+
     def calculate(self, sim: SimSnap) -> np.ndarray:
         prop, _min, _max = self._get_lazy_params(sim)
         return _BandPass(prop, _min, _max)(sim)
@@ -143,6 +175,11 @@ class HighPass(FilterBase, _HighPass):
         self._prop = prop
         self._min = min
 
+    def instance_signature(self):
+        prop = get_signature_safe(self._prop, fallback_to_id=True)
+        _min = get_signature_safe(self._min, fallback_to_id=True)
+        return (self.__class__.__name__, prop, _min)
+
     def calculate(self, sim: SimSnap) -> np.ndarray:
         prop, _min = self._get_lazy_params(sim)
         return _HighPass(prop, _min)(sim)
@@ -157,6 +194,11 @@ class LowPass(FilterBase, _LowPass):
     def __init__(self, prop: str, max: ValueLike | ValueLikeFunc):
         self._prop = prop
         self._max = max
+
+    def instance_signature(self):
+        prop = get_signature_safe(self._prop, fallback_to_id=True)
+        _max = get_signature_safe(self._max, fallback_to_id=True)
+        return (self.__class__.__name__, prop, _max)
 
     def calculate(self, sim: SimSnap) -> np.ndarray:
         prop, _max = self._get_lazy_params(sim)
@@ -173,6 +215,12 @@ class Annulus(FilterBase, _Annulus):
         self.r1 = r1
         self.r2 = r2
         self.cen = cen
+
+    def instance_signature(self):
+        r1 = get_signature_safe(self.r1, fallback_to_id=True)
+        r2 = get_signature_safe(self.r2, fallback_to_id=True)
+        cen = get_signature_safe(self.cen, fallback_to_id=True)
+        return (self.__class__.__name__, r1, r2, cen)
 
     def calculate(self, sim: SimSnap) -> np.ndarray:
         r1, r2, cen = self._get_lazy_params(sim)
@@ -196,6 +244,13 @@ class SolarNeighborhood(FilterBase, _SolarNeighborhood):
         self.r2 = r2
         self.height = height
         self.cen = cen
+
+    def instance_signature(self):
+        r1 = get_signature_safe(self.r1, fallback_to_id=True)
+        r2 = get_signature_safe(self.r2, fallback_to_id=True)
+        height = get_signature_safe(self.height, fallback_to_id=True)
+        cen = get_signature_safe(self.cen, fallback_to_id=True)
+        return (self.__class__.__name__, r1, r2, height, cen)
 
     def calculate(self, sim: SimSnap) -> np.ndarray:
         r1, r2, height, cen = self._get_lazy_params(sim)
