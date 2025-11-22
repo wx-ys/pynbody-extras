@@ -51,6 +51,18 @@ where = ["src"]
 version = {attr = "pynbodyext.__version__"}
 
 
+# ======================================================================================
+# Optional dependencies
+# ======================================================================================
+[project.optional-dependencies]
+
+dev = [
+    "pre-commit",
+    "mypy>=1.17",
+    "ruff>=0.11"
+]
+
+
 
 # ======================================================================================
 # Ruff configuration
@@ -116,7 +128,7 @@ known-third-party = [
   "matplotlib",
   "pytest",
 ]
-known-first-party = ["gal3d"]
+known-first-party = ["pynbodyext"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
