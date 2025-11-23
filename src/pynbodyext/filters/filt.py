@@ -1,4 +1,5 @@
 
+from abc import abstractmethod
 from collections.abc import Callable
 from typing import TypeAlias
 
@@ -6,7 +7,7 @@ import numpy as np
 from pynbody.array import SimArray
 from pynbody.family import Family, get_family
 from pynbody.snapshot import SimSnap
-from pynbody.units import UnitBase
+from pynbody.units import Unit, UnitBase
 
 from pynbodyext.util._type import get_signature_safe
 
@@ -35,8 +36,14 @@ FamilyLike: TypeAlias = Family | str
 FamilyLikeFunc: TypeAlias = Callable[[SimSnap], FamilyLike]
 
 
+class VolumeFilter(FilterBase):
+    """ A filter that defines a volume in the simulation space."""
+    @abstractmethod
+    def volume(self, sim: SimSnap | None = None) -> float | UnitBase:
+        """ Total volume of the filter """
 
-class Sphere(FilterBase,_Sphere):
+
+class Sphere(VolumeFilter,_Sphere):
 
     def __init__(self,
                 radius: ValueLike | ValueLikeFunc,
@@ -58,6 +65,17 @@ class Sphere(FilterBase,_Sphere):
         radius = self._in_sim_units(radius, "pos",sim)
         cen = self.cen(sim) if callable(self.cen) else self.cen
         return radius, cen
+
+    def volume(self, sim: SimSnap | None = None) -> float | UnitBase:
+        if callable(self.radius) and sim is None:
+            raise ValueError("Simulation snapshot must be provided when radius is callable.")
+        radius = self.radius(sim) if callable(self.radius) else self.radius
+        if sim is not None:
+            radius = self._in_sim_units(radius, "pos", sim)
+        elif isinstance(radius, str):
+            radius = Unit(radius)
+        volume = 4/3 * np.pi * radius**3
+        return volume
 
 
 class FamilyFilter(FilterBase, _FamilyFilter):
@@ -81,7 +99,7 @@ class FamilyFilter(FilterBase, _FamilyFilter):
         family = get_family(family, False)
         return family
 
-class Cuboid(FilterBase, _Cuboid):
+class Cuboid(VolumeFilter, _Cuboid):
     def __init__(self, x1: ValueLike | ValueLikeFunc, y1: ValueLike | ValueLikeFunc | None = None,
                  z1: ValueLike | ValueLikeFunc | None = None, x2: ValueLike | ValueLikeFunc | None = None,
                  y2: ValueLike | ValueLikeFunc | None = None, z2: ValueLike | ValueLikeFunc | None = None):
@@ -118,8 +136,26 @@ class Cuboid(FilterBase, _Cuboid):
         z2 = self.z2(sim) if callable(self.z2) else self.z2
         return x1, y1, z1, x2, y2, z2
 
+    def volume(self, sim: SimSnap | None = None) -> float | UnitBase:
+        if callable(self.x1) or callable(self.y1) or callable(self.z1) or callable(self.x2) or callable(self.y2) or callable(self.z2):
+            if sim is None:
+                raise ValueError("Simulation snapshot must be provided when any coordinate is callable.")
+            x1, y1, z1, x2, y2, z2 = self._get_lazy_params(sim)
+        else:
+            x1, y1, z1, x2, y2, z2 = self.x1, self.y1, self.z1, self.x2, self.y2, self.z2
+        x1 = Unit(x1) if isinstance(x1, str) else x1
+        y1 = Unit(y1) if isinstance(y1, str) else y1
+        z1 = Unit(z1) if isinstance(z1, str) else z1
+        x2 = Unit(x2) if isinstance(x2, str) else x2
+        y2 = Unit(y2) if isinstance(y2, str) else y2
+        z2 = Unit(z2) if isinstance(z2, str) else z2
+        l1 = (x2 - x1) if x2 is not None else 2*x1
+        l2 = (y2 - y1) if y2 is not None else 2*y1
+        l3 = (z2 - z1) if z2 is not None else 2*z1
+        volume = l1 * l2 * l3
+        return volume
 
-class Disc(FilterBase, _Disc):
+class Disc(VolumeFilter, _Disc):
     def __init__(self, radius: ValueLike | ValueLikeFunc, height: ValueLike | ValueLikeFunc,
                  cen: ArrayLike | ArrayLikeFunc = (0, 0, 0)):
         self.radius = radius
@@ -143,6 +179,20 @@ class Disc(FilterBase, _Disc):
         height = self._in_sim_units(height, "pos", sim)
         cen = self.cen(sim) if callable(self.cen) else self.cen
         return radius, height, cen
+
+    def volume(self, sim: SimSnap | None = None) -> float | UnitBase:
+        radius: ValueLike
+        height: ValueLike
+        if callable(self.radius) or callable(self.height) or callable(self.cen):
+            if sim is None:
+                raise ValueError("Simulation snapshot must be provided when any parameter is callable.")
+            radius, height, _ = self._get_lazy_params(sim)
+        else:
+            radius, height = self.radius, self.height
+        radius = Unit(radius) if isinstance(radius, str) else radius
+        height = Unit(height) if isinstance(height, str) else height
+        volume = 2 * np.pi * radius**2 * height
+        return volume
 
 
 class BandPass(FilterBase, _BandPass):
@@ -209,7 +259,7 @@ class LowPass(FilterBase, _LowPass):
         _max = self._in_sim_units(_max, self._prop, sim)
         return prop, _max
 
-class Annulus(FilterBase, _Annulus):
+class Annulus(VolumeFilter, _Annulus):
 
     def __init__(self, r1: ValueLike | ValueLikeFunc, r2: ValueLike | ValueLikeFunc, cen: ArrayLike | ArrayLikeFunc = (0, 0, 0)):
         self.r1 = r1
@@ -233,8 +283,22 @@ class Annulus(FilterBase, _Annulus):
         cen = self.cen(sim) if callable(self.cen) else self.cen
         return r1, r2, cen
 
+    def volume(self, sim: SimSnap | None = None) -> float | UnitBase:
+        r1: ValueLike
+        r2: ValueLike
+        if callable(self.r1) or callable(self.r2) or callable(self.cen):
+            if sim is None:
+                raise ValueError("Simulation snapshot must be provided when any parameter is callable.")
+            r1, r2, _ = self._get_lazy_params(sim)
+        else:
+            r1, r2 = self.r1, self.r2
+        r1 = Unit(r1) if isinstance(r1, str) else r1
+        r2 = Unit(r2) if isinstance(r2, str) else r2
+        volume = 4/3 * np.pi * (r2**3 - r1**3)
+        return volume
 
-class SolarNeighborhood(FilterBase, _SolarNeighborhood):
+
+class SolarNeighborhood(VolumeFilter, _SolarNeighborhood):
 
     def __init__(self, r1: ValueLike | ValueLikeFunc = "5 kpc",
                  r2: ValueLike | ValueLikeFunc = "10 kpc",
@@ -265,3 +329,19 @@ class SolarNeighborhood(FilterBase, _SolarNeighborhood):
         height = self._in_sim_units(height, "pos", sim)
         cen = self.cen(sim) if callable(self.cen) else self.cen
         return r1, r2, height, cen
+
+    def volume(self, sim: SimSnap | None = None) -> float | UnitBase:
+        r1: ValueLike
+        r2: ValueLike
+        height: ValueLike
+        if callable(self.r1) or callable(self.r2) or callable(self.height) or callable(self.cen):
+            if sim is None:
+                raise ValueError("Simulation snapshot must be provided when any parameter is callable.")
+            r1, r2, height, _ = self._get_lazy_params(sim)
+        else:
+            r1, r2, height = self.r1, self.r2, self.height
+        r1 = Unit(r1) if isinstance(r1, str) else r1
+        r2 = Unit(r2) if isinstance(r2, str) else r2
+        height = Unit(height) if isinstance(height, str) else height
+        volume = 2 * np.pi * height * (r2**2 - r1**2)
+        return volume
