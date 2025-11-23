@@ -13,10 +13,9 @@ from pynbodyext.calculate import CalculatorBase
 from pynbodyext.util._type import get_signature_safe
 
 __all__ = ["PropertyBase", "ConstantProperty", "LambdaProperty", "OpProperty",
-           "ParamSum", "ParameterContain",]
+           "ParamSum", "ParameterContain","VolumeDensity", "SurfaceDensity"]
 
-
-
+from pynbodyext.filters.filt import Annulus, BandPass, ValueLike, ValueLikeFunc, VolumeFilter
 
 TProp = TypeVar("TProp", bound=SimArray | float | np.ndarray | int | tuple | bool, covariant=True)
 
@@ -453,7 +452,63 @@ class ParameterContain(PropertyBase[SimArray]):
         results = float(results_arr[0]) if self._frac_is_scalar else results_arr
 
         cal_key_crit = SimArray(results)
-        cal_key_crit.units = cal_key_sorted.units
+        cal_key_crit.units = cal_key_array.units
         cal_key_crit.sim = sim.ancestor
 
         return cal_key_crit
+
+
+class VolumeDensity(PropertyBase[SimArray]):
+
+    def __init__(self, rmax: VolumeFilter | ValueLike | ValueLikeFunc, parameter: str = "mass", rmin: ValueLike | ValueLikeFunc = 0.):
+        self.rmax = rmax
+        self.rmin = rmin
+        self.parameter = parameter
+
+
+    def instance_signature(self):
+        return (self.__class__.__name__,
+                get_signature_safe(self.rmax, fallback_to_id=True),
+                get_signature_safe(self.parameter, fallback_to_id=True),
+                get_signature_safe(self.rmin, fallback_to_id=True))
+
+    def calculate(self, sim: SimSnap) -> SimArray:
+        if isinstance(self.rmax, VolumeFilter):
+            selector = self.rmax
+        else:
+            selector = Annulus(self.rmin,self.rmax,)
+        param_sum = sim[selector][self.parameter].sum()
+        volume = selector.volume(sim)
+
+        den = param_sum / volume
+        if isinstance(volume, float):
+            den.units = sim[self.parameter].units / sim["pos"].units**3
+        den.sim = sim.ancestor
+        return den
+
+class SurfaceDensity(PropertyBase[SimArray]):
+
+    def __init__(self, rmax: ValueLike | ValueLikeFunc, parameter: str = "mass", rmin: ValueLike | ValueLikeFunc = 0.):
+        self.rmax = rmax
+        self.rmin = rmin
+        self.parameter = parameter
+
+    def instance_signature(self):
+        return (self.__class__.__name__,
+                get_signature_safe(self.rmax, fallback_to_id=True),
+                get_signature_safe(self.parameter, fallback_to_id=True),
+                get_signature_safe(self.rmin, fallback_to_id=True))
+
+    def calculate(self, sim: SimSnap) -> SimArray:
+        rmax = self.rmax(sim) if callable(self.rmax) else self.rmax
+        rmin = self.rmin(sim) if callable(self.rmin) else self.rmin
+        rmin = self._in_sim_units(rmin, "pos",sim)
+        rmax = self._in_sim_units(rmax, "pos",sim)
+        selector = BandPass("rxy",rmin, rmax)
+        param_sum = sim[selector][self.parameter].sum()
+
+        den = param_sum / (np.pi * (rmax**2 - rmin**2))
+
+        den.units = sim[self.parameter].units / sim["pos"].units**2
+        den.sim = sim.ancestor
+        return den

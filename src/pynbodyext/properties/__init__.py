@@ -4,12 +4,14 @@ module for property calculations.
 """
 
 
-from .base import ParameterContain, ParamSum, PropertyBase
+from .base import ParameterContain, ParamSum, PropertyBase, SurfaceDensity, VolumeDensity
 
 __all__ = [
     "PropertyBase",
     "ParamSum",
     "ParameterContain",
+    "VolumeDensity",
+    "SurfaceDensity",
 ]
 
 from .generic import AngMomVec, CenPos, CenVel, KappaRot, SpinParam, VirialRadius
