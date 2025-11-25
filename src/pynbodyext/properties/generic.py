@@ -34,7 +34,7 @@ class CenPos(PropertyBase[SimArray | np.ndarray]):
         elif self.mode == "ssc":
             cen = shrink_sphere_center(sim)
         elif self.mode == "hyb":
-            cen = hybrid_center(sim)
+            cen = hybrid_center(sim, r = "5 kpc")
         else:
             raise ValueError(f"Invalid mode: {self.mode}. Expected one of ['ssc', 'com', 'pot', 'hyb'].")
         if isinstance(cen, SimArray):
