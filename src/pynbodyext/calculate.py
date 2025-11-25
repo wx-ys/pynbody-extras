@@ -38,7 +38,7 @@ Us = TypeVarTuple("Us")
 U = TypeVar("U")
 T = TypeVar("T")
 
-
+TCalculator = TypeVar("TCalculator", bound="CalculatorBase[Any]")
 
 class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
     """An abstract base class for performing calculations on particle data."""
@@ -410,8 +410,43 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         )
 
     # ------- combinators --------
-    def __and__(self: CalculatorBase[T], other: CalculatorBase[U]) -> CombinedCalculator[T, U]:
-        return CombinedCalculator(self, other)
+
+    @overload
+    def __and__(                # type: ignore
+        self: CombinedCalculator[Unpack[Ts]],
+        other: CombinedCalculator[Unpack[Us]],
+    ) -> CombinedCalculator[Unpack[Ts], Unpack[Us]]: ...  # type: ignore
+
+    @overload
+    def __and__(                # type: ignore
+        self: CombinedCalculator[Unpack[Ts]],
+        other: CalculatorBase[U],
+    ) -> CombinedCalculator[Unpack[Ts], U]: ...
+
+    @overload
+    def __and__(
+        self: CalculatorBase[T],
+        other: CombinedCalculator[Unpack[Us]],
+    ) -> CombinedCalculator[T, Unpack[Us]]: ...
+    @overload
+    def __and__(self: CalculatorBase[T], other: CalculatorBase[U]) -> CombinedCalculator[T, U]: ...
+
+    def __and__(self: TCalculator, other: object) -> CombinedCalculator[Unpack[tuple[Any, ...]]]:
+        if not isinstance(other, CalculatorBase):
+            raise TypeError(f"Unsupported operand type(s) for &: '{type(self).__name__}' and '{type(other).__name__}'")
+
+        left_props: tuple[CalculatorBase[Any], ...]
+        if isinstance(self, CombinedCalculator):
+            left_props = self.props
+        else:
+            left_props = (self,)
+
+        right_props: tuple[CalculatorBase[Any], ...]
+        if isinstance(other, CombinedCalculator):
+            right_props = other.props
+        else:
+            right_props = (other,)
+        return CombinedCalculator(*left_props, *right_props)
 
     def __repr__(self):
         if hasattr(self,"name"):
@@ -439,20 +474,6 @@ class CombinedCalculator(CalculatorBase[tuple[Unpack[Ts]]], Generic[Unpack[Ts]])
         # Expand all child calculations under "3) calculate"
         return list(self.props)
 
-    @overload   # type: ignore
-    def __and__(self: CombinedCalculator[Unpack[Ts]],
-                other: CalculatorBase[U]) -> CombinedCalculator[Unpack[Ts], U]: ...
-    @overload
-    def __and__(self: CombinedCalculator[Unpack[Ts]],     # type: ignore
-                other: CombinedCalculator[Unpack[Us]]) -> CombinedCalculator[Unpack[Ts], Unpack[Us]]: ...   # type: ignore
-
-    def __and__(self, other: Any) -> Any:
-        if isinstance(other, CombinedCalculator):
-            return CombinedCalculator(*self.props, *other.props)
-        elif isinstance(other, CalculatorBase):
-            return CombinedCalculator(*self.props, other)
-        else:
-            raise TypeError(f"Unsupported operand type(s) for &: 'CombinedCalculator' and '{type(other).__name__}'")
 
     def __repr__(self) -> str:
         return f"CombinedCalculator({', '.join(repr(p) for p in self.props)})"
