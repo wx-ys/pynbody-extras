@@ -1,5 +1,31 @@
 """
+pynbodyext.calculate
+====================
+
 Generic calculation interface for pynbody snapshots.
+
+This module provides an abstract base class `CalculatorBase` for defining
+calculations on particle data in pynbody simulations, supporting composable
+filters, transformations, performance profiling, and caching. It also provides
+`CombinedCalculator` for combining multiple calculators.
+
+Classes
+-------
+CalculatorBase : Abstract base class for calculations on simulation data.
+CombinedCalculator : Combines multiple CalculatorBase instances for joint evaluation.
+
+Usage
+-----
+Subclass `CalculatorBase` to implement custom calculations, and use
+`CombinedCalculator` to combine multiple calculators.
+
+
+>>> class MyCalc(CalculatorBase[float]):
+...     def calculate(self, sim: SimSnap) -> float:
+...         return np.mean(sim['mass'])
+...
+>>> calc = MyCalc()
+>>> result = calc.enable_perf()(sim)
 """
 from __future__ import annotations
 
@@ -37,11 +63,48 @@ Ts = TypeVarTuple("Ts")
 Us = TypeVarTuple("Us")
 U = TypeVar("U")
 T = TypeVar("T")
-
 TCalculator = TypeVar("TCalculator", bound="CalculatorBase[Any]")
 
 class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
-    """An abstract base class for performing calculations on particle data."""
+    """
+    Abstract base class for performing calculations on particle data.
+
+    This class provides a unified interface for calculations on pynbody
+    simulation snapshots, supporting composable filters, transformations,
+    performance profiling, and evaluation caching.
+
+    Subclasses should implement the `calculate` method.
+
+    Attributes
+    ----------
+    _filter : FilterLike or None
+        Optional filter to apply before calculation.
+    _transformation : TransformLike or None
+        Optional transformation to apply before calculation.
+    _revert_transformation : bool
+        Whether to revert the transformation after calculation.
+    _perf_stats : PerfStats
+        Performance statistics collector.
+    _enable_eval_cache : bool
+        Whether to enable evaluation caching for this instance.
+
+    Methods
+    -------
+    calculate(sim, *args, **kwargs)
+        Abstract method to perform the calculation.
+    with_filter(filt)
+        Returns a new instance with the given filter applied.
+    with_transformation(transformation, revert=True)
+        Returns a new instance with the given transformation applied.
+    enable_perf(time=True, memory=True)
+        Enables/disables timing and memory profiling.
+    enable_cache(enable=True)
+        Enables/disables evaluation caching.
+    format_flow(indent=0, short=True)
+        Returns a semantic flow rendering of the calculation.
+    format_tree(indent=0)
+        Returns a pretty-printed tree of the calculator and its children.
+    """
 
     _filter: FilterLike | None
     _transformation: TransformLike | None
@@ -49,6 +112,9 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
     _perf_stats: PerfStats
     _enable_eval_cache: bool = True
     def __new__(cls: type[Self], *args: Any, **kwargs: Any) -> Self:
+        """
+        Create a new instance, initializing filter, transformation, and performance stats.
+        """
         # initialize per-instance filter and transformation settings
         self = super().__new__(cls)
         self._filter = None
@@ -60,27 +126,29 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
     # Calculation phase "child calculation" hook: default is none, subclasses may override
     def calculate_children(self) -> list[CalculatorBase[Any]]:
+        """
+        Returns a list of child calculations for this node.
+
+        Default is an empty list. Subclasses may override to provide child calculators.
+        """
         return []
 
 
     def instance_signature(self) -> tuple:
         """
-        Signature describing how *this* calculator was constructed.
-        Default: identity-based. Subclasses should override to return
-        a stable representation of constructor args if possible.
-        Example override: return (self.__class__.__name__, ("param", self.param))
+        Returns a signature describing how this calculator was constructed.
+
+        Default is identity-based. Subclasses should override to return a stable
+        representation of constructor arguments if possible.
         """
         return ("id", id(self))
 
     def signature(self) -> tuple:
         """
-        Full structural signature for this calculator node, including:
-          - instance init signature (instance_signature)
-          - filter signature (if filter is CalculatorBase use its signature, else id)
-          - transformation signature (same logic)
-          - revert flag
-        This is the canonical signature used for run-level caching and CSE.
-        Subclasses may override instance_signature() to provide a deterministic key.
+        Returns the full structural signature for this calculator node.
+
+        Includes instance signature, filter signature, transformation signature,
+        and revert flag. Used for run-level caching and common subexpression elimination.
         """
         # instance/init signature
         try:
@@ -112,13 +180,26 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
     def format_flow(self, indent: int = 0, short: bool = True) -> str:
         """
-        Semantic flow rendering:
+        Returns a semantic flow rendering of the calculation node.
+
+        Parameters
+        ----------
+        indent : int, optional
+            Indentation level for pretty-printing, by default 0
+        short : bool, optional
+            Whether to use a short form omitting empty transform/filter, by default True
+
+        Rendering
+        ---------
         Node
         ├─ 1) transform: <transform-node-or-repr>
         ├─ 2) filter:    <filter-node-or-repr>
         └─ 3) calculate:
              └─ <child-calculation(s)...>
-        Note: If transform/filter is CalculatorBase, recursively expand with format_flow.
+
+        Notes
+        -----
+        If transform/filter is CalculatorBase, recursively expand with format_flow.
         """
         pad = "  " * indent
         lines: list[str] = []
@@ -170,6 +251,11 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
     # children hook for tree formatting and optional traversal
     def children(self) -> list[CalculatorBase[Any]]:
+        """
+        Returns a list of calculator-like children (filter and transformation if present).
+
+        Used for tree formatting and traversal.
+        """
         kids: list[CalculatorBase[Any]] = []
         if isinstance(getattr(self, "_filter", None), CalculatorBase):
             kids.append(self._filter)   # type: ignore[arg-type]
@@ -179,6 +265,13 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
     def format_tree(self, indent: int = 0) -> str:
         """
+        Returns a pretty-printed string representation of the calculator tree.
+
+        Parameters
+        ----------
+        indent : int, optional
+            Indentation level for pretty-printing, by default 0
+
         Pretty-print the calculator tree using children() to discover subnodes.
         Falls back to showing filter/transformation if they don't support children().
         """
@@ -213,6 +306,11 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
 
     def _do_pre_transform(self, sim: SimSnap) -> Transformation | None:
+        """
+        Applies the transformation to the simulation snapshot if present.
+
+        Returns the transformation object, or None if no transformation is set.
+        """
         if self._transformation is not None:
 
             with TraceManager.trace_phase(self, "transform"):
@@ -226,6 +324,11 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         return None
 
     def _do_pre_filter(self, sim: SimSnap) -> SimSnap:
+        """
+        Applies the filter to the simulation snapshot if present.
+
+        Returns the filtered simulation snapshot.
+        """
         if self._filter is not None:
             with TraceManager.trace_phase(self, "filter"):
                 try:
@@ -237,6 +340,11 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         return sim
 
     def _do_calculate(self, sim: SimSnap, trans_obj: Transformation | None, stats: PerfStats) -> ReturnT:
+        """
+        Performs the calculation and reverts the transformation if needed.
+
+        Returns the calculation result.
+        """
         try:
             with TraceManager.trace_phase(self, "calculate"):
                 with stats.step("calculate"):
@@ -253,9 +361,20 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
     def __call__(self, sim: SimSnap) -> ReturnT:
         """
-        Unified top-level call:
-         - create a single Trace run and EvalCache.use(sim) for the duration
-         - use a structure-based cache key to avoid duplicate evaluate
+        Unified top-level call for calculator evaluation.
+
+        Parameters
+        ----------
+        sim : SimSnap
+            The simulation snapshot to evaluate the calculator on.
+
+        Examples
+        --------
+        >>> # If enable performance profiling
+        >>> calculator.enable_perf()(sim)
+        >>>
+        >>> # If enable evaluation caching
+        >>> calculator.enable_cache()(sim)
         """
         logger.debug("")
         token = id(sim)
@@ -306,9 +425,9 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
     def _invoke(self, sim: SimSnap) -> ReturnT:
         """
-        Perform the actual transform/filter/calculate under PerfStats.
-        Note: do NOT create TraceManager.trace_run or EvalCacheManager.use here;
-        that is handled at the caller so we don't nest contexts.
+        Performs the actual transform/filter/calculate under PerfStats.
+
+        Note: TraceManager.run and EvalCacheManager.use(sim) should already be active.
         """
         # At this point TraceManager.run and EvalCacheManager.use(sim) should already be active.
         with self._perf_stats as stats:
@@ -322,35 +441,100 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
     @abstractmethod
     def calculate(self, sim: SimSnap, *args: Any, **kwargs: Any) -> ReturnT:
+        """
+        Abstract method to perform the calculation.
+
+        Must be implemented by subclasses.
+        """
         raise NotImplementedError(
             f"{self.__class__.__name__} must implement calculate"
         )
 
     def enable_perf(self: Self, time: bool = True, memory: bool = True) -> Self:
-        """Enable or disable timing and memory profiling for this calculator."""
+        """
+        Enable or disable timing and memory profiling for this calculator.
+
+        Parameters
+        ----------
+        time : bool
+            Enable timing profiling.
+        memory : bool
+            Enable memory profiling.
+
+        Returns
+        -------
+        Self
+            The calculator instance.
+        """
         self._perf_stats.time_enabled = time
         self._perf_stats.memory_enabled = memory
         return self
 
     def enable_cache(self: Self, enable: bool = True) -> Self:
-        """Enable/disable evaluation caching for this calculator instance."""
+        """
+        Enable or disable evaluation caching for this calculator instance.
+
+        Parameters
+        ----------
+        enable : bool
+            Whether to enable caching.
+
+        Returns
+        -------
+        Self
+            The calculator instance.
+        """
         self._enable_eval_cache = bool(enable)
         return self
 
     def with_filter(self: Self, filt: FilterLike) -> Self:
-        """Return a new CalculatorBase instance with the given filter applied."""
+        """
+        Return a new CalculatorBase instance with the given filter applied.
+
+        Parameters
+        ----------
+        filt : FilterLike
+            The filter to apply.
+
+        Returns
+        -------
+        Self
+            The calculator instance.
+        """
         logger.debug("Applying filter: %s to %s", filt, self)
         self._filter = filt
         return self
 
     def with_transformation(self: Self, transformation: TransformLike, revert: bool = True) -> Self:
-        """Return a new CalculatorBase instance with the given transformation applied."""
+        """
+        Return a new CalculatorBase instance with the given transformation applied.
+
+        Parameters
+        ----------
+        transformation : TransformLike
+            The transformation to apply.
+        revert : bool
+            Whether to revert the transformation after calculation.
+
+        Returns
+        -------
+        Self
+            The calculator instance.
+        """
         logger.debug("Applying transformation: %s with revert=%s to %s", transformation, revert, self)
         self._transformation = transformation
         self._revert_transformation = revert
         return self
 
     def __getitem__(self, key: FilterLike) -> Self:
+        """
+        Shorthand for applying a filter using indexing syntax.
+
+        Returns
+        -------
+        Self
+            The calculator instance with the filter applied.
+        """
         return self.with_filter(key)
 
     def _in_sim_units(
@@ -362,9 +546,8 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         """
         Convert a value into the simulation's native units for a given array.
 
-        This converts `value` - which may be a string with units (e.g., "10 kpc"),
-        a pynbody Unit object, or a raw number assumed to already be in native units -
-        to a float expressed in the units of `sim[sim_parameter]`.
+        Converts `value` (str, Unit, number, or single-element array) to a float
+        in the units of `sim[sim_parameter]`.
 
         Parameters
         ----------
@@ -432,6 +615,21 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
     def __and__(self: CalculatorBase[T], other: CalculatorBase[U]) -> CombinedCalculator[T, U]: ...
 
     def __and__(self: TCalculator, other: object) -> CombinedCalculator[Unpack[tuple[Any, ...]]]:
+        """
+        Combine this calculator with another using the & operator.
+
+        Returns a CombinedCalculator containing both calculators.
+
+        Parameters
+        ----------
+        other : CalculatorBase or CombinedCalculator
+            The other calculator to combine.
+
+        Returns
+        -------
+        CombinedCalculator
+            A new CombinedCalculator instance.
+        """
         if not isinstance(other, CalculatorBase):
             raise TypeError(f"Unsupported operand type(s) for &: '{type(self).__name__}' and '{type(other).__name__}'")
 
@@ -455,22 +653,72 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
 
 class CombinedCalculator(CalculatorBase[tuple[Unpack[Ts]]], Generic[Unpack[Ts]]):
+    """
+    Combines multiple CalculatorBase instances for joint evaluation.
+
+    Evaluates all contained calculators and returns a tuple of their results.
+
+    Attributes
+    ----------
+    props : tuple of CalculatorBase
+        The calculators to combine.
+
+    Methods
+    -------
+    calculate(sim)
+        Evaluates all calculators and returns a tuple of results.
+    children()
+        Returns the list of child calculators.
+    calculate_children()
+        Returns the list of calculators for semantic flow rendering.
+    """
+
     props: tuple[CalculatorBase[Any], ...]
     def __init__(self, *props: CalculatorBase[Unpack[Ts]]) -> None: # type: ignore
+        """
+        Initialize with the given calculators.
+
+        Parameters
+        ----------
+        *props : CalculatorBase
+            The calculators to combine.
+        """
         self.props = props
 
 
     def instance_signature(self):
+        """
+        Returns a signature describing how this CombinedCalculator was constructed.
+        """
         return (self.__class__.__name__, tuple(p.instance_signature() for p in self.props))
 
     def calculate(self, sim: SimSnap) -> tuple[Unpack[Ts]]:
+        """
+        Evaluates all contained calculators and returns a tuple of their results.
+
+        Parameters
+        ----------
+        sim : SimSnap
+            The simulation snapshot.
+
+        Returns
+        -------
+        tuple
+            Tuple of results from each calculator.
+        """
         return tuple(p(sim) for p in self.props)
 
     def children(self) -> list[CalculatorBase[Any]]:
+        """
+        Returns the list of child calculators, including parent filter/transformation.
+        """
         # Expand own props and also keep parent filter/transformation expansion
         return [*self.props, *super().children()]
 
     def calculate_children(self) -> list[CalculatorBase[Any]]:
+        """
+        Returns the list of calculators for semantic flow rendering.
+        """
         # Expand all child calculations under "3) calculate"
         return list(self.props)
 
