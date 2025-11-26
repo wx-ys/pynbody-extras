@@ -10,7 +10,7 @@ from pynbodyext.util._type import get_signature_safe
 
 from .base import TransformBase
 
-__all__ = ["AlignAngMomVec"]
+__all__ = ["AlignAngMomVec","AlignMajorAngMomAxis"]
 
 
 class AlignVec(TransformBase[Rotation]):
@@ -111,7 +111,7 @@ class AlignVec(TransformBase[Rotation]):
         return upn
 
 
-class AlignAngMomVec(TransformBase[Rotation]):
+class AlignAngMomVec(AlignVec):
     """
     Aligns the angular momentum vector with the z-axis.
     """
@@ -120,3 +120,29 @@ class AlignAngMomVec(TransformBase[Rotation]):
         from pynbodyext.properties.generic import AngMomVec
         return AngMomVec()(sim)
 
+class AlignMajorAngMomAxis(AlignVec):
+    """
+    Aligns the axis that most particles' angular momentum vectors are parallel to (regardless of sign),
+    and chooses the direction so that the majority of particles have positive projection.
+    """
+    def get_vec(self, sim: SimSnap) -> np.ndarray:
+        # Get positions and velocities
+        pos = sim["pos"].view(np.ndarray)
+        vel = sim["vel"].view(np.ndarray)
+
+        # Particle angular momentum vectors
+        L = np.cross(pos, vel)
+        L_norm = np.linalg.norm(L, axis=1)
+        valid = L_norm > 0
+        L_unit = np.zeros_like(L)
+        L_unit[valid] = L[valid] / L_norm[valid][:, None]
+
+        # SVD find major axis
+        u, s, vh = np.linalg.svd(L_unit, full_matrices=False)
+        axis = vh[0]
+        axis = axis / np.linalg.norm(axis)
+
+        dots = L_unit @ axis
+        if np.sum(dots > 0) < np.sum(dots < 0):
+            axis = -axis
+        return axis
