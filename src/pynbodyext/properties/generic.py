@@ -11,7 +11,7 @@ from pynbody.snapshot import SimSnap
 
 from .base import PropertyBase
 
-__all__ = ["CenPos","CenVel","AngMomVec", "KappaRot", "KappaRotMean", "VirialRadius", "SpinParam"]
+__all__ = ["CenPos","CenVel","AngMomVec", "KappaRot", "KappaRotMean", "VirialRadius", "SpinParam", "PatternSpeed"]
 
 
 
@@ -136,3 +136,30 @@ class SpinParam(PropertyBase[float]):
 
         spin = spin_parameter(sim)
         return spin
+
+
+class PatternSpeed(PropertyBase[SimArray]):
+    """Calculate pattern speed in Z direction, assuming disk in x-y plane.
+
+    Notes
+    -----
+    The calculation is based on eq. 46 of Pfenniger & Romero-Gómez (2023) [1]_.
+
+    References
+    ----------
+    .. [1] Pfenniger, D., & Romero-Gómez, M. 2023, A&A, 673, A36
+    """
+
+    def calculate(self, sim: SimSnap) -> SimArray:
+
+        Ixx = (sim["mass"]*sim["x"]*sim["x"]).sum()
+        Iyy = (sim["mass"]*sim["y"]*sim["y"]).sum()
+        Ixy = (sim["mass"]*sim["x"]*sim["y"]).sum()
+        # I_plus = 1/2*(Ixx+Iyy)
+        I_minus = 1/2*(Ixx-Iyy)
+        d_Ixy = (sim["mass"]*(sim["x"]*sim["vy"]+sim["y"]*sim["vx"])).sum()
+        d_I_minus = (sim["mass"]*(sim["x"]*sim["vx"]-sim["y"]*sim["vy"])).sum()
+
+        omega_Iz = 1/2*(I_minus*d_Ixy-d_I_minus*Ixy)/(I_minus*I_minus+Ixy*Ixy)
+        omega_Iz.sim = sim.ancestor
+        return omega_Iz
