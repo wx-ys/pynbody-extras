@@ -2,7 +2,7 @@
 from typing import Generic, TypeVar
 
 from pynbody.snapshot import SimSnap
-from pynbody.transformation import Transformable, Transformation
+from pynbody.transformation import Transformation
 
 from pynbodyext.calculate import CalculatorBase
 from pynbodyext.log import logger
@@ -32,7 +32,8 @@ class TransformBase(CalculatorBase[TTrans], Generic[TTrans]):
     def __repr__(self):
         return f"<Transform {self.__class__.__name__}>"
 
-    def get_target(self, sim: SimSnap, previous: Transformation | None = None) -> Transformable:
+    def get_target(self, sim: SimSnap, previous: Transformation | None = None) -> Transformation | SimSnap:
+        target: Transformation | SimSnap
         if previous is not None:
             target = previous
         elif self.move_all:

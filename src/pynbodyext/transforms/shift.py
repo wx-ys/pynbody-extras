@@ -18,7 +18,7 @@ class PosToCenter(TransformBase[GenericTranslation]):
 
     def __init__(self, mode: Literal["ssc", "com", "pot", "hyb"] | SimNpArray | SimNpArrayFunc= "ssc", move_all: bool = True):
         if isinstance(mode, str):
-            if mode not in ["ssc", "com", "pot","hyb"]:
+            if mode not in ("ssc", "com", "pot","hyb"):
                 raise ValueError(f"Invalid mode: {mode}. Expected one of ['ssc', 'com', 'pot', 'hyb'].")
         elif not (callable(mode) or isinstance(mode, (np.ndarray, SimArray))):
             raise ValueError(f"Invalid mode type: {type(mode)}. Expected str, callable, or array.")
