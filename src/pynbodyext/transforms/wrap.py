@@ -9,6 +9,7 @@ from pynbody import transformation, units
 from pynbody.array import SimArray
 from pynbody.snapshot import SimSnap
 
+from pynbodyext.log import logger
 from pynbodyext.util._type import get_signature_safe
 
 from .base import TransformBase
@@ -47,15 +48,16 @@ class WrapTransformation(transformation.Transformation):
             Integer dtype for the offset counters (default: int8).
             Use a larger type (e.g. int16/int32) if needed.
         """
-        if convention not in ("center", "upper", "minirange"):
+        convention_l = convention.lower()
+        if convention_l not in ("center", "upper", "minirange"):
             raise ValueError(
                 "Unknown wrapping convention, must be 'center', 'upper' or 'minirange'"
             )
         self.boxsize = boxsize
-        self.convention = convention
+        self.convention = convention_l
         self._k_dtype = k_dtype
         self._k_offsets: np.ndarray | None = None  # shape (N, 3), ints
-        description = convention + "_wrap"
+        description = "Wrap"+convention_l.capitalize()
         super().__init__(f, description=description)
 
     def _resolve_boxsize_float(self, f: SimSnap | None) -> float | None:
@@ -121,10 +123,27 @@ class WrapTransformation(transformation.Transformation):
         z = f["z"].view(np.ndarray)
 
         L = self._resolve_boxsize_float(f)
+        logger.debug("wrap: resolved boxsize L=%s", L)
+
+
         if L is None:
             warnings.warn(
                 "wrap: no boxsize specified and snapshot has no 'boxsize' property; skipping wrap",
                 stacklevel=2,
+            )
+            logger.warning(
+                "wrap: no boxsize specified and snapshot has no 'boxsize' property; skipping wrap"
+            )
+            return
+
+        if L <= 0:
+            warnings.warn(
+                f"wrap: boxsize must be positive, got {L}; skipping wrap",
+                stacklevel=2,
+            )
+            logger.warning(
+                "wrap: boxsize must be positive, got %s; skipping wrap",
+                L,
             )
             return
 
@@ -160,12 +179,13 @@ class WrapTransformation(transformation.Transformation):
             axes_k_u = (kx_u, ky_u, kz_u)
             chosen_k = []
 
-            for v, kc, ku, _lower_c, _lower_u in zip(
+            for i, (v, kc, ku, _lower_c, _lower_u) in enumerate(
+                zip(
                 axes_v,
                 axes_k_c,
                 axes_k_u,
                 (lower_center,)*3,
-                (lower_upper,)*3, strict=False,
+                (lower_upper,)*3, strict=False,)
             ):
                 if v.size == 0:
                     chosen_k.append(np.zeros_like(v, dtype=self._k_dtype))
@@ -177,12 +197,19 @@ class WrapTransformation(transformation.Transformation):
                 range_c = float(wrapped_c.max() - wrapped_c.min()) if wrapped_c.size else 0.0
                 range_u = float(wrapped_u.max() - wrapped_u.min()) if wrapped_u.size else 0.0
 
+                logger.debug(
+                    "wrap[minirange]: axis %d range center=%.6g upper=%.6g",
+                    i, range_c, range_u,
+                )
+
                 if range_c <= range_u:
                     v[:] = wrapped_c
                     chosen_k.append(kc)
+                    logger.debug("wrap[minirange]: axis %d chose center wrapping", i)
                 else:
                     v[:] = wrapped_u
                     chosen_k.append(ku)
+                    logger.debug("wrap[minirange]: axis %d chose upper wrapping", i)
 
             kx, ky, kz = chosen_k
 
