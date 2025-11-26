@@ -11,7 +11,7 @@ from pynbody.snapshot import SimSnap
 
 from .base import PropertyBase
 
-__all__ = ["CenPos","CenVel","AngMomVec", "KappaRot", "VirialRadius", "SpinParam"]
+__all__ = ["CenPos","CenVel","AngMomVec", "KappaRot", "KappaRotMean", "VirialRadius", "SpinParam"]
 
 
 
@@ -82,6 +82,21 @@ class KappaRot(PropertyBase[float]):
         Krot = np.sum(0.5 * sim["mass"] * (sim["vcxy"] ** 2))
         K = np.sum(sim["mass"] * sim["ke"])
         return float(Krot / K)
+
+
+class KappaRotMean(PropertyBase[float]):
+    """
+    Calculate the mean of the ratio of rotational kinetic energy to total kinetic energy per particle.
+
+    Notes
+    -----
+    This is the mean of (0.5 * m * vcxy^2) / (m * ke) over given particles.
+    """
+    def calculate(self, sim: SimSnap) -> float:
+        krot = 0.5 * sim["vcxy"] ** 2
+        ke = sim["ke"]
+        ratio = krot / ke
+        return float(np.mean(ratio))
 
 class VirialRadius(PropertyBase[float]):
     """Virial radius property"""
