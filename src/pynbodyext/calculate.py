@@ -111,6 +111,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
     _revert_transformation: bool
     _perf_stats: PerfStats
     _enable_eval_cache: bool = True
+    _enable_chunk: bool = False
     def __new__(cls: type[Self], *args: Any, **kwargs: Any) -> Self:
         """
         Create a new instance, initializing filter, transformation, and performance stats.
@@ -122,6 +123,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         self._revert_transformation = True
         self._perf_stats = PerfStats(time=False, memory=False)
         self._enable_eval_cache = True
+        self._enable_chunk = False
         return self
 
     # Calculation phase "child calculation" hook: default is none, subclasses may override
@@ -431,12 +433,17 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         """
         # At this point TraceManager.run and EvalCacheManager.use(sim) should already be active.
         with self._perf_stats as stats:
+            use_sim = sim
+            if self._enable_chunk:
+                # TODO, new chunking implementation
+                use_sim = sim
             with stats.step("transform"):
-                trans_obj = self._do_pre_transform(sim)
+                trans_obj = self._do_pre_transform(use_sim)
             with stats.step("filter"):
-                sim2 = self._do_pre_filter(sim)
+                sim2 = self._do_pre_filter(use_sim)
             # calculate (and possibly revert)
             result = self._do_calculate(sim2, trans_obj, stats)
+            # TODO for new dask result use compute()
         return result
 
     @abstractmethod
@@ -485,6 +492,23 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
             The calculator instance.
         """
         self._enable_eval_cache = bool(enable)
+        return self
+
+    def enable_chunk(self: Self, enable: bool = True) -> Self:
+        """
+        Enable or disable chunked evaluation for this calculator instance.
+
+        Parameters
+        ----------
+        enable : bool
+            Whether to enable chunked evaluation.
+
+        Returns
+        -------
+        Self
+            The calculator instance.
+        """
+        self._enable_chunk = bool(enable)
         return self
 
     def with_filter(self: Self, filt: FilterLike) -> Self:
