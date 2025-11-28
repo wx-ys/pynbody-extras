@@ -46,9 +46,7 @@ def ang_mom_vec(snap):
         cross = np.cross(pos, vel)
         angmom = (mass * cross).sum(axis=0)
 
-    # Set units if possible
-    if hasattr(angmom, "units"):
-        angmom.units = snap["mass"].units * snap["pos"].units * snap["vel"].units
+    angmom.units = snap["mass"].units * snap["pos"].units * snap["vel"].units
     return angmom
 
 
