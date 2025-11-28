@@ -4,7 +4,6 @@
 from typing import Literal
 
 import numpy as np
-from pynbody.analysis.angmom import ang_mom_vec
 from pynbody.analysis.halo import hybrid_center, shrink_sphere_center, virial_radius
 from pynbody.array import SimArray
 from pynbody.snapshot import SimSnap
@@ -13,7 +12,44 @@ from .base import PropertyBase
 
 __all__ = ["CenPos","CenVel","AngMomVec", "KappaRot", "KappaRotMean", "VirialRadius", "SpinParam", "PatternSpeed"]
 
+def ang_mom_vec(snap):
+    """
+    Calculates the angular momentum vector of the specified snapshot.
 
+    Parameters
+    ----------
+    snap : SimSnap
+        The snapshot to analyze
+
+    Returns
+    -------
+    array.SimArray
+        The angular momentum vector of the snapshot
+    """
+    mass = snap["mass"].reshape((len(snap["mass"]), 1))
+    pos = snap["pos"]
+    vel = snap["vel"]
+
+    # Try to import dask only if needed
+    use_dask = False
+    try:
+        import dask.array as da
+        if isinstance(pos, da.Array) and isinstance(vel, da.Array):
+            use_dask = True
+    except ImportError:
+        use_dask = False
+
+    if use_dask:
+        cross = da.map_blocks(np.cross, pos, vel, dtype=pos.dtype)
+        angmom = (mass * cross).sum(axis=0)
+    else:
+        cross = np.cross(pos, vel)
+        angmom = (mass * cross).sum(axis=0)
+
+    # Set units if possible
+    if hasattr(angmom, "units"):
+        angmom.units = snap["mass"].units * snap["pos"].units * snap["vel"].units
+    return angmom
 
 
 class CenPos(PropertyBase[SimArray | np.ndarray]):
@@ -81,7 +117,7 @@ class KappaRot(PropertyBase[float]):
     def calculate(self, sim: SimSnap) -> float:
         Krot = np.sum(0.5 * sim["mass"] * (sim["vcxy"] ** 2))
         K = np.sum(sim["mass"] * sim["ke"])
-        return float(Krot / K)
+        return Krot / K
 
 
 class KappaRotMean(PropertyBase[float]):
