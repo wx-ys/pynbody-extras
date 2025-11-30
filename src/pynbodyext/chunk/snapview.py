@@ -99,7 +99,7 @@ class SimSnapView(ExposedBaseSnapshotMixin, SimSnapViewBase):
         return self.base.derivable_keys()
 
 
-@dataclass
+@dataclass(slots=True)
 class ArrayInfo:
     """ Metadata container describing a SimArray """
     shape: tuple[int, ...]
@@ -107,6 +107,7 @@ class ArrayInfo:
     units: UnitBase
     name: str | None
     family: Family | None
+    derived: bool
 
 
 class MiniSimSnap(SubSnap):
@@ -216,4 +217,5 @@ class MiniSimSnap(SubSnap):
         units = arr.units
         name: str | None = arr.name
         family_: Family | None = arr.family
-        return ArrayInfo(shape, dtype, units, name, family_)
+        derived: bool = arr.derived
+        return ArrayInfo(shape, dtype, units, name, family_, derived)
