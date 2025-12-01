@@ -30,7 +30,7 @@ Subclass `CalculatorBase` to implement custom calculations, and use
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
+from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar, overload, runtime_checkable
 
 import numpy as np
 from pynbody import units
@@ -58,6 +58,12 @@ if TYPE_CHECKING:
 
 
 ReturnT = TypeVar("ReturnT",covariant=True)
+
+@runtime_checkable
+class ReturnTr(Protocol[ReturnT]):
+    """Protocol for return type with .compute() method."""
+    def compute(self, **kwargs: Any) -> ReturnT:
+        ...
 
 Ts = TypeVarTuple("Ts")
 Us = TypeVarTuple("Us")
@@ -110,8 +116,9 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
     _transformation: TransformLike | None
     _revert_transformation: bool
     _perf_stats: PerfStats
-    _enable_eval_cache: bool = True
-    _enable_chunk: bool = False
+    _enable_eval_cache: bool
+    _enable_chunk: bool
+    _chunk_size: int
     def __new__(cls: type[Self], *args: Any, **kwargs: Any) -> Self:
         """
         Create a new instance, initializing filter, transformation, and performance stats.
@@ -124,6 +131,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         self._perf_stats = PerfStats(time=False, memory=False)
         self._enable_eval_cache = True
         self._enable_chunk = False
+        self._chunk_size = 100_000
         return self
 
     # Calculation phase "child calculation" hook: default is none, subclasses may override
@@ -360,6 +368,26 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
                         trans_obj.revert()
         return result
 
+    def _do_compute(self, result: ReturnT | ReturnTr[ReturnT], stats: PerfStats) -> ReturnT:
+        """
+        result.compute() if applicable
+        """
+        if hasattr(result, "compute") and callable(result.compute):
+            try:
+                from dask.array import Array
+                if isinstance(result, Array):
+                    from dask.diagnostics.progress import ProgressBar
+                    with TraceManager.trace_phase(self, "dask compute"):
+                        logger.debug("[%s] computing dask result ...", self)
+                        with stats.step("dask compute"):
+                            with ProgressBar(minimum=1):
+                                result = result.compute(scheduler="single-threaded")
+            except ImportError:
+                pass
+
+        return result   # type: ignore[return-value]
+
+
 
     def __call__(self, sim: SimSnap) -> ReturnT:
         """
@@ -379,6 +407,23 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         >>> calculator.enable_cache()(sim)
         """
         logger.debug("")
+        use_sim: SimSnap | ChunkSimSnap = sim
+
+        created_chunk = False
+        # Wrap with ChunkSnap if chunking enabled and not already chunked
+        if self._enable_chunk:
+            try:
+                from .chunk.chunksnap import ChunkSimSnap  # local import to avoid cycles
+                if not isinstance(sim, ChunkSimSnap):
+                    use_sim = ChunkSimSnap(sim, self._chunk_size)
+                    n_chunk = use_sim.chunks.num_chunks
+                    n_particles = use_sim.chunks.num_particles
+                    created_chunk = True
+                    logger.debug("[%s] chunk mode enabled with chunk_size=%s", self, self._chunk_size)
+                    logger.debug("%d chunks created with %d particles", n_chunk, n_particles)
+            except Exception as e:
+                logger.warning("Chunk mode requested but failed to enable: %s", e)
+
         token = id(sim)
 
         # detect existing ctx for this sim (fast path)
@@ -402,7 +447,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
             if cached is not None:
                 trace_mgr.trace_cache_event(self, "hit", {"sig": node_sig})
                 return cached
-            res = self._invoke(sim)
+            res = self._invoke(use_sim)
             eval_mgr.set(key, res)
             return res
 
@@ -415,12 +460,20 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
                         result =  _run_with_cache()
                     else:
                         # cache disabled for this run -> direct call
-                        result = self._invoke(sim)
+                        result = self._invoke(use_sim)
         else:
             # nested call: reuse existing ctx and its cache_enabled decision
             if eval_mgr.cache_enabled():
                 return _run_with_cache()
-            result = self._invoke(sim)
+            result = self._invoke(use_sim)
+        if created_chunk:
+            try:
+                from .chunk.chunksnap import ChunkSimSnap
+                if isinstance(use_sim, ChunkSimSnap):
+                    use_sim.clear_cache()
+                    del use_sim
+            except ImportError:
+                pass
 
         self._perf_stats.report(logger, title=title)
         return result
@@ -443,7 +496,9 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
                 sim2 = self._do_pre_filter(use_sim)
             # calculate (and possibly revert)
             result = self._do_calculate(sim2, trans_obj, stats)
-            # TODO for new dask result use compute()
+
+            # compute if result is dask-array-like
+            result = self._do_compute(result, stats)
         return result
 
     @abstractmethod
@@ -494,7 +549,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         self._enable_eval_cache = bool(enable)
         return self
 
-    def enable_chunk(self: Self, enable: bool = True) -> Self:
+    def enable_chunk(self: Self, enable: bool = True, chunk_size: int = 100_000) -> Self:
         """
         Enable or disable chunked evaluation for this calculator instance.
 
@@ -502,6 +557,8 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         ----------
         enable : bool
             Whether to enable chunked evaluation.
+        chunk_size : int
+            The size of each chunk.
 
         Returns
         -------
@@ -509,6 +566,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
             The calculator instance.
         """
         self._enable_chunk = bool(enable)
+        self._chunk_size = int(chunk_size)
         return self
 
     def with_filter(self: Self, filt: FilterLike) -> Self:
