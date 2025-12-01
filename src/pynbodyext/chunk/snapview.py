@@ -46,7 +46,7 @@ class SimSnapViewBase(SimSnap):
         super().__init__()
         self._transformations = base._transformations
         self._family_slice = base._family_slice
-        self._num_particles = len(self.base)
+        self._num_particles = len(base)
 
 
 class SimSnapView(ExposedBaseSnapshotMixin, SimSnapViewBase):
@@ -73,18 +73,16 @@ class SimSnapView(ExposedBaseSnapshotMixin, SimSnapViewBase):
     """
     base: SimSnap
     def __init__(self, simsnap: SimSnap):
-        super().__init__(simsnap)
+        ExposedBaseSnapshotMixin.__init__(self, simsnap)
+        SimSnapViewBase.__init__(self, simsnap)
         self._inherit()
+
+    def families(self):
+        return self.base.families()
 
     @property
     def _filename(self):
         return f"{self.base._filename}:View"
-
-    def physical_units(self):
-        return self.base.physical_units()
-
-    def infer_original_units(self, dimensions):
-        return self.base.infer_original_units(dimensions)
 
     def family_keys(self, fam=None):
         return self.base.family_keys(fam)
@@ -107,7 +105,6 @@ class ArrayInfo:
     units: UnitBase
     name: str | None
     family: Family | None
-    derived: bool
 
 
 class MiniSimSnap(SubSnap):
@@ -217,5 +214,4 @@ class MiniSimSnap(SubSnap):
         units = arr.units
         name: str | None = arr.name
         family_: Family | None = arr.family
-        derived: bool = arr.derived
-        return ArrayInfo(shape, dtype, units, name, family_, derived)
+        return ArrayInfo(shape, dtype, units, name, family_)
