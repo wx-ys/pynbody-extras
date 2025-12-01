@@ -6,9 +6,11 @@ from typing import TypeAlias
 import numpy as np
 from pynbody.array import SimArray
 from pynbody.family import Family, get_family
+from pynbody.filt import geometry_selection
 from pynbody.snapshot import SimSnap
 from pynbody.units import Unit, UnitBase
 
+from pynbodyext.chunk import DASK_AVAILABLE
 from pynbodyext.util._type import get_signature_safe
 
 from .base import FilterBase
@@ -58,6 +60,40 @@ class Sphere(VolumeFilter,_Sphere):
 
     def calculate(self, sim: SimSnap) -> np.ndarray:
         radius, cen = self._get_lazy_params(sim)
+        pos = sim["pos"]
+
+        if DASK_AVAILABLE and not isinstance(pos, SimArray):
+            import dask.array as da
+            cen = np.asarray(cen)
+            r = float(radius)
+
+            # compute wrap in the units of pos if available, else -1.0
+            try:
+                wrap = self._get_wrap_in_position_units(sim)
+            except Exception:
+                wrap = -1.0
+
+            def _block_sphere(block, block_info=None, cen=cen, r=r, wrap=wrap):
+                # block is a numpy ndarray with shape (n,3)
+                if block.size == 0:
+                    return np.empty((0,), dtype=bool)
+                if not block.flags["C_CONTIGUOUS"]:
+                    block = np.ascontiguousarray(block)
+                out = geometry_selection.selection(np.asarray(block), "sphere",
+                                                (float(cen[0]), float(cen[1]), float(cen[2]), float(r)),
+                                                float(wrap))
+                return out.view(np.bool_)
+
+            # map_blocks: input is 2D -> output is 1D, so drop_axis=1 (drop second axis)
+            # chunks for output should be a 1-tuple (first-dim chunks)
+            out_chunks = (pos.chunks[0],) if isinstance(pos.chunks, tuple) else (pos.shape[0],)
+            result = da.map_blocks(_block_sphere, pos,
+                                dtype=bool,
+                                chunks=out_chunks,
+                                drop_axis=1)
+            return result
+
+        # fallback: non-dask path (or SimArray) - use upstream implementation
         return _Sphere(radius, cen)(sim)
 
     def _get_lazy_params(self, sim: SimSnap) -> tuple[float, ArrayLike]:
