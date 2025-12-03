@@ -272,6 +272,14 @@ class SimDaskArray(DaskArray):
     __hash__ = DaskArray.__hash__  # make unhashable like Dask Array
 
     @property
+    def pb_name(self):
+        return self._sidecar.name
+
+    @pb_name.setter
+    def pb_name(self, value):
+        self._sidecar.name = value
+
+    @property
     def ancestor(self):
         return self
 
@@ -310,6 +318,10 @@ class SimDaskArray(DaskArray):
     @property
     def base(self):
         return None
+
+    @property
+    def flags(self):
+        return self._sidecar.flags
 
 
     in_units = SimArray.in_units
@@ -455,6 +467,31 @@ class SimDaskArray(DaskArray):
     def __ne__(self, other):
         return super().__ne__(other)
 
+
+# Dirty-bit support for SimDaskArray, mirroring SimArray._dirty_fn but using pb_name
+
+def _dirty_fn_dask(method):
+    def wrapped(a, *args, **kwargs):
+        # a is SimDaskArray
+        if getattr(a, "sim", None) is not None and getattr(a, "pb_name", None) is not None:
+            a.sim._dirty(a.pb_name) # Mark the corresponding pynbody array as "dirty" similar to SimArray._dirty_fn, but using pb_name
+
+        return method(a, *args, **kwargs)
+
+    wrapped.__name__ = method.__name__
+    return wrapped
+
+_dirty_methods = [
+    "__setitem__", "__setslice__",
+    "__irshift__", "__imod__", "__iand__", "__ifloordiv__",
+    "__ilshift__", "__imul__", "__ior__", "__ixor__",
+    "__isub__", "__invert__", "__iadd__", "__itruediv__",
+    "__idiv__", "__ipow__",
+]
+
+for name in _dirty_methods:
+    if hasattr(SimDaskArray, name):
+        setattr(SimDaskArray, name, _dirty_fn_dask(getattr(SimDaskArray, name)))
 
 # Factories
 
