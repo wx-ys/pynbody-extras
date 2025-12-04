@@ -126,6 +126,11 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
         # Non-associative binary or unary (we treat all unary via helper methods)
         return OpProperty(op_name, [left, right])
 
+    def clip(self, vmin: Addable | None = None, vmax: Addable | None = None) -> "PropertyBase":
+        """ Return a new PropertyBase that clips the values to [vmin, vmax]."""
+
+        return OpProperty("clip", [self, self._as_property(vmin),self._as_property(vmax)])
+
     # -------- arithmetic operators --------
     def __add__(self, other: Addable) -> "PropertyBase":
         return self._make_op("add", other)
@@ -286,6 +291,18 @@ class OpProperty(PropertyBase[Any]):
         if self.op_name in unary_map:
             val = self.operands[0](sim)
             return unary_map[self.op_name](val)
+
+        # support np.clip as clip operation
+        if self.op_name == "clip":
+            val = self.operands[0](sim)
+            vmin = self.operands[1](sim)
+            vmax = self.operands[2](sim)
+            new_val = np.clip(val, vmin, vmax)
+            if isinstance(val, SimArray):
+                val[...] = new_val
+            else:
+                val = new_val
+            return val
 
         if self.op_name in ("add", "mul"):
             opf = func_map[self.op_name]
@@ -548,6 +565,7 @@ class VolumeDensity(PropertyBase[SimArray]):
         if isinstance(volume, float):
             den.units = sim[self.parameter].units / sim["pos"].units**3
         den.sim = sim.ancestor
+        den.in_units(sim[self.parameter].units / sim["pos"].units**3)
         return den
 
 class SurfaceDensity(PropertyBase[SimArray]):
