@@ -10,7 +10,7 @@ from pynbody.filt import geometry_selection
 from pynbody.snapshot import SimSnap
 from pynbody.units import Unit, UnitBase
 
-from pynbodyext.chunk import DASK_AVAILABLE
+from pynbodyext.chunk import is_dask_array
 from pynbodyext.util._type import get_signature_safe
 
 from .base import FilterBase
@@ -61,8 +61,7 @@ class Sphere(VolumeFilter,_Sphere):
     def calculate(self, sim: SimSnap) -> np.ndarray:
         radius, cen = self._get_lazy_params(sim)
         pos = sim["pos"]
-
-        if DASK_AVAILABLE and not isinstance(pos, SimArray):
+        if is_dask_array(pos):
             import dask.array as da
             cen = np.asarray(cen)
             r = float(radius)
