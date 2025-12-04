@@ -36,6 +36,7 @@ import numpy as np
 from pynbody import units
 from pynbody.array import SimArray
 
+from pynbodyext.chunk import DASK_AVAILABLE, is_dask_array
 from pynbodyext.log import logger
 from pynbodyext.util.perf import PerfStats
 from pynbodyext.util.tracecache import EvalCacheManager, TraceManager
@@ -55,6 +56,8 @@ from .util._type import (
 if TYPE_CHECKING:
     from pynbody.snapshot import SimSnap
     from pynbody.transformation import Transformation
+
+    from pynbodyext.chunk.chunksnap import ChunkSimSnap
 
 
 ReturnT = TypeVar("ReturnT",covariant=True)
@@ -360,6 +363,8 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
                 with stats.step("calculate"):
                     logger.debug("[%s] performing calculation ...", self)
                     result = self.calculate(sim)
+            # compute if result is dask-array-like
+            result = self._do_compute(result, stats)
         finally:
             if trans_obj is not None and self._revert_transformation:
                 with TraceManager.trace_phase(self, "revert"):
@@ -372,19 +377,19 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         """
         result.compute() if applicable
         """
-        if hasattr(result, "compute") and callable(result.compute):
-            try:
-                from dask.array import Array
-                if isinstance(result, Array):
-                    from dask.diagnostics.progress import ProgressBar
-                    with TraceManager.trace_phase(self, "dask compute"):
-                        logger.debug("[%s] computing dask result ...", self)
-                        with stats.step("dask compute"):
-                            with ProgressBar(minimum=1):
-                                result = result.compute(scheduler="single-threaded")
-            except ImportError:
-                pass
+        if DASK_AVAILABLE and is_dask_array(result) and hasattr(result, "compute"):
+            from dask.diagnostics.progress import ProgressBar
 
+            from .chunk.chunksnap import ChunkSimSnap  # local import to avoid cycles
+            with TraceManager.trace_phase(self, "dask compute"):
+                logger.debug("[%s] computing dask result ...", self)
+                with stats.step("dask compute"):
+                    with ProgressBar(minimum=1):
+                        result = result.compute(scheduler="single-threaded")
+            if hasattr(result, "sim") and isinstance(result, SimArray):
+                if isinstance(result.sim, ChunkSimSnap):
+                    result.sim = result.sim.base
+        logger.debug("Calculator %s, return type %s", self, result)
         return result   # type: ignore[return-value]
 
 
@@ -411,18 +416,18 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
         created_chunk = False
         # Wrap with ChunkSnap if chunking enabled and not already chunked
-        if self._enable_chunk:
+        if self._enable_chunk and DASK_AVAILABLE:
             try:
-                from .chunk.chunksnap import ChunkSimSnap  # local import to avoid cycles
+                from .chunk.chunksnap import ChunkSimSnap
                 if not isinstance(sim, ChunkSimSnap):
                     use_sim = ChunkSimSnap(sim, self._chunk_size)
-                    n_chunk = use_sim.chunks.num_chunks
-                    n_particles = use_sim.chunks.num_particles
                     created_chunk = True
                     logger.debug("[%s] chunk mode enabled with chunk_size=%s", self, self._chunk_size)
-                    logger.debug("%d chunks created with %d particles", n_chunk, n_particles)
+                    logger.debug("%d chunks created with %d particles", use_sim.chunks.num_chunks, use_sim.chunks.num_particles)
             except Exception as e:
                 logger.warning("Chunk mode requested but failed to enable: %s", e)
+        elif self._enable_chunk and not DASK_AVAILABLE:
+            logger.info("Chunk mode requested but chunk/dask not available; running without chunking")
 
         token = id(sim)
 
@@ -467,13 +472,10 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
                 return _run_with_cache()
             result = self._invoke(use_sim)
         if created_chunk:
-            try:
-                from .chunk.chunksnap import ChunkSimSnap
-                if isinstance(use_sim, ChunkSimSnap):
-                    use_sim.clear_cache()
-                    del use_sim
-            except ImportError:
-                pass
+            from .chunk.chunksnap import ChunkSimSnap
+            if isinstance(use_sim, ChunkSimSnap):
+                use_sim.clear_cache()
+                del use_sim
 
         self._perf_stats.report(logger, title=title)
         return result
@@ -497,8 +499,6 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
             # calculate (and possibly revert)
             result = self._do_calculate(sim2, trans_obj, stats)
 
-            # compute if result is dask-array-like
-            result = self._do_compute(result, stats)
         return result
 
     @abstractmethod
