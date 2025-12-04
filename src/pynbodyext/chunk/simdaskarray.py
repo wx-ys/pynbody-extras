@@ -24,7 +24,13 @@ def _is_iterable(obj):
 
 def _extract_sidecar(obj):
     if _is_iterable(obj):
-        return [_extract_sidecar(o) for o in obj]
+        has_sim_like = any(isinstance(o, (SimDaskArray, SimArray)) for o in obj)
+        if has_sim_like:
+            # keep the same type as input
+            seq_type = type(obj)
+            return seq_type(_extract_sidecar(o) for o in obj)
+        else:
+            return obj
     return obj._sidecar if isinstance(obj, SimDaskArray) else obj
 
 def _extract_dask(obj):
@@ -37,62 +43,11 @@ def _extract_plain_numpy(obj):
         return [_extract_plain_numpy(o) for o in obj]
     return obj.view(np.ndarray) if isinstance(obj, SimArray) else obj
 
-def _units_may_need_alignment(a, b):
-    # If both have units and are dimensionally compatible, align to left-hand unit
-    try:
-        au = getattr(a, "units", None)
-        bu = getattr(b, "units", None)
-        if au is not None and bu is not None:
-            # If ratio works, they are compatible
-            _ = au.ratio(bu)
-            return True
-    except Exception:
-        return False
-    return False
-
-def _align_arguments_to_left_unit(args):
-    # For binary ops: if units are compatible, convert right to left's units on sidecar & reflect into dask args via scalar factor
-    if len(args) < 2:
-        return args
-    a, b = args[0], args[1]
-    left = a if isinstance(a, (SimArray, SimDaskArray)) else None
-    right = b if isinstance(b, (SimArray, SimDaskArray)) else None
-    if left is None or right is None:
-        return args
-
-    la = left.units if isinstance(left, SimArray) else left._sidecar.units
-    rb = right.units if isinstance(right, SimArray) else right._sidecar.units
-
-    if la is None or rb is None:
-        return args
-
-    try:
-        # Convert right to left's units on sidecar, but for dask args only multiply by ratio
-        ratio = rb.ratio(la)
-    except Exception:
-        return args
-
-    args = list(args)
-    # For Dask execution we only need numeric factor on the right argument
-    args[1] = _multiply_arg_by_scalar(args[1], ratio)
-    return args
-
-def _multiply_arg_by_scalar(arg, scalar):
-    # Multiply either dask Array or numpy array or SimDaskArray by a scalar, without changing units
-    if isinstance(arg, SimDaskArray):
-        return arg.to_dask() * scalar
-    elif isinstance(arg, DaskArray):
-        return arg * scalar
-    elif isinstance(arg, SimArray):
-        return (arg.view(np.ndarray)) * scalar
-    else:
-        return np.asarray(arg) * scalar
-
-def _unary_dask_decorator(dask_func, current_sim_dask):
+def _wrap_unary_preserving_units(dask_func, current_sim_dask):
+    """Wrap a Dask unary op so the result keeps the same sidecar/units."""
     @wraps(dask_func)
     def wrapper(*args, **kwargs):
         da_out = dask_func(*args, **kwargs)
-        # Units unchanged
         return _create_with_sidecar(da_out, current_sim_dask._sidecar)
     return wrapper
 
@@ -118,58 +73,54 @@ def _units_via_registry(func, *sidecar_inputs, **kwargs):
         return result, None
 
 
-def _prep_ufunc(ufunc, *inputs, extract_dask=False, align_units=True, **kwargs):
+def _prep_ufunc(ufunc, *inputs, extract_dask=False, **kwargs):
+    """Prepare inputs/units for numpy/dask ufunc, using SimArray registry when available."""
     sidecar_inputs = _extract_sidecar(inputs)
 
     # Try SimArray registry first
     reg_units_and_inputs = _units_via_registry(ufunc, *sidecar_inputs, **kwargs)
     if reg_units_and_inputs is not None:
         out_units, modified_inputs = reg_units_and_inputs
-        # Prepare numeric inputs for sidecar execution (plain numpy views)
+
         if modified_inputs is not None:
             sidecar_call_inputs = SimArray._simarray_to_plain_ndarray(modified_inputs)
         else:
             sidecar_call_inputs = _extract_plain_numpy(sidecar_inputs)
 
-        # Execute ufunc on the sidecar numerics (to validate shape) but use out_units for the sidecar result
         try:
-            _ = ufunc(*sidecar_call_inputs, **kwargs)  # shape check; result unused
+            _ = ufunc(*sidecar_call_inputs, **kwargs)
         except Exception:
-            pass  # don’t block on shape errors here
+            pass
 
-        # Forge a sidecar result SimArray carrier with out_units (length-1 dummy is fine)
-        sidecar_result = SimArray([1.0], units=out_units, sim=sidecar_inputs[0].sim if hasattr(sidecar_inputs[0], "sim") else None)
-
-        dask_inputs = _extract_dask(inputs) if extract_dask else inputs
-        return dask_inputs, sidecar_result
-
-    # Fallback: original alignment + sidecar execution
-    if align_units and len(sidecar_inputs) >= 2 and _units_may_need_alignment(sidecar_inputs[0], sidecar_inputs[1]):
-        sidecar_inputs = _align_arguments_to_left_unit(sidecar_inputs)
-
-    sidecar_call_inputs = _extract_plain_numpy(sidecar_inputs)
-
-    # Coerce SimDaskArray -> its SimArray sidecar, others -> numpy
-    coerced_inputs = []
-    for si, orig in zip(sidecar_call_inputs, sidecar_inputs, strict=False):
-        if isinstance(orig, SimArray):
-            coerced_inputs.append(orig)
-        elif isinstance(orig, SimDaskArray):
-            coerced_inputs.append(orig._sidecar)
+        if extract_dask:
+            dask_inputs = list(_extract_dask(inputs))
         else:
-            coerced_inputs.append(np.asarray(si))
+            dask_inputs = list(inputs)
 
-    sidecar_result = ufunc(*coerced_inputs, **kwargs)
+        if modified_inputs is not None:
+            for i, (orig_si, mod_si) in enumerate(zip(sidecar_inputs, modified_inputs, strict=False)):
+                if not isinstance(orig_si, (SimArray, SimDaskArray)):
+                    dask_inputs[i] = mod_si             # type: ignore
 
-    dask_inputs = _extract_dask(inputs) if extract_dask else inputs
-    return dask_inputs, sidecar_result
+        sidecar_result = SimArray(
+            [1.0],
+            units=out_units,
+            sim=sidecar_inputs[0].sim if hasattr(sidecar_inputs[0], "sim") else None,
+        )
+
+        return tuple(dask_inputs), sidecar_result
+
+    return None
 
 def _finalize_to_sim(results, unit_like):
     # Finalize dask compute result to SimArray or SimArray scalar
     result = dask_finalize(results)
     units = unit_like.units if isinstance(unit_like, SimArray) else unit_like
     sim = unit_like.sim if isinstance(unit_like, SimArray) else None
+    sim = sim.base if sim is not None and hasattr(sim, "base") else sim
     name = unit_like.name if isinstance(unit_like, SimArray) else None
+    if np.isscalar(result):
+        result = np.array(result)
     if isinstance(result, np.ndarray):
         out = SimArray(result, units=units, sim=sim)
         out._name = name
@@ -212,7 +163,7 @@ def _op_to_np(func_name):
         "__abs__": np.abs,
     }.get(func_name)
 
-def _special_dec(the_func):
+def _wrap_binary_op_with_units(the_func):
     # Ensure dunder ops return SimDaskArray with correct units
     def wrapper(self, *args, **kwargs):
         funcname = the_func.__name__
@@ -223,7 +174,9 @@ def _special_dec(the_func):
 
         # Prepare unit result using the sidecars (and align units if compatible)
         ufunc_args = (self,) + args
-        args_for_dask, sidecar_result = _prep_ufunc(npufunc, *ufunc_args, extract_dask=True, **kwargs)
+        args_for_dask, sidecar_result = _prep_ufunc(
+            npufunc, *ufunc_args, extract_dask=True, **kwargs
+        )
 
         # Remove the first argument (self) for the actual operator call
         args_for_call = list(args_for_dask)
@@ -277,7 +230,7 @@ class SimDaskArray(DaskArray):
 
     @pb_name.setter
     def pb_name(self, value):
-        self._sidecar.name = value
+        self._sidecar._name = value
 
     @property
     def ancestor(self):
@@ -369,18 +322,21 @@ class SimDaskArray(DaskArray):
         return wrapped(numpy_ufunc, method, *inputs, **kwargs)
 
     def __array_function__(self, func, types, args, kwargs):
-        args, sidecar_res = _prep_ufunc(func, *args, extract_dask=True, **kwargs)
+        prep = _prep_ufunc(func, *args, extract_dask=True, **kwargs)
+        if prep is None: # No unit handling available
+            return super().__array_function__(func, types, args, kwargs)
+        args, sidecar_res = prep
         types = [type(i) for i in args]
         wrapped = _post_ufunc(super().__array_function__, sidecar_res)
         return wrapped(func, types, args, kwargs)
 
     def __getitem__(self, index):
-        return _unary_dask_decorator(super().__getitem__, self)(index)
+        return _wrap_unary_preserving_units(super().__getitem__, self)(index)
 
     def __getattribute__(self, name):
         result = super().__getattribute__(name)
         if name in _USE_UNARY_DECORATOR:
-            return _unary_dask_decorator(result, self)
+            return _wrap_unary_preserving_units(result, self)
         return result
 
     def __dask_postcompute__(self):
@@ -411,59 +367,59 @@ class SimDaskArray(DaskArray):
         else:
             return {}
 
-    @_special_dec
+    @_wrap_binary_op_with_units
     def __abs__(self):
         return super().__abs__()
 
-    @_special_dec
+    @_wrap_binary_op_with_units
     def __pow__(self, other):
         return super().__pow__(other)
 
-    @_special_dec
+    @_wrap_binary_op_with_units
     def __mul__(self, other):
         return super().__mul__(other)
 
-    @_special_dec
+    @_wrap_binary_op_with_units
     def __rmul__(self, other):
         return super().__rmul__(other)
 
-    @_special_dec
+    @_wrap_binary_op_with_units
     def __truediv__(self, other):
         return super().__truediv__(other)
 
-    @_special_dec
+    @_wrap_binary_op_with_units
     def __rtruediv__(self, other):
         return super().__rtruediv__(other)
 
-    @_special_dec
+    @_wrap_binary_op_with_units
     def __add__(self, other):
         return super().__add__(other)
 
-    @_special_dec
+    @_wrap_binary_op_with_units
     def __sub__(self, other):
         return super().__sub__(other)
 
-    @_special_dec
+    @_wrap_binary_op_with_units
     def __lt__(self, other):
         return super().__lt__(other)
 
-    @_special_dec
+    @_wrap_binary_op_with_units
     def __le__(self, other):
         return super().__le__(other)
 
-    @_special_dec
+    @_wrap_binary_op_with_units
     def __gt__(self, other):
         return super().__gt__(other)
 
-    @_special_dec
+    @_wrap_binary_op_with_units
     def __ge__(self, other):
         return super().__ge__(other)
 
-    @_special_dec
+    @_wrap_binary_op_with_units
     def __eq__(self, other):
         return super().__eq__(other)
 
-    @_special_dec
+    @_wrap_binary_op_with_units
     def __ne__(self, other):
         return super().__ne__(other)
 
@@ -471,10 +427,14 @@ class SimDaskArray(DaskArray):
 # Dirty-bit support for SimDaskArray, mirroring SimArray._dirty_fn but using pb_name
 
 def _dirty_fn_dask(method):
+    """Mark underlying SimDaskArray as dirty when mutating SimDaskArray in-place."""
     def wrapped(a, *args, **kwargs):
         # a is SimDaskArray
-        if getattr(a, "sim", None) is not None and getattr(a, "pb_name", None) is not None:
-            a.sim._dirty(a.pb_name) # Mark the corresponding pynbody array as "dirty" similar to SimArray._dirty_fn, but using pb_name
+        sim = getattr(a, "sim", None)
+        name = getattr(a, "pb_name", None)
+        # Mark the corresponding pynbody array as "dirty" similar to SimArray._dirty_fn, but using pb_name
+        if sim is not None and name is not None:
+            sim._dirty(name)
 
         return method(a, *args, **kwargs)
 
@@ -521,11 +481,11 @@ def reduce_with_units(dask_func: Any, sim_dask_arr: SimDaskArray, *args: Any, **
     """Call a dask.array reduction function and preserve units when appropriate."""
     name = getattr(dask_func, "__name__", "")
     if name in _ALLOWED_REDUCTIONS:
-        return _unary_dask_decorator(dask_func, sim_dask_arr)(sim_dask_arr, *args, **kwargs)
+        return _wrap_unary_preserving_units(dask_func, sim_dask_arr)(sim_dask_arr, *args, **kwargs)
     # Fallback: try matching numpy function name to infer units via sidecar
-    npfunc = getattr(np, name, None)
-    if npfunc:
-        newargs, sidecar_res = _prep_ufunc(npfunc, sim_dask_arr, *args, extract_dask=True, **kwargs)
+    np_func = getattr(np, name, None)
+    if np_func:
+        newargs, sidecar_res = _prep_ufunc(np_func, sim_dask_arr, *args, extract_dask=True, **kwargs)
         return _post_ufunc(dask_func, sidecar_res)(*newargs)
     else:
         raise ValueError("could not deduce np equivalent of dask reduction")
