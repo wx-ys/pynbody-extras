@@ -89,6 +89,8 @@ class _ChunkSnapshotCache:
                     self._holds_global = True
                     sel = cast("IndexedSubSnap", self.ancestor[self.chunk_slice])
                     self._chunk_snap = sel.load_copy()
+                    for k in self.ancestor._transformations:
+                        k.apply_to(self._chunk_snap)
         return self._chunk_snap
 
     def _acquire(self):
