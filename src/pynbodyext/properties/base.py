@@ -10,6 +10,7 @@ from pynbody.array import SimArray
 from pynbody.snapshot import SimSnap
 
 from pynbodyext.calculate import CalculatorBase
+from pynbodyext.chunk import is_dask_array
 from pynbodyext.util._type import get_signature_safe
 
 __all__ = ["PropertyBase", "ConstantProperty", "LambdaProperty", "OpProperty",
@@ -431,6 +432,9 @@ class ParameterContain(PropertyBase[SimArray]):
         parameter_array = sim[self.parameter]
         cal_key_array = sim[self.cal_key]
 
+        if is_dask_array(cal_key_array) or is_dask_array(parameter_array):
+            return self._calculate_dask(sim)
+
         # Sort the arrays
         indices = np.argsort(cal_key_array)
         cal_key_sorted = cal_key_array[indices]
@@ -455,6 +459,66 @@ class ParameterContain(PropertyBase[SimArray]):
         cal_key_crit.units = cal_key_array.units
         cal_key_crit.sim = sim.ancestor
 
+        return cal_key_crit
+
+    def _calculate_dask(self, sim: SimSnap) -> SimArray:
+        import dask.array as da
+        key_da = sim[self.cal_key]
+        param_da = sim[self.parameter]
+
+        # 1) Materialize key to NumPy and compute global argsort
+        #    This avoids dask.array global sort limitations while keeping param lazy.
+        key_np = np.asarray(key_da.compute())
+        idx_np = np.argsort(key_np)
+
+        # Reorder key and param
+        key_sorted_np = key_np[idx_np]                  # NumPy array
+        param_sorted_da = da.take(param_da, idx_np)     # Dask array, reordered lazily
+
+        # 2) Cumulative sum and normalization (match NumPy path)
+        cum_da = da.cumsum(param_sorted_da)
+
+        # Compute only first and last scalars for normalization
+        first = float(cum_da[0].compute())
+        last  = float(cum_da[-1].compute())
+        denom = last - first
+        if denom <= 0.0:
+            raise ValueError(
+                f"Non-positive total '{self.parameter}' encountered; cannot normalize cumulative."
+            )
+
+        cum_norm_da = (cum_da - first) / denom
+
+        # 3) Vectorized interpolation via searchsorted against normalized cumulative
+        frac_da = da.from_array(self._frac_array, chunks=(len(self._frac_array),))
+        pos_da = da.searchsorted(cum_norm_da, frac_da, side="left")
+
+        # Clamp positions to [1, N-1] to allow neighbor access
+        n = key_sorted_np.shape[0]
+        pos_da = da.clip(pos_da, 1, max(1, n - 1))
+
+        i0 = pos_da - 1
+        i1 = pos_da
+
+        x0 = cum_norm_da[i0]
+        x1 = cum_norm_da[i1]
+
+        # Use NumPy key array for neighbors (fast, already sorted)
+        y0 = key_sorted_np[np.asarray(i0.compute(), dtype=int)]
+        y1 = key_sorted_np[np.asarray(i1.compute(), dtype=int)]
+
+        # Linear interpolation weights with safe denominator
+        w = (frac_da - x0) / da.maximum(x1 - x0, np.finfo(float).eps)
+
+        # y0/y1 are NumPy; convert w to NumPy to finish interpolation cheaply
+        w_np = np.asarray(w.compute(), dtype=float)
+        res_np = y0 + w_np * (y1 - y0)
+
+        # 4) Wrap result
+        results = float(res_np[0]) if self._frac_is_scalar else res_np
+        cal_key_crit = SimArray(results)
+        cal_key_crit.units = key_da.units
+        cal_key_crit.sim = sim.ancestor
         return cal_key_crit
 
 
