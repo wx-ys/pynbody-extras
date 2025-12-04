@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, cast
 import numpy as np
 from pynbody.family import Family, get_family
 from pynbody.snapshot import SimSnap
-from pynbody.snapshot.subsnap import ExposedBaseSnapshotMixin, FamilySubSnap, IndexedSubSnap, SubSnap
+from pynbody.snapshot.subsnap import FamilySubSnap, IndexedSubSnap, SubSnap
 from pynbody.units import UnitBase
 
 if TYPE_CHECKING:
@@ -47,9 +47,10 @@ class SimSnapViewBase(SimSnap):
         self._transformations = base._transformations
         self._family_slice = base._family_slice
         self._num_particles = len(base)
+        self.properties = base.properties
 
 
-class SimSnapView(ExposedBaseSnapshotMixin, SimSnapViewBase):
+class SimSnapView(SimSnapViewBase): # should use ExposedBaseSnapshotMixin ?
     """
     Read-only view of an existing `SimSnap`.
 
@@ -62,8 +63,7 @@ class SimSnapView(ExposedBaseSnapshotMixin, SimSnapViewBase):
     Attributes
     ----------
     base : SimSnap
-        The underlying snapshot object that backs this view. Set by the
-        `ExposedBaseSnapshotMixin` initialization.
+        The underlying snapshot object that backs this view.
 
     Examples
     --------
@@ -73,9 +73,17 @@ class SimSnapView(ExposedBaseSnapshotMixin, SimSnapViewBase):
     """
     base: SimSnap
     def __init__(self, simsnap: SimSnap):
-        ExposedBaseSnapshotMixin.__init__(self, simsnap)
+        self.base = simsnap
         SimSnapViewBase.__init__(self, simsnap)
-        self._inherit()
+
+
+    def physical_units(self, distance="kpc", velocity="km s^-1", mass="Msol", persistent=True, convert_parent=True):
+
+        self.base.physical_units(distance, velocity, mass, persistent, convert_parent)
+        return super().physical_units(distance, velocity, mass, persistent, convert_parent)
+
+    def _get_dims(self, dims=None):
+        return self.base._get_dims(dims)
 
     def families(self):
         return self.base.families()
