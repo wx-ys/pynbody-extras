@@ -4,9 +4,11 @@ from typing import Any, Union
 import dask
 import dask.array as da
 import numpy as np
-from pynbody.family import Family, _registry as family_registry
+from pynbody.family import Family
 from pynbody.filt import Filter
 from pynbody.snapshot import SimSnap
+
+from pynbodyext.log import logger
 
 from .chunk import ChunkManager
 from .simdaskarray import SimDaskArray, sim_from_dask
@@ -63,6 +65,8 @@ class ChunkDaskArrayLoader:
 
 class ChunkSimSnap(ChunkDaskArrayLoader, SimSnapView):
     def __init__(self, simsnap: SimSnap, chunk_size: int = 1000_000, **kwargs: Any):
+        if simsnap.keys():
+            logger.warning("Creating ChunkSimSnap from a SimSnap with loaded arrays. Loaded arrays will be ignored.")
         ChunkDaskArrayLoader.__init__(self, simsnap, chunk_size, **kwargs)
         SimSnapView.__init__(self, simsnap)
 
@@ -73,33 +77,54 @@ class ChunkSimSnap(ChunkDaskArrayLoader, SimSnapView):
             return ChunkSubSnap(self, key)
 
     def __delitem__(self, key: str) -> None:
-        self.minisnap.base.__delitem__(key)
+        self.minisnap.ancestor.__delitem__(key)
         super().__delitem__(key)
 
+
     def _load_array(self, key: str, fam: Family | None = None) -> None:
+        self.minisnap._load_array(key, fam)
 
-        base = self.minisnap.base
-        def fk():
-            return {fami: {k for k in list(base._family_arrays.keys()) if fami in base._family_arrays[k]}
-                           for fami in family_registry}
+        NDname = self._array_name_1D_to_ND(key)
+        if NDname:
+            self._load_array(NDname, fam)
+            return
 
-        pre_keys = set(base.keys())
-        pre_fam_keys = fk()
+        arr = ChunkDaskArrayLoader.__getitem__(self, key)
 
-        base[key]
+        self._make_array(arr, key, fam=fam)
 
-        new_keys = set(base.keys()) - pre_keys
-        new_fam_keys = fk()
-        for fami in new_fam_keys:
-            new_fam_keys[fami] = new_fam_keys[fami] - pre_fam_keys[fami]
+    def _make_array(self,arr: SimDaskArray, name: str, fam: Family | None = None, derived: bool = False) -> None:
 
-        for i in new_keys:
-            arr = ChunkDaskArrayLoader.__getitem__(self, i)
+        arr.sim = self
+        arr.family = fam
+        self._arrays[name] = arr
 
-            arr.sim = self.simsnap
-            arr.family = fam
-            self._arrays[i] = arr
+        if derived:
+            if name not in self._derived_array_names:
+                self._derived_array_names.append(name)
 
+        if arr.ndim > 1 and arr.shape[-1] == 3:
+            array_name_1D = self._array_name_ND_to_1D(name)
+            for i, a in enumerate(array_name_1D):
+                self._arrays[a] = arr[:, i]
+                self._arrays[a].pb_name = a
+
+    def _derive_array(self, name, fam=None):
+        """Calculate and store, for this SnapShot, the derivable array 'name'.
+        If *fam* is not None, derive only for the specified family.
+
+        This searches the registry of @X.derived_array functions
+        for all X in the inheritance path of the current class.
+        """
+        fn = self.find_deriving_function(name)
+        if fn:
+            with self.auto_propagate_off:
+                if fam is None:
+                    result = fn(self)
+                    self._make_array(result, name, derived=not fn.__stable__)
+                else:
+                    result = fn(self[fam])
+                    self[fam]._make_array(result, name, fam=fam, derived=not fn.__stable__)
 
     def family_keys(self, fam=None):
         return SimSnap.family_keys(self, fam)
@@ -114,9 +139,11 @@ class ChunkSimSnap(ChunkDaskArrayLoader, SimSnapView):
     def is_ancestor(self, other: "ChunkSimSnap") -> bool:
         return self is other.ancestor
 
+    def apply_transformation_to_array(self, array_name, family = None):
+        pass
+
 
 class ChunkSubSnap(ChunkSimSnap):
-
 
     chunk_ancestor: ChunkSimSnap
     def __init__(self, base: ChunkSimSnap, slice_: slice | np.ndarray | int | Family | Filter):
@@ -127,7 +154,3 @@ class ChunkSubSnap(ChunkSimSnap):
             indices = slice_
         new_chunks = base.chunks.select(indices)
         ChunkSimSnap.__init__(self, new_chunks.simsnap, chunk_size=base.chunks.chunk_size, chunks=new_chunks)
-
-    @property
-    def ancestor(self):
-        return self.chunk_ancestor
