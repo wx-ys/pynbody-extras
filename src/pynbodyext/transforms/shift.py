@@ -6,6 +6,7 @@ from pynbody.array import SimArray
 from pynbody.snapshot import SimSnap
 from pynbody.transformation import GenericTranslation, Transformation
 
+from pynbodyext.log import logger
 from pynbodyext.properties import CenPos, CenVel
 from pynbodyext.util._type import SimNpArray, SimNpArrayFunc, get_signature_safe
 
@@ -48,11 +49,12 @@ class PosToCenter(TransformBase[GenericTranslation]):
 
         target = self.get_target(sim, previous)
 
+        logger.debug("Centering positions using mode: %s, center: %s for %s", description, cen, sim)
         return GenericTranslation(target, "pos", -cen, description=f"PosToCenter_{description}")
 
     @classmethod
     def get_center(cls, sim: SimSnap, mode: Literal["ssc", "com", "pot", "hyb"]) -> SimNpArray:
-        return CenPos(mode=mode).calculate(sim)
+        return CenPos(mode=mode)(sim)
 
 
 class VelToCenter(TransformBase[GenericTranslation]):
@@ -79,8 +81,9 @@ class VelToCenter(TransformBase[GenericTranslation]):
             raise ValueError(f"Invalid mode type: {type(self.mode)}. Expected str, callable, or array.")
 
         target = self.get_target(sim, previous)
+        logger.debug("Centering velocities using mode: %s, center: %s for %s", self.mode, vcen, sim)
         return GenericTranslation(target, "vel", -vcen, description="VelToCenter")
 
     @classmethod
     def get_center(cls, sim: SimSnap, mode: Literal["com"]) -> SimNpArray:
-        return CenVel(mode=mode).calculate(sim)
+        return CenVel(mode=mode)(sim)
