@@ -16,7 +16,7 @@ class TransformBase(CalculatorBase[TTrans], Generic[TTrans]):
     move_all: bool = True
 
 
-    def _do_calculate(self, sim: SimSnap, trans_obj: Transformation | None, stats: PerfStats) -> TTrans:
+    def _perform_calculation(self, sim: SimSnap, trans_obj: Transformation | None, stats: PerfStats) -> TTrans:
         try:
             with stats.step("calculate"):
                 logger.debug("[%s] performing calculation ...", self)

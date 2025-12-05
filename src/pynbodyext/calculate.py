@@ -122,6 +122,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
     _enable_eval_cache: bool
     _enable_chunk: bool
     _chunk_size: int
+    _cached_signature: tuple | None
     def __new__(cls: type[Self], *args: Any, **kwargs: Any) -> Self:
         """
         Create a new instance, initializing filter, transformation, and performance stats.
@@ -135,6 +136,8 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         self._enable_eval_cache = True
         self._enable_chunk = False
         self._chunk_size = 100_000
+
+        self._cached_signature = None
         return self
 
     # Calculation phase "child calculation" hook: default is none, subclasses may override
@@ -163,6 +166,10 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         Includes instance signature, filter signature, transformation signature,
         and revert flag. Used for run-level caching and common subexpression elimination.
         """
+        # if cached, return it
+        if self._cached_signature:
+            return self._cached_signature
+
         # instance/init signature
         try:
             init_sig = self.instance_signature()
@@ -183,13 +190,15 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         else:
             trans_sig = get_signature_safe(trans, fallback_to_id=True)
 
-        return (
+        self._cached_signature = (
             self.__class__.__name__,
             ("init", init_sig),
             ("filter", filter_sig),
             ("trans", trans_sig),
             ("rev", bool(getattr(self, "_revert_transformation", True))),
         )
+
+        return self._cached_signature
 
     def format_flow(self, indent: int = 0, short: bool = True) -> str:
         """
@@ -318,7 +327,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         return "\n".join(lines)
 
 
-    def _do_pre_transform(self, sim: SimSnap) -> Transformation | None:
+    def _apply_pre_transformation(self, sim: SimSnap) -> Transformation | None:
         """
         Applies the transformation to the simulation snapshot if present.
 
@@ -336,7 +345,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
                 return trans_obj
         return None
 
-    def _do_pre_filter(self, sim: SimSnap) -> SimSnap:
+    def _apply_filter(self, sim: SimSnap) -> SimSnap:
         """
         Applies the filter to the simulation snapshot if present.
 
@@ -352,7 +361,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
                     raise RuntimeError(f"Error applying pre-filter {self._filter}") from e
         return sim
 
-    def _do_calculate(self, sim: SimSnap, trans_obj: Transformation | None, stats: PerfStats) -> ReturnT:
+    def _perform_calculation(self, sim: SimSnap, trans_obj: Transformation | None, stats: PerfStats) -> ReturnT:
         """
         Performs the calculation and reverts the transformation if needed.
 
@@ -364,7 +373,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
                     logger.debug("[%s] performing calculation ...", self)
                     result = self.calculate(sim)
             # compute if result is dask-array-like
-            result = self._do_compute(result, stats)
+            result = self._compute_if_delayed(result, stats)
         finally:
             if trans_obj is not None and self._revert_transformation:
                 with TraceManager.trace_phase(self, "revert"):
@@ -373,7 +382,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
                         trans_obj.revert()
         return result
 
-    def _do_compute(self, result: ReturnT | ReturnTr[ReturnT], stats: PerfStats) -> ReturnT:
+    def _compute_if_delayed(self, result: ReturnT | ReturnTr[ReturnT], stats: PerfStats) -> ReturnT:
         """
         result.compute() if applicable
         """
@@ -452,7 +461,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
             if cached is not None:
                 trace_mgr.trace_cache_event(self, "hit", {"sig": node_sig})
                 return cached
-            res = self._invoke(use_sim)
+            res = self._evaluate(use_sim)
             eval_mgr.set(key, res)
             return res
 
@@ -465,12 +474,12 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
                         result =  _run_with_cache()
                     else:
                         # cache disabled for this run -> direct call
-                        result = self._invoke(use_sim)
+                        result = self._evaluate(use_sim)
         else:
             # nested call: reuse existing ctx and its cache_enabled decision
             if eval_mgr.cache_enabled():
                 return _run_with_cache()
-            result = self._invoke(use_sim)
+            result = self._evaluate(use_sim)
         if created_chunk:
             from .chunk.chunksnap import ChunkSimSnap
             if isinstance(use_sim, ChunkSimSnap):
@@ -480,7 +489,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         self._perf_stats.report(logger, title=title)
         return result
 
-    def _invoke(self, sim: SimSnap) -> ReturnT:
+    def _evaluate(self, sim: SimSnap) -> ReturnT:
         """
         Performs the actual transform/filter/calculate under PerfStats.
 
@@ -493,11 +502,11 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
                 # TODO, new chunking implementation
                 use_sim = sim
             with stats.step("transform"):
-                trans_obj = self._do_pre_transform(use_sim)
+                trans_obj = self._apply_pre_transformation(use_sim)
             with stats.step("filter"):
-                sim2 = self._do_pre_filter(use_sim)
+                sim2 = self._apply_filter(use_sim)
             # calculate (and possibly revert)
-            result = self._do_calculate(sim2, trans_obj, stats)
+            result = self._perform_calculation(sim2, trans_obj, stats)
 
         return result
 
@@ -549,7 +558,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         self._enable_eval_cache = bool(enable)
         return self
 
-    def enable_chunk(self: Self, enable: bool = True, chunk_size: int = 100_000) -> Self:
+    def enable_chunk(self: Self, enable: bool = True, chunk_size: int = 4_000_000) -> Self:
         """
         Enable or disable chunked evaluation for this calculator instance.
 
@@ -585,6 +594,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         """
         logger.debug("Applying filter: %s to %s", filt, self)
         self._filter = filt
+        self._cached_signature = None
         return self
 
     def with_transformation(self: Self, transformation: TransformLike, revert: bool = True) -> Self:
@@ -606,6 +616,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         logger.debug("Applying transformation: %s with revert=%s to %s", transformation, revert, self)
         self._transformation = transformation
         self._revert_transformation = revert
+        self._cached_signature = None
         return self
 
     def __getitem__(self, key: FilterLike) -> Self:
