@@ -74,6 +74,7 @@ from typing import TYPE_CHECKING, Literal, Optional, Union, cast, overload
 import numpy as np
 from pynbody.array import IndexedSimArray, SimArray
 
+from pynbodyext.chunk import is_dask_array
 from pynbodyext.util._type import SimNpArray
 
 if TYPE_CHECKING:
@@ -285,6 +286,12 @@ class ProfileArray(SimArray):
             arr_pp = profile.sim[arr]
         else:
             arr_pp = arr
+
+        if is_dask_array(arr_pp):
+            arr_pp = arr_pp.compute()
+        if is_dask_array(weights):
+            weights = weights.compute() # type: ignore
+
 
         for i,ind in enumerate(profile.binind):
             if len(ind) == 0:
