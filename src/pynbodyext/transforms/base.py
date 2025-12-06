@@ -1,3 +1,121 @@
+"""
+Transformation calculators for pynbody-extras.
+
+This module defines :class:`~pynbodyext.transforms.base.TransformBase`, the
+base class for all *transformation calculators*, and the helper
+:func:`~pynbodyext.transforms.base.chain_transforms` for building readable
+transformation chains.
+
+A transformation calculator is a small object that, given a
+:class:`pynbody.snapshot.SimSnap`, returns a
+:class:`pynbody.transformation.Transformation` (or subclass), and applies
+it to the appropriate target (either the full ancestor snapshot or the
+current view/halo). Additionally, these transformations can be attached to other
+calculators via :meth:`pynbodyext.calculate.CalculatorBase.with_transformation`.
+
+See also
+--------
+* :mod:`pynbodyext.calculate` for the generic calculator abstraction.
+* :mod:`pynbodyext.transforms.shift` and :mod:`pynbodyext.transforms.rotate`
+  for concrete transformations (centering, rotations, etc.).
+
+Basic usage
+-----------
+
+TransformBase subclasses implement:
+
+.. code-block:: python
+
+   from pynbody.snapshot import SimSnap
+   from pynbody.transformation import Transformation
+   from pynbodyext.transforms.base import TransformBase
+
+   class MyTransform(TransformBase[Transformation]):
+       def calculate(
+           self,
+           sim: SimSnap,
+           previous: Transformation | None = None,
+       ) -> Transformation:
+           target = self.get_target(sim, previous)
+           # construct a new Transformation acting on target
+           trans = Transformation(target)   # placeholder example
+           return trans
+
+Transformations not only can be used directly:
+
+.. code-block:: python
+    sim = ...  # a SimSnap
+    transform_calc = MyTransform()
+    trans = transform_calc(sim)
+
+But they can also be attached to other calculators via
+:meth:`pynbodyext.calculate.CalculatorBase.with_transformation`:
+
+.. code-block:: python
+
+   from pynbodyext.calculate import CalculatorBase
+
+   class MyCalculator(CalculatorBase[float]):
+       def calculate(self, sim: SimSnap) -> float:
+           # compute something on sim
+           return float(len(sim))
+
+   sim = ...  # a SimSnap
+   my_calc = MyCalculator().with_transformation(MyTransform())
+   value = my_calc(sim)  # MyTransform is applied to sim before MyCalculator.calculate is called.
+
+Chaining transformations
+------------------------
+
+To build readable, linear transformation chains, use
+:func:`chain_transforms` or :meth:`TransformBase.chain`:
+
+.. code-block:: python
+
+   from pynbodyext.transforms.shift import PosToCenter, VelToCenter
+   from pynbodyext.transforms.rotate import AlignAngMomVec
+   from pynbodyext.transforms.base import chain_transforms
+
+   # center in position, center in velocity, then align face-on
+   faceon = chain_transforms(
+       PosToCenter("ssc"),
+       VelToCenter("com"),
+       AlignAngMomVec(),
+   )
+
+   # attach to a calculator
+   from pynbodyext.properties.kappa import KappaRot
+   from pynbodyext.filters.filt import Sphere
+   from pynbodyext.filters import FamilyFilter
+
+   re_faceon = (
+       KappaRot()
+       .with_filter(Sphere("30 kpc") & FamilyFilter("stars"))
+       .with_transformation(faceon)
+   )
+
+   value = re_faceon(sim.halos()[0])
+
+Each transform in the chain is applied in the order given; the final
+return value is the last transform instance, which has previous steps
+attached via :meth:`with_transformation`.
+
+Implementation notes
+--------------------
+
+* :class:`TransformBase` itself inherits from
+  :class:`~pynbodyext.calculate.CalculatorBase` and reuses its profiling,
+  caching and chunking facilities.
+* :meth:`TransformBase.get_target` helps decide whether a transform should
+  operate on ``sim.ancestor`` (global) or the current view/halo.
+
+To add a new transformation, subclass :class:`TransformBase` and implement
+:meth:`calculate(sim, previous)`. See the existing implementations in
+:mod:`pynbodyext.transforms.shift` and :mod:`pynbodyext.transforms.rotate`
+for patterns.
+
+"""
+
 
 from typing import Any, Generic, TypeVar, cast
 
