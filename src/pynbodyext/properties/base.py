@@ -1,5 +1,126 @@
+"""
+Property calculators and expression trees.
+
+This module defines :class:`~pynbodyext.properties.base.PropertyBase` –
+a :class:`~pynbodyext.calculate.CalculatorBase` subclass for lazily
+evaluated "properties" of a :class:`pynbody.snapshot.SimSnap` – and a
+small expression system for combining them.
+
+See also
+--------
+* :mod:`pynbodyext.calculate` for the general calculator API.
+
+Basic usage
+-----------
+
+A property is a calculator; you call it with a snapshot:
+
+.. code-block:: python
+
+   from pynbodyext.properties.base import ParamSum
+
+   # total stellar mass within some filter
+   mstar = ParamSum("mass")
+
+   # later, attach filters/transforms as needed
+   from pynbodyext.filters import FamilyFilter, Sphere
+
+   mstar_inner = (
+       mstar
+       .with_filter(Sphere("30 kpc") & FamilyFilter("stars"))
+   )
+
+   value = mstar_inner(sim)
+
+Composing properties
+--------------------
+
+:class:`PropertyBase` supports arithmetic operators and builds
+:class:`OpProperty` expression trees:
+
+.. code-block:: python
+
+   from pynbodyext.properties.base import PropertyBase, ParamSum
+
+   mstar = ParamSum("mass").with_filter(FamilyFilter("stars"))
+   mgas  = ParamSum("mass").with_filter(FamilyFilter("gas"))
+
+   # total mass, using add
+   mtot = mstar + mgas
+
+   # specific quantity
+   frac = mstar / (mstar + mgas)
+
+   val = frac(sim)
+
+Internally, no calculation happens at construction time; instead
+``frac`` is an :class:`OpProperty` describing the expression.
+When you call ``frac(sim)``, the tree is evaluated, and structurally
+identical subtrees can be cached within that top-level run.
 
 
+Domain-specific examples
+------------------------
+
+Half-mass radius (or similar "contain" radii) can be computed via
+:class:`ParameterContain`:
+
+.. code-block:: python
+
+   from pynbodyext.properties.base import ParameterContain
+   from pynbodyext.filters import FamilyFilter
+
+   re = (
+       ParameterContain("r", 0.5, "mass")
+       .with_filter(FamilyFilter("stars"))
+   )
+
+   re_val = re(sim)   # SimArray with units of "r"
+
+3D volume density and 2D surface density can be computed from simple
+wrappers:
+
+.. code-block:: python
+
+   from pynbodyext.properties.base import VolumeDensity, SurfaceDensity
+   from pynbodyext.filters.filt import Sphere
+
+   # mean mass density inside 10 kpc sphere
+   rho = VolumeDensity(Sphere("10 kpc"), parameter="mass")
+
+   # surface density in annulus 5–10 kpc
+   sigma = SurfaceDensity(rmax="10 kpc", rmin="5 kpc", parameter="mass")
+
+   rho_val   = rho(sim)
+   sigma_val = sigma(sim)
+
+Extending
+---------
+
+To add a new property, subclass :class:`PropertyBase` and implement
+:meth:`calculate`. For example:
+
+.. code-block:: python
+
+   from pynbodyext.properties.base import PropertyBase
+
+   class MyProp(PropertyBase[SimArray]):
+       def instance_signature(self) -> tuple:
+           return (self.__class__.__name__,)
+
+       def calculate(self, sim: SimSnap) -> SimArray:
+           arr = sim["mass"] / sim["rho"]
+           return arr
+
+Because :class:`PropertyBase` inherits from
+:class:`~pynbodyext.calculate.CalculatorBase`, your property can:
+
+* be filtered and transformed;
+* participate in profiling and caching;
+* appear inside :class:`OpProperty` expression trees;
+* be combined with other calculators via the ``&`` operator.
+
+"""
 
 import operator
 from collections.abc import Callable, Sequence
