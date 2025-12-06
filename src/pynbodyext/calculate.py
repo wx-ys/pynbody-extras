@@ -1,32 +1,221 @@
 """
-pynbodyext.calculate
-====================
 
-Generic calculation interface for pynbody snapshots.
+Core calculator abstraction for pynbody-extras.
 
-This module provides an abstract base class `CalculatorBase` for defining
-calculations on particle data in pynbody simulations, supporting composable
-filters, transformations, performance profiling, and caching. It also provides
-`CombinedCalculator` for combining multiple calculators.
+This module defines :class:`~pynbodyext.calculate.CalculatorBase`, the base
+class for all calculations, and :class:`~pynbodyext.calculate.CombinedCalculator`
+for evaluating several calculators together.
 
-Classes
--------
-CalculatorBase : Abstract base class for calculations on simulation data.
-CombinedCalculator : Combines multiple CalculatorBase instances for joint evaluation.
+A *calculator* is a small object with a :meth:`calculate` method that turns a
+:class:`pynbody.snapshot.SimSnap` into some result. Optional **filters** and
+**transformations** can be attached; profiling, caching and (optional)
+chunked/Dask evaluation are handled by the base class.
 
-Usage
------
-Subclass `CalculatorBase` to implement custom calculations, and use
-`CombinedCalculator` to combine multiple calculators.
+See also
+--------
+* :mod:`pynbodyext.filters.base` for filter calculators.
+* :mod:`pynbodyext.transforms.base` for transformation calculators.
+* :mod:`pynbodyext.properties.base` for property calculators.
+* :mod:`pynbodyext.profiles.base` for profile builders.
+
+Basic usage
+-----------
+
+To define a new calculator, subclass :class:`CalculatorBase` and implement
+:meth:`calculate`:
+
+.. code-block:: python
+
+   import numpy as np
+   from pynbody.snapshot import SimSnap
+   from pynbodyext.calculate import CalculatorBase
+
+   class SumMass(CalculatorBase[float]):
+       \"\"\"Return the mean particle mass.\"\"\"
+       def calculate(self, sim: SimSnap) -> float:
+           return float(np.sum(sim["mass"]))
+
+   sim = ...  # a SimSnap
+   calc = SumMass()
+   value = calc(sim)   # calls SumMass.calculate(sim) internally
+
+You never call :meth:`calculate` directly; always call the instance:
+``calc(sim)``.
 
 
->>> class MyCalc(CalculatorBase[float]):
-...     def calculate(self, sim: SimSnap) -> float:
-...         return np.mean(sim['mass'])
-...
->>> calc = MyCalc()
->>> result = calc.enable_perf()(sim)
+Filters and transformations
+---------------------------
+
+Any calculator can be used with a pre-filter and/or pre-transformation.
+
+Filters
+^^^^^^
+Attach a filter with :meth:`with_filter`:
+
+.. code-block:: python
+
+   from pynbody import filt as pyn_filt
+   from pynbodyext.filters import FamilyFilter
+
+   mass_sum = (
+       SumMass()
+       .with_filter(pyn_filt.Sphere("30 kpc") & FamilyFilter("stars"))
+   )
+
+   value = mass_sum(sim)
+
+See :mod:`pynbodyext.filters.base` for how to write calculator-style filters.
+
+Transformations
+^^^^^^^^^^^^^^^
+Attach a transformation with :meth:`with_transformation`:
+
+.. code-block:: python
+
+   from pynbodyext.transforms.shift import PosToCenter, VelToCenter
+   from pynbodyext.transforms.rotate import AlignAngMomVec
+   from pynbodyext.transforms.base import chain_transforms
+   from pynbodyext.filters.filt import Sphere
+   from pynbodyext.properties.base import ParameterContain
+   from pynbodyext.filters import FamilyFilter
+
+   # half-mass radius of stars
+   re = ParameterContain("r", 0.5, "mass").with_filter(FamilyFilter("stars"))
+
+   # readable transform chain: center -> velocity center -> face-on
+   faceon = chain_transforms(
+       PosToCenter("ssc"),
+       VelToCenter().with_filter(Sphere(0.5 * re) & FamilyFilter("stars")),
+       AlignAngMomVec().with_filter(Sphere(2 * re) & FamilyFilter("stars")),
+   )
+
+   from pynbodyext.properties.kappa import KappaRot
+
+   krot = (
+       KappaRot()
+       .with_filter(Sphere("30 kpc") & FamilyFilter("stars"))
+       .with_transformation(faceon)
+   )
+
+   value = krot(sim)
+
+See :mod:`pynbodyext.transforms.base` for more details on :class:`TransformBase`
+and transformation chaining.
+
+
+Combining calculators
+---------------------
+
+Use the ``&`` operator to evaluate several calculators together:
+
+.. code-block:: python
+
+   sum_mass = SumMass().with_filter(FamilyFilter("stars"))
+   combined = krot & sum_mass   # CombinedCalculator[(float, float)]
+
+   krot_val, sum_mass_val = combined(sim)
+
+
+Profiling, caching and chunking
+-------------------------------
+
+Profiling
+^^^^^^^^^
+Enable simple per-node profiling via :meth:`enable_perf`:
+
+.. code-block:: python
+
+   calc = krot.enable_perf(time=True, memory=True)
+   result = calc(sim)
+
+This records time (and optionally memory) spent in the main phases
+(transform, filter, calculate, revert, dask compute). See
+:mod:`pynbodyext.util.perf` for details.
+
+Caching
+^^^^^^^
+Within a single top-level call (a "run"), results can be reused based on a
+structural signature:
+
+.. code-block:: python
+
+   calc = krot.enable_cache(True)
+   v1 = calc(sim)    # computed
+   v2 = calc(sim)    # reused from cache
+
+For custom calculators, override :meth:`instance_signature` to describe how
+the calculator was constructed. See :mod:`pynbodyext.util.tracecache` for
+the caching internals.
+
+Chunked / Dask-backed evaluation
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+For large simulations, you can let :class:`CalculatorBase` wrap the input
+snapshot in a :class:`~pynbodyext.chunk.chunksnap.ChunkSimSnap` so particle
+arrays are loaded lazily as Dask graphs:
+
+.. code-block:: python
+
+   calc = krot.enable_chunk(True, chunk_size=4_000_000)
+result = calc(sim)   # uses ChunkSimSnap internally
+
+If a calculator returns a Dask-backed array, :class:`CalculatorBase` will
+call ``.compute()`` on the top-level result so user code always receives
+concrete arrays/scalars. When you implement your own heavy calculators,
+you may either:
+
+* work on in-memory arrays (simple but eager), or
+* accept Dask arrays and push vectorized reductions down to Dask, only
+  calling ``compute()`` at the end.
+
+See :mod:`pynbodyext.chunk` for chunk/Dask utilities.
+
+
+Inspecting flows and trees
+--------------------------
+
+For debugging, two helpers are available on any calculator:
+
+* :meth:`format_flow` – semantic view (transform → filter → calculate)
+* :meth:`format_tree` – structural tree of calculators
+
+Example:
+
+.. code-block:: python
+
+   print(krot.format_flow())
+   print()
+   print(krot.format_tree())
+
+
+Extending the system
+--------------------
+
+To add **new calculations**, subclass :class:`CalculatorBase` (or one of the
+domain-specific bases, such as :class:`~pynbodyext.properties.base.PropertyBase`
+or :class:`~pynbodyext.profiles.base.ProfileBuilderBase`):
+
+.. code-block:: python
+
+   class MyCalc(CalculatorBase[float]):
+       def __init__(self, param: float):
+           self.param = param
+
+       def instance_signature(self) -> tuple:
+           return (self.__class__.__name__, float(self.param))
+
+       def calculate(self, sim: SimSnap) -> float:
+           # use self._filter / self._transformation transparently
+           return float(sim["mass"].mean() * self.param)
+
+This new calculator can now:
+
+* be filtered via :meth:`with_filter`
+* be transformed via :meth:`with_transformation`
+* be composed via ``&`` with other calculators
+* participate in profiling, caching and (if enabled) chunked evaluation.
+
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
