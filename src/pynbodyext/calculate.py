@@ -140,16 +140,6 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         self._cached_signature = None
         return self
 
-    # Calculation phase "child calculation" hook: default is none, subclasses may override
-    def calculate_children(self) -> list[CalculatorBase[Any]]:
-        """
-        Returns a list of child calculations for this node.
-
-        Default is an empty list. Subclasses may override to provide child calculators.
-        """
-        return []
-
-
     def instance_signature(self) -> tuple:
         """
         Returns a signature describing how this calculator was constructed.
@@ -199,6 +189,15 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         )
 
         return self._cached_signature
+
+    # Calculation phase "child calculation" hook: default is none, subclasses may override
+    def calculate_children(self) -> list[CalculatorBase[Any]]:
+        """
+        Returns a list of child calculations for this node. Used for flow/tree rendering.
+
+        Default is an empty list. Subclasses may override to provide child calculators.
+        """
+        return []
 
     def format_flow(self, indent: int = 0, short: bool = True) -> str:
         """
@@ -327,7 +326,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         return "\n".join(lines)
 
 
-    def _apply_pre_transformation(self, sim: SimSnap) -> Transformation | None:
+    def _apply_transform(self, sim: SimSnap) -> Transformation | None:
         """
         Applies the transformation to the simulation snapshot if present.
 
@@ -502,7 +501,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
                 # TODO, new chunking implementation
                 use_sim = sim
             with stats.step("transform"):
-                trans_obj = self._apply_pre_transformation(use_sim)
+                trans_obj = self._apply_transform(use_sim)
             with stats.step("filter"):
                 sim2 = self._apply_filter(use_sim)
             # calculate (and possibly revert)
@@ -580,7 +579,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
     def with_filter(self: Self, filt: FilterLike) -> Self:
         """
-        Return a new CalculatorBase instance with the given filter applied.
+        Return self with the given filter applied.
 
         Parameters
         ----------
@@ -599,7 +598,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
     def with_transformation(self: Self, transformation: TransformLike, revert: bool = True) -> Self:
         """
-        Return a new CalculatorBase instance with the given transformation applied.
+        Return self with the given transformation applied.
 
         Parameters
         ----------

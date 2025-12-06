@@ -45,8 +45,8 @@ def _extract_numeric(x: Any) -> float | np.ndarray | Any:
 class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
     """A lazily evaluated calculator: SimSnap -> TProp."""
 
-    _init_sig: tuple
 
+    _description: str
     def calculate(self, sim: SimSnap) -> TProp:
         raise NotImplementedError
 
@@ -57,26 +57,9 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
     def children(self) -> list[CalculatorBase[Any]]:
         return super().children()
 
-    # ----- signature for caching -----
-    def signature(self) -> tuple:
-        """
-        Unified structural signature:
-          (class_name,
-           ("init", self._init_sig or ()),
-           ("filter", id(self._filter)), ("trans", id(self._transformation)), ("rev", bool(self._revert_transformation)))
-        Subclasses don't need to override this in most cases.
-        """
-        init_sig = getattr(self, "_init_sig", ())
-        return (
-            self.__class__.__name__,
-            ("init", init_sig),
-            ("filter", id(getattr(self, "_filter", None))),
-            ("trans", id(getattr(self, "_transformation", None))),
-            ("rev", bool(getattr(self, "_revert_transformation", True))),
-        )
     def __repr__(self) -> str:
-        init_sig = getattr(self, "_init_sig", ())
-        return f"<Prop {self.__class__.__name__} {init_sig}>"
+        description = getattr(self, "_description", "")
+        return f"<Prop {self.__class__.__name__} {description}>"
 
     # -------- composition helpers --------
     @classmethod
@@ -126,7 +109,7 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
         # Non-associative binary or unary (we treat all unary via helper methods)
         return OpProperty(op_name, [left, right])
 
-    def clip(self, vmin: Addable | None = None, vmax: Addable | None = None) -> "PropertyBase":
+    def clip(self, vmin: Addable | None = None, vmax: Addable | None = None) -> "OpProperty":
         """ Return a new PropertyBase that clips the values to [vmin, vmax]."""
 
         return OpProperty("clip", [self, self._as_property(vmin),self._as_property(vmax)])
@@ -357,6 +340,7 @@ class ParamSum(PropertyBase[SimArray]):
             Parameter to sum up (e.g., 'mass', 'sfr')
         """
         self.parameter = parameter
+        self._description = f"({parameter})"
 
     def instance_signature(self):
         return (self.__class__.__name__, self.parameter)
