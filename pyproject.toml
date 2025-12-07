@@ -59,7 +59,8 @@ version = {attr = "pynbodyext.__version__"}
 dev = [
     "pre-commit",
     "mypy>=1.17",
-    "ruff>=0.11"
+    "ruff>=0.11",
+    "pytest>=7.4",
 ]
 
 
@@ -148,3 +149,19 @@ warn_redundant_casts = true
 
 disallow_incomplete_defs = true
 check_untyped_defs = true
+
+
+# ======================================================================================
+# pytest configuration
+# ======================================================================================
+[tool.pytest.ini_options]
+minversion = "6.0"
+testpaths = [
+    "tests"
+]
+console_output_style = "classic"
+
+log_cli = true
+log_cli_level = "INFO"
+log_cli_format = "%(asctime)s %(levelname)s %(message)s"
+log_cli_date_format = "%Y-%m-%d %H:%M:%S"

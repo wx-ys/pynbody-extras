@@ -324,7 +324,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         self._perf_stats = PerfStats(time=False, memory=False)
         self._enable_eval_cache = True
         self._enable_chunk = False
-        self._chunk_size = 100_000
+        self._chunk_size = 4_000_000
 
         self._cached_signature = None
         return self
