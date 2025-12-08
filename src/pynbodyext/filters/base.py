@@ -147,6 +147,9 @@ class FilterBase(CalculatorBase[np.ndarray],_Filter):
 class And(FilterBase,_And):
     calculate = _And.__call__
 
+    def __init__(self, f1: FilterBase, f2: FilterBase):
+        _And.__init__(self, f1, f2)
+
     def instance_signature(self):
         f1 = get_signature_safe(self.f1, fallback_to_id=True)
         f2 = get_signature_safe(self.f2, fallback_to_id=True)
@@ -159,6 +162,10 @@ class And(FilterBase,_And):
         return [self.f1,self.f2]
 class Or(FilterBase,_Or):
     calculate = _Or.__call__
+
+    def __init__(self, f1: FilterBase, f2: FilterBase):
+        _Or.__init__(self, f1, f2)
+
     def instance_signature(self):
         f1 = get_signature_safe(self.f1, fallback_to_id=True)
         f2 = get_signature_safe(self.f2, fallback_to_id=True)
@@ -170,6 +177,9 @@ class Or(FilterBase,_Or):
 
 class Not(FilterBase,_Not):
     calculate = _Not.__call__
+
+    def __init__(self, f: FilterBase):
+        _Not.__init__(self, f)
 
     def instance_signature(self):
         f = get_signature_safe(self.f, fallback_to_id=True)
