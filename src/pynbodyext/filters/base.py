@@ -113,6 +113,7 @@ import numpy as np
 from pynbody.snapshot import SimSnap
 
 from pynbodyext.calculate import CalculatorBase
+from pynbodyext.log import logger
 from pynbodyext.util._type import get_signature_safe
 
 from .pynfilt import _And, _Filter, _Not, _Or
@@ -142,6 +143,17 @@ class FilterBase(CalculatorBase[np.ndarray],_Filter):
 
     def __or__(self, f2):
         return Or(self, f2)
+
+    def with_filter(self, filter: Any) -> "FilterBase":
+        logger.warning("You'd typically want to use bitwise operators (&, |, ~) to combine filters. \
+                    For example: filter1 & filter2, filter1 | filter2, ~filter1")
+        return self
+
+    def _apply_filter(self, sim):
+        if self._filter is not None:
+            logger.warning("FilterBase should not have a pre-filter applied. Ignoring pre-filter.")
+
+        return sim
 
 
 class And(FilterBase,_And):
