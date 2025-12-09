@@ -1,6 +1,4 @@
 
-import logging
-
 import numpy.testing as npt
 import numpy as np
 import pytest
@@ -128,10 +126,7 @@ def test_combined_calculate(snap):
 
 @pytest.mark.skipif(not DASK_AVAILABLE, reason="Dask not available")
 def test_chunked_calculate(snap):
-    logging.info(f"{len(snap)} particles in snap")
-    logging.info(f"{snap['mass'].dtype} mass array")
-    calc = SumMass().enable_chunk(chunk_size=100_000)
-    
+    calc = SumMass().enable_chunk(chunk_size=1_000_000)
     star_mass = calc(snap)
     npt.assert_allclose(star_mass, 7632.6, rtol=1e-4)
     assert isinstance(star_mass, SimArray)

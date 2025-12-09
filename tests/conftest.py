@@ -26,11 +26,12 @@ def ensure_test_data():
     # no explicit cleanup here — snapshots are closed in individual fixtures
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def snap():
     """
     Load snapshot for tests. Module-scoped so tests in same module reuse the object.
     """
+    # total 4194304 particles, 2097152 dm + 2076907 gas + 20245 star
     f = pynbody.load("testdata/gadget3/data/snapshot_103/snap_103.hdf5")
     yield f
     # explicit cleanup to release memory between modules
@@ -40,7 +41,7 @@ def snap():
         gc.collect()
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def subfind():
     """
     Load subhalo/subfind data for tests that need it.
