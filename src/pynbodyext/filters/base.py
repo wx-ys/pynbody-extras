@@ -155,6 +155,32 @@ class FilterBase(CalculatorBase[np.ndarray],_Filter):
 
         return sim
 
+    @staticmethod
+    def _resolve_param(sim: SimSnap, value: Any) -> Any:
+        """
+        Resolve a parameter that may be a constant or a callable taking SimSnap.
+
+        If ``value`` is callable, returns ``value(sim)``; otherwise returns
+        ``value`` unchanged.
+        """
+        return value(sim) if callable(value) else value
+
+    def _resolve_param_in_units(
+        self,
+        sim: SimSnap,
+        value: Any,
+        prop_or_field: str,
+    ) -> Any:
+        """
+        Resolve a parameter and convert it to simulation units.
+
+        This is a convenience wrapper around :meth:`_in_sim_units`:
+        first resolves ``value`` (possibly calling it with ``sim``),
+        then calls ``self._in_sim_units`` with the given field name.
+        """
+        resolved = self._resolve_param(sim, value)
+        return self._in_sim_units(resolved, prop_or_field, sim)
+
 
 class And(FilterBase,_And):
     calculate = _And.__call__

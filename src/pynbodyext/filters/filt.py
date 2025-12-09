@@ -96,9 +96,8 @@ class Sphere(VolumeFilter,_Sphere):
         return _Sphere(radius, cen)(sim)
 
     def _get_lazy_params(self, sim: SimSnap) -> tuple[float, ArrayLike]:
-        radius = self.radius(sim) if callable(self.radius) else self.radius
-        radius = self._in_sim_units(radius, "pos",sim)
-        cen = self.cen(sim) if callable(self.cen) else self.cen
+        radius = self._resolve_param_in_units(sim, self.radius, "pos")
+        cen = self._resolve_param(sim, self.cen)
         return radius, cen
 
     def volume(self, sim: SimSnap | None = None) -> float | UnitBase:
@@ -130,7 +129,7 @@ class FamilyFilter(FilterBase, _FamilyFilter):
         return _FamilyFilter(family)(sim)
 
     def _get_lazy_params(self, sim: SimSnap) -> Family:
-        family = self.family(sim) if callable(self.family) else self.family
+        family = self._resolve_param(sim, self.family)
         family = get_family(family, False)
         return family
 
@@ -163,12 +162,12 @@ class Cuboid(VolumeFilter, _Cuboid):
         return _Cuboid(*params)(sim)
 
     def _get_lazy_params(self, sim: SimSnap) -> tuple[ValueLike,ValueLike,ValueLike,ValueLike,ValueLike,ValueLike]:
-        x1 = self.x1(sim) if callable(self.x1) else self.x1
-        y1 = self.y1(sim) if callable(self.y1) else self.y1
-        z1 = self.z1(sim) if callable(self.z1) else self.z1
-        x2 = self.x2(sim) if callable(self.x2) else self.x2
-        y2 = self.y2(sim) if callable(self.y2) else self.y2
-        z2 = self.z2(sim) if callable(self.z2) else self.z2
+        x1 = self._resolve_param(sim, self.x1)
+        y1 = self._resolve_param(sim, self.y1)
+        z1 = self._resolve_param(sim, self.z1)
+        x2 = self._resolve_param(sim, self.x2)
+        y2 = self._resolve_param(sim, self.y2)
+        z2 = self._resolve_param(sim, self.z2)
         return x1, y1, z1, x2, y2, z2
 
     def volume(self, sim: SimSnap | None = None) -> float | UnitBase:
@@ -208,11 +207,9 @@ class Disc(VolumeFilter, _Disc):
         return _Disc(radius, height, cen)(sim)
 
     def _get_lazy_params(self, sim: SimSnap) -> tuple[float, float, ArrayLike]:
-        radius = self.radius(sim) if callable(self.radius) else self.radius
-        radius = self._in_sim_units(radius, "pos", sim)
-        height = self.height(sim) if callable(self.height) else self.height
-        height = self._in_sim_units(height, "pos", sim)
-        cen = self.cen(sim) if callable(self.cen) else self.cen
+        radius = self._resolve_param_in_units(sim, self.radius, "pos")
+        height = self._resolve_param_in_units(sim, self.height, "pos")
+        cen = self._resolve_param(sim, self.cen)
         return radius, height, cen
 
     def volume(self, sim: SimSnap | None = None) -> float | UnitBase:
@@ -249,10 +246,8 @@ class BandPass(FilterBase, _BandPass):
 
     def _get_lazy_params(self, sim: SimSnap) -> tuple[str, ValueLike, ValueLike]:
         prop = self._prop
-        _min = self._min(sim) if callable(self._min) else self._min
-        _min = self._in_sim_units(_min, self._prop, sim)
-        _max = self._max(sim) if callable(self._max) else self._max
-        _max = self._in_sim_units(_max, self._prop, sim)
+        _min = self._resolve_param_in_units(sim, self._min, self._prop)
+        _max = self._resolve_param_in_units(sim, self._max, self._prop)
         return prop, _min, _max
 
 class HighPass(FilterBase, _HighPass):
@@ -271,8 +266,7 @@ class HighPass(FilterBase, _HighPass):
 
     def _get_lazy_params(self, sim: SimSnap) -> tuple[str, ValueLike]:
         prop = self._prop
-        _min = self._min(sim) if callable(self._min) else self._min
-        _min = self._in_sim_units(_min, self._prop, sim)
+        _min = self._resolve_param_in_units(sim, self._min, self._prop)
         return prop, _min
 
 class LowPass(FilterBase, _LowPass):
@@ -290,8 +284,7 @@ class LowPass(FilterBase, _LowPass):
         return _LowPass(prop, _max)(sim)
     def _get_lazy_params(self, sim: SimSnap) -> tuple[str, ValueLike]:
         prop = self._prop
-        _max = self._max(sim) if callable(self._max) else self._max
-        _max = self._in_sim_units(_max, self._prop, sim)
+        _max = self._resolve_param_in_units(sim, self._max, self._prop)
         return prop, _max
 
 class Annulus(VolumeFilter, _Annulus):
@@ -311,11 +304,9 @@ class Annulus(VolumeFilter, _Annulus):
         r1, r2, cen = self._get_lazy_params(sim)
         return _Annulus(r1, r2, cen)(sim)
     def _get_lazy_params(self, sim: SimSnap) -> tuple[float, float, ArrayLike]:
-        r1 = self.r1(sim) if callable(self.r1) else self.r1
-        r1 = self._in_sim_units(r1, "pos", sim)
-        r2 = self.r2(sim) if callable(self.r2) else self.r2
-        r2 = self._in_sim_units(r2, "pos", sim)
-        cen = self.cen(sim) if callable(self.cen) else self.cen
+        r1 = self._resolve_param_in_units(sim, self.r1, "pos")
+        r2 = self._resolve_param_in_units(sim, self.r2, "pos")
+        cen = self._resolve_param(sim, self.cen)
         return r1, r2, cen
 
     def volume(self, sim: SimSnap | None = None) -> float | UnitBase:
@@ -356,13 +347,10 @@ class SolarNeighborhood(VolumeFilter, _SolarNeighborhood):
         return _SolarNeighborhood(r1, r2, height, cen)(sim)
 
     def _get_lazy_params(self, sim: SimSnap) -> tuple[float, float, float, ArrayLike]:
-        r1 = self.r1(sim) if callable(self.r1) else self.r1
-        r1 = self._in_sim_units(r1, "pos", sim)
-        r2 = self.r2(sim) if callable(self.r2) else self.r2
-        r2 = self._in_sim_units(r2, "pos", sim)
-        height = self.height(sim) if callable(self.height) else self.height
-        height = self._in_sim_units(height, "pos", sim)
-        cen = self.cen(sim) if callable(self.cen) else self.cen
+        r1 = self._resolve_param_in_units(sim, self.r1, "pos")
+        r2 = self._resolve_param_in_units(sim, self.r2, "pos")
+        height = self._resolve_param_in_units(sim, self.height, "pos")
+        cen = self._resolve_param(sim, self.cen)
         return r1, r2, height, cen
 
     def volume(self, sim: SimSnap | None = None) -> float | UnitBase:
