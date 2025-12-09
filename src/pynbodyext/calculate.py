@@ -514,83 +514,6 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         lines = render(self, "" if indent == 0 else "  " * indent, True)
         return "\n".join(lines)
 
-
-    def _apply_transform(self, sim: SimSnap) -> Transformation | None:
-        """
-        Applies the transformation to the simulation snapshot if present.
-
-        Returns the transformation object, or None if no transformation is set.
-        """
-        if self._transformation is not None:
-
-            with TraceManager.trace_phase(self, "transform"):
-                try:
-                    logger.debug("[%s] transformation: %s", self, self._transformation)
-                    trans_obj = self._transformation(sim)
-                except Exception as e:
-                    logger.error("Error applying pre-transformation: %s, when calculating %s", e, self)
-                    raise RuntimeError(f"Error applying pre-transformation {self._transformation}") from e
-                return trans_obj
-        return None
-
-    def _apply_filter(self, sim: SimSnap) -> SimSnap:
-        """
-        Applies the filter to the simulation snapshot if present.
-
-        Returns the filtered simulation snapshot.
-        """
-        if self._filter is not None:
-            with TraceManager.trace_phase(self, "filter"):
-                try:
-                    logger.debug("[%s] filter: %s", self, self._filter)
-                    sim = sim[self._filter]
-                except Exception as e:
-                    logger.error("Error applying pre-filter: %s, when calculating %s", e, self)
-                    raise RuntimeError(f"Error applying pre-filter {self._filter}") from e
-        return sim
-
-    def _perform_calculation(self, sim: SimSnap, trans_obj: Transformation | None, stats: PerfStats) -> ReturnT:
-        """
-        Performs the calculation and reverts the transformation if needed.
-
-        Returns the calculation result.
-        """
-        try:
-            with TraceManager.trace_phase(self, "calculate"):
-                with stats.step("calculate"):
-                    logger.debug("[%s] performing calculation ...", self)
-                    result = self.calculate(sim)
-            # compute if result is dask-array-like
-            result = self._compute_if_delayed(result, stats)
-        finally:
-            if trans_obj is not None and self._revert_transformation:
-                with TraceManager.trace_phase(self, "revert"):
-                    with stats.step("revert"):
-                        logger.debug("[%s] reverting transformation: %s", self, self._transformation)
-                        trans_obj.revert()
-        return result
-
-    def _compute_if_delayed(self, result: ReturnT | ReturnTr[ReturnT], stats: PerfStats) -> ReturnT:
-        """
-        result.compute() if applicable
-        """
-        if DASK_AVAILABLE and is_dask_array(result) and hasattr(result, "compute"):
-            from dask.diagnostics.progress import ProgressBar
-
-            from .chunk.chunksnap import ChunkSimSnap  # local import to avoid cycles
-            with TraceManager.trace_phase(self, "dask compute"):
-                logger.debug("[%s] computing dask result ...", self)
-                with stats.step("dask compute"):
-                    with ProgressBar(minimum=1):
-                        result = result.compute(scheduler="single-threaded")
-            if hasattr(result, "sim") and isinstance(result, SimArray):
-                if isinstance(result.sim, ChunkSimSnap):
-                    result.sim = result.sim.base
-        logger.debug("Calculator %s, return type %s", self, result)
-        return result   # type: ignore[return-value]
-
-
-
     def __call__(self, sim: SimSnap) -> ReturnT:
         """
         Unified top-level call for calculator evaluation.
@@ -679,24 +602,236 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
 
     def _evaluate(self, sim: SimSnap) -> ReturnT:
         """
-        Performs the actual transform/filter/calculate under PerfStats.
+        Perform the full evaluation pipeline under :class:`PerfStats`.
 
-        Note: TraceManager.run and EvalCacheManager.use(sim) should already be active.
+        The pipeline is:
+        transform → filter → calculate → optional dask compute → revert.
+
+        Note
+        ----
+        :class:`TraceManager` and :class:`EvalCacheManager` should already
+        be active when this is called (handled by :meth:`__call__`).
         """
         # At this point TraceManager.run and EvalCacheManager.use(sim) should already be active.
         with self._perf_stats as stats:
-            use_sim = sim
-            if self._enable_chunk:
-                # TODO, new chunking implementation
-                use_sim = sim
-            with stats.step("transform"):
-                trans_obj = self._apply_transform(use_sim)
-            with stats.step("filter"):
-                sim2 = self._apply_filter(use_sim)
-            # calculate (and possibly revert)
-            result = self._perform_calculation(sim2, trans_obj, stats)
+            trans_obj = self._run_transform(sim, stats)
+            sim_masked = self._run_filter(sim, stats)
+            result = self._run_calculation(sim, stats, trans_obj, sim_masked)
+            result = self._run_dask_compute(result, stats)
+            self._run_revert(trans_obj, stats)
 
         return result
+
+    def _run_transform(self, sim: SimSnap, stats: PerfStats) -> Transformation | None:
+        """
+        Runs the transformation on the simulation snapshot if present.
+
+        Returns the transformation object, or None if no transformation is set.
+        """
+        with stats.step("transform"):
+            if self._transformation is not None:
+                with TraceManager.trace_phase(self, "transform"):
+                    try:
+                        logger.debug("[%s] transformation: %s", self, self._transformation)
+                        trans_obj = self._apply_transform(sim)
+                    except Exception as e:
+                        logger.error("Error applying pre-transformation: %s, when calculating %s", e, self)
+                        raise RuntimeError(f"Error applying pre-transformation {self._transformation}") from e
+                    return trans_obj
+        return None
+
+
+    def _apply_transform(self, sim: SimSnap) -> Transformation | None:
+        """
+        Applies the transformation to the simulation snapshot if present.
+
+        Returns the transformation object.
+        """
+        return self._transformation(sim) if self._transformation is not None else None
+
+    def _run_filter(self, sim: SimSnap, stats: PerfStats) -> SimSnap:
+        """
+        Run the filter phase on the simulation snapshot if present.
+
+        Parameters
+        ----------
+        sim : SimSnap
+            The (possibly transformed) simulation snapshot to be filtered.
+        stats : PerfStats
+            Profiler for the "filter" phase.
+
+        Returns
+        -------
+        SimSnap
+            The filtered snapshot if a filter is set, otherwise the original
+            ``sim`` unchanged.
+        """
+        with stats.step("filter"):
+            if self._filter is not None:
+                with TraceManager.trace_phase(self, "filter"):
+                    try:
+                        logger.debug("[%s] filter: %s", self, self._filter)
+                        sim_masked = self._apply_filter(sim)
+                    except Exception as e:
+                        logger.error("Error applying pre-filter: %s, when calculating %s", e, self)
+                        raise RuntimeError(f"Error applying pre-filter {self._filter}") from e
+                return sim_masked
+        return sim
+
+    def _apply_filter(self, sim: SimSnap) -> SimSnap:
+        """
+        Apply the configured filter to the simulation snapshot if present.
+
+        Parameters
+        ----------
+        sim : SimSnap
+            The (possibly transformed) snapshot to filter.
+
+        Returns
+        -------
+        SimSnap
+            The filtered snapshot if a filter is set, otherwise ``sim``.
+        """
+        return sim if self._filter is None else sim[self._filter]
+
+    def _run_calculation(self, sim: SimSnap, stats: PerfStats, trans_obj: Transformation | None, sim_masked: SimSnap) -> ReturnT:
+        """
+        Execute the main calculation phase.
+
+        Parameters
+        ----------
+        sim : SimSnap
+            Original (possibly transformed) snapshot.
+        stats : PerfStats
+            Profiler for the "calculate" phase.
+        trans_obj : Transformation or None
+            Transformation object returned by the transform phase, if any.
+        sim_masked : SimSnap
+            Snapshot after applying any active filter.
+
+        Returns
+        -------
+        ReturnT
+            Result of the calculation.
+        """
+        try:
+            with TraceManager.trace_phase(self, "calculate"):
+                with stats.step("calculate"):
+                    logger.debug("[%s] performing calculation ...", self)
+                    result = self._apply_calculation(sim, trans_obj, sim_masked)
+        except Exception as e:
+            if trans_obj is not None:
+                logger.debug("[%s] reverting transformation due to error: %s", self, self._transformation)
+                trans_obj.revert()
+            logger.error("Error during calculation: %s, when calculating %s", e, self)
+            raise RuntimeError(f"Error during calculation in {self}") from e
+        return result
+
+    def _apply_calculation(self, sim: SimSnap, trans_obj: Transformation | None, sim_masked: SimSnap) -> ReturnT:
+        """
+        Hook for subclasses to customize the actual calculation.
+
+        Parameters
+        ----------
+        sim : SimSnap
+            Original (possibly transformed) snapshot.
+        trans_obj : Transformation or None
+            Transformation object returned by the transform phase, if any.
+        sim_masked : SimSnap
+            Snapshot after applying any active filter.
+
+        Notes
+        -----
+        Default implementation ignores ``sim`` and ``trans_obj`` and just
+        calls ``calculate(sim_masked)``. Subclasses may override this method
+        if they need access to the unfiltered snapshot or the transformation.
+        """
+        return self.calculate(sim_masked)
+
+
+    def _run_dask_compute(self, result: ReturnT | ReturnTr[ReturnT], stats: PerfStats) -> ReturnT:
+        """
+        Optionally compute a Dask-backed result.
+
+        If Dask is available and ``result`` looks like a Dask collection
+        (has a ``.compute`` method and is recognised by ``is_dask_array``),
+        run ``.compute()`` under a profiling step. Otherwise return
+        ``result`` unchanged.
+
+        Parameters
+        ----------
+        result : ReturnT or ReturnTr[ReturnT]
+            The calculation result, possibly Dask-backed.
+        stats : PerfStats
+            Profiler for the "dask compute" phase.
+
+        Returns
+        -------
+        ReturnT
+            The concrete (computed) result.
+        """
+        if DASK_AVAILABLE and is_dask_array(result) and hasattr(result, "compute"):
+            with stats.step("dask compute"):
+                from dask.diagnostics.progress import ProgressBar
+
+                from .chunk.chunksnap import ChunkSimSnap  # local import to avoid cycles
+                with TraceManager.trace_phase(self, "dask compute"):
+                    logger.debug("[%s] computing dask result ...", self)
+                    with ProgressBar(minimum=1):
+                        result = self._apply_compute(result)
+                if hasattr(result, "sim") and isinstance(result, SimArray):
+                    if isinstance(result.sim, ChunkSimSnap):
+                        result.sim = result.sim.base
+        logger.debug("Calculator %s, return type %s", self, result)
+        return result   # type: ignore[return-value]
+
+    def _apply_compute(self, result: ReturnTr[ReturnT]) -> ReturnT:
+        """
+        Compute a Dask-backed result.
+
+        This is the low-level hook used by :meth:`_run_dask_compute`
+        to call ``result.compute(...)``.
+
+        Parameters
+        ----------
+        result : ReturnTr[ReturnT]
+            An object exposing a ``compute`` method (e.g. Dask array).
+
+        Returns
+        -------
+        ReturnT
+            The computed concrete result.
+        """
+        return result.compute(scheduler="single-threaded")
+
+    def _run_revert(self, trans_obj: Transformation | None, stats: PerfStats) -> None:
+        """
+        Run the revert phase if a transformation was applied.
+
+        Parameters
+        ----------
+        trans_obj : Transformation or None
+            The transformation instance returned by :meth:`_run_transform`,
+            or ``None`` if no transformation was used.
+        stats : PerfStats
+            Profiler for the "revert" phase.
+        """
+        with stats.step("revert"):
+            if trans_obj is not None and self._revert_transformation:
+                with TraceManager.trace_phase(self, "revert"):
+                    logger.debug("[%s] reverting transformation: %s", self, self._transformation)
+                    self._apply_revert(trans_obj)
+
+    def _apply_revert(self, trans_obj: Transformation) -> None:
+        """
+        Apply the revert operation on the transformation object.
+
+        Parameters
+        ----------
+        trans_obj : Transformation
+            The transformation object whose :meth:`revert` method will be called.
+        """
+        trans_obj.revert()
 
     @abstractmethod
     def calculate(self, sim: SimSnap, *args: Any, **kwargs: Any) -> ReturnT:
