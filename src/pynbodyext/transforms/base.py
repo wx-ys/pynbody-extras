@@ -124,8 +124,6 @@ from pynbody.transformation import Transformation
 
 from pynbodyext.calculate import CalculatorBase
 from pynbodyext.log import logger
-from pynbodyext.util.perf import PerfStats
-from pynbodyext.util.tracecache import TraceManager
 
 TTrans = TypeVar("TTrans",bound=Transformation, covariant=True)
 
@@ -134,22 +132,18 @@ _LastT = TypeVar("_LastT", bound="TransformBase[Any]")
 class TransformBase(CalculatorBase[TTrans], Generic[TTrans]):
     """ Simsnap -> TTrans """
 
-    move_all: bool = True
+    move_all: bool
 
+    def __new__(cls, *args, **kwargs):
+        instance = super().__new__(cls)
+        instance.move_all = True
+        return instance
 
-    def _perform_calculation(self, sim: SimSnap, trans_obj: Transformation | None, stats: PerfStats) -> TTrans:
-        try:
-            with TraceManager.trace_phase(self, "calculate"):
-                with stats.step("calculate"):
-                    logger.debug("[%s] performing calculation ...", self)
-                    result = self.calculate(sim, trans_obj)
-        except Exception as e:
-            if trans_obj is not None and self._revert_transformation:
-                    trans_obj.revert()
-            raise e
+    def _apply_calculation(self, sim, trans_obj, sim_masked):
+        target_obj = self.get_target(sim_masked, trans_obj)
         if trans_obj is not None and self._revert_transformation:
             logger.debug("[%s] merging pre-transformation: %s", self, self._transformation)
-        return result
+        return self.calculate(sim_masked, target_obj)
 
     def __repr__(self):
         return f"<Transform {self.__class__.__name__}>"
@@ -164,7 +158,11 @@ class TransformBase(CalculatorBase[TTrans], Generic[TTrans]):
             target = sim
         return target
 
-    def calculate(self, sim: SimSnap, previous: Transformation | None = None) -> TTrans:
+    def with_transformation(self, transformation, revert = True):
+        logger.info("You'd typically want to use chain_transforms() to build transformation chains. For example: chain_transforms(transform1, transform2, ...)")
+        return super().with_transformation(transformation, revert)
+
+    def calculate(self, sim: SimSnap, apply_to: SimSnap | Transformation | None = None) -> TTrans:
         raise NotImplementedError
 
     @classmethod

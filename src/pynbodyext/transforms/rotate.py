@@ -43,7 +43,7 @@ class AlignVec(TransformBase[Rotation]):
         """
         raise NotImplementedError("Subclasses must implement get_vec")
 
-    def calculate(self, sim: SimSnap, previous: Transformation | None = None) -> Rotation:
+    def calculate(self, sim: SimSnap | Transformation, apply_to: SimSnap | Transformation | None = None) -> Rotation:
         """
         Rotate the simulation snapshot to align the specified vector with the z-axis.
 
@@ -63,7 +63,7 @@ class AlignVec(TransformBase[Rotation]):
         else:
             safe_up = self.up
         trans = calc_faceon_matrix(vec, up=safe_up)
-        target = self.get_target(sim, previous)
+        target = apply_to if apply_to is not None else sim
         rota = target.rotate(trans, description=self.__class__.__name__)
         return rota
 

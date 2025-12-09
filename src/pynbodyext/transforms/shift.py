@@ -32,7 +32,7 @@ class PosToCenter(TransformBase[GenericTranslation]):
         move_all_sig = get_signature_safe(self.move_all, fallback_to_id=True)
         return (self.__class__.__name__, mode_sig, move_all_sig)
 
-    def calculate(self, sim: SimSnap, previous: Transformation | None = None) -> GenericTranslation:
+    def calculate(self, sim: SimSnap, apply_to:  SimSnap | Transformation | None = None) -> GenericTranslation:
 
         description: str
         if isinstance(self.mode, str):
@@ -47,7 +47,7 @@ class PosToCenter(TransformBase[GenericTranslation]):
         else:
             raise ValueError(f"Invalid mode type: {type(self.mode)}. Expected str, callable, or array.")
 
-        target = self.get_target(sim, previous)
+        target = apply_to if apply_to is not None else sim
 
         logger.debug("Centering positions using mode: %s, center: %s for %s", description, cen, sim)
         return GenericTranslation(target, "pos", -cen, description=f"PosToCenter_{description}")
@@ -70,7 +70,7 @@ class VelToCenter(TransformBase[GenericTranslation]):
         move_all_sig = get_signature_safe(self.move_all, fallback_to_id=True)
         return (self.__class__.__name__, mode_sig, move_all_sig)
 
-    def calculate(self, sim: SimSnap, previous: Transformation | None = None) -> GenericTranslation:
+    def calculate(self, sim: SimSnap, apply_to:  SimSnap | Transformation | None = None) -> GenericTranslation:
         if isinstance(self.mode, str):
             vcen = self.get_center(sim, mode=self.mode)  # type: ignore
         elif isinstance(self.mode, (np.ndarray, SimArray)):
@@ -80,7 +80,7 @@ class VelToCenter(TransformBase[GenericTranslation]):
         else:
             raise ValueError(f"Invalid mode type: {type(self.mode)}. Expected str, callable, or array.")
 
-        target = self.get_target(sim, previous)
+        target = apply_to if apply_to is not None else sim
         logger.debug("Centering velocities using mode: %s, center: %s for %s", self.mode, vcen, sim)
         return GenericTranslation(target, "vel", -vcen, description="VelToCenter")
 
