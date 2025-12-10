@@ -56,6 +56,8 @@ version = {attr = "pynbodyext.__version__"}
 # ======================================================================================
 [project.optional-dependencies]
 
+chunk = ["dask"]
+
 dev = [
     "pre-commit",
     "mypy>=1.17",
