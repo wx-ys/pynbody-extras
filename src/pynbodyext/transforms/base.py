@@ -145,6 +145,9 @@ class TransformBase(CalculatorBase[TTrans], Generic[TTrans]):
             logger.debug("[%s] merging pre-transformation: %s", self, self._transformation)
         return self.calculate(sim_masked, target_obj)
 
+    def _apply_revert(self, trans_obj):
+        logger.debug("Skipping reverting transformation: %s", self, self._transformation)
+
     def __repr__(self):
         return f"<Transform {self.__class__.__name__}>"
 

@@ -115,7 +115,7 @@ class KappaRot(PropertyBase[float]):
     def calculate(self, sim: SimSnap) -> float:
         Krot = np.sum(0.5 * sim["mass"] * (sim["vcxy"] ** 2))
         K = np.sum(sim["mass"] * sim["ke"])
-        return Krot / K
+        return float(Krot / K)
 
 
 class KappaRotMean(PropertyBase[float]):
