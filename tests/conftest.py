@@ -47,6 +47,9 @@ def subfind():
     Load subhalo/subfind data for tests that need it.
     """
     f = pynbody.load("testdata/gadget3/data/subhalos_103/subhalo_103")
+    # total 382909 particles, 189613 dm + 172955 gas + 20341 star
+    # halos count: 4226
+    # halos[0] count: 15682 particles, 7869 dm + 4410 gas + 3403 star
     yield f
     try:
         del f
