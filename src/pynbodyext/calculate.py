@@ -530,6 +530,9 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         >>>
         >>> # If enable evaluation caching
         >>> calculator.enable_cache()(sim)
+        >>>
+        >>> # If enable chunked/Dask evaluation
+        >>> calculator.enable_chunk()(sim)
         """
         logger.debug("")
         use_sim: SimSnap | ChunkSimSnap = sim
