@@ -903,7 +903,9 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         self._enable_chunk = bool(enable)
         self._chunk_size = int(chunk_size)
         if not DASK_AVAILABLE and self._enable_chunk:
-            logger.warning("Chunk mode requested but chunk/dask not available; running without chunking. To use chunking, please pip install dask.")
+            logger.error(
+                "Chunk mode requested but chunk/dask not available. Install with 'pip install dask' to enable chunked evaluation."
+            )
             self._enable_chunk = False
         return self
 
