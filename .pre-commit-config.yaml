@@ -6,7 +6,7 @@ repos:
         entry: ruff
         language: system
         types: [python]
-        files: '^src/pynbodyext/'               # only trigger in src
+        files: '^pynbodyext/'               # only trigger in src
         args: ["check"]
         pass_filenames: true
       - id: mypy
@@ -14,6 +14,6 @@ repos:
         entry: mypy
         language: system
         types: [python]
-        files: '^src/pynbodyext/'               # only trigger in src
+        files: '^pynbodyext/'               # only trigger in src
         args: ["--config-file=pyproject.toml"]
         pass_filenames: true
