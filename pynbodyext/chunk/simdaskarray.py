@@ -100,7 +100,7 @@ def _prep_ufunc(ufunc, *inputs, extract_dask=False, **kwargs):
         if modified_inputs is not None:
             for i, (orig_si, mod_si) in enumerate(zip(sidecar_inputs, modified_inputs, strict=False)):
                 if not isinstance(orig_si, (SimArray, SimDaskArray)):
-                    dask_inputs[i] = mod_si             # type: ignore
+                    dask_inputs[i] = mod_si
 
         sidecar_result = SimArray(
             [1.0],

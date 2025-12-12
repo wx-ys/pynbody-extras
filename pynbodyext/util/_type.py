@@ -1,7 +1,7 @@
 """ Some type utilities for pynbodyext """
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal, Protocol, Self, TypeAlias, TypeVar, Union, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, TypeVar, Union, runtime_checkable
 
 #Protocol need python version >3.8
 import numpy as np
@@ -13,8 +13,10 @@ from pynbody.transformation import Transformation
 from pynbody.units import UnitBase
 
 try:
-    from typing import TypeVarTuple, Unpack  # python >= 3.11
+    from typing import Self, TypeVarTuple, Unpack  # python >= 3.11
 except ImportError:
+    from typing import Self
+
     from typing_extensions import TypeVarTuple, Unpack  # type: ignore
 
 if TYPE_CHECKING:

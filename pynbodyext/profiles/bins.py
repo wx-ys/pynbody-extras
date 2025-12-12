@@ -261,7 +261,7 @@ class BinsSet:
         """
         # If nbins is an array, interpret as explicit edges
         if not isinstance(self._nbins, (int, np.integer)):
-            arr = np.asarray(self._nbins)
+            arr = np.asarray(self._nbins)                   # type: ignore[unreachable]
             if arr.ndim != 1 or arr.shape[0] < 2:
                 raise ValueError("Explicit bin_edges must be a 1D array of length >= 2")
             return self._coerce_edges_units(arr, x)
@@ -471,10 +471,12 @@ class BinsSet:
 
     @property
     def nbins(self) -> int:
-        if isinstance(self._nbins, (int,np.integer)):
-            return int(self._nbins)
-        else:
-            return len(self._nbins)-1
+        nb = self._nbins
+        if isinstance(nb, (int, np.integer)):
+            return int(nb)
+        if isinstance(nb, (np.ndarray, SimArray)):      # type: ignore[unreachable]
+            return len(nb) - 1
+        raise TypeError(f"Invalid _nbins type: {type(nb)}")
 
     def __repr__(self)->str:
         if self.is_defined():
