@@ -1,0 +1,14 @@
+[package]
+name = "pynbodyext-rust"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.19", features = ["extension-module", "auto-initialize"] }
+numpy = "0.19"
+ndarray = "0.15"
+rayon = "1.10"
+gravity = { path = "../gravity" }
