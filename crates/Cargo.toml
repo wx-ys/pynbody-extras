@@ -1,0 +1,7 @@
+[workspace]
+members = [
+	"gravity",
+	"sph",
+	"pynbodyext-rust",
+]
+
