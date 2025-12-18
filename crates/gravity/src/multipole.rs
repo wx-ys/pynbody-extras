@@ -480,9 +480,9 @@ impl PotentialDerivatives {
         d.d210 = dt_4 * rx_r2 * ry_r + dt_3 * ry_r;
         d.d201 = dt_4 * rx_r2 * rz_r + dt_3 * rz_r;
         d.d120 = dt_4 * ry_r2 * rx_r + dt_3 * rx_r;
-        d.d102 = dt_4 * ry_r2 * rz_r + dt_3 * rz_r;
-        d.d021 = dt_4 * rz_r2 * ry_r + dt_3 * ry_r;
-        d.d012 = dt_4 * rz_r2 * rx_r + dt_3 * rx_r;
+        d.d102 = dt_4 * rz_r2 * rx_r + dt_3 * rx_r;
+        d.d021 = dt_4 * ry_r2 * rz_r + dt_3 * rz_r;
+        d.d012 = dt_4 * rz_r2 * ry_r + dt_3 * ry_r;
         d.d111 = dt_4 * rx_r * ry_r * rz_r;
 
         dt_3 *= r_inv;
@@ -493,9 +493,9 @@ impl PotentialDerivatives {
         d.d310 = dt_5 * rx_r3 * ry_r + 3.0 * dt_4 * rx_r * ry_r;
         d.d301 = dt_5 * rx_r3 * rz_r + 3.0 * dt_4 * rx_r * rz_r;
         d.d130 = dt_5 * ry_r3 * rx_r + 3.0 * dt_4 * ry_r * rx_r;
-        d.d103 = dt_5 * ry_r3 * rz_r + 3.0 * dt_4 * ry_r * rz_r;
-        d.d031 = dt_5 * rz_r3 * ry_r + 3.0 * dt_4 * rz_r * ry_r;
-        d.d013 = dt_5 * rz_r3 * rx_r + 3.0 * dt_4 * rz_r * rx_r;
+        d.d103 = dt_5 * rz_r3 * rx_r + 3.0 * dt_4 * rx_r * rz_r;
+        d.d031 = dt_5 * ry_r3 * rz_r + 3.0 * dt_4 * rz_r * ry_r;
+        d.d013 = dt_5 * rz_r3 * ry_r + 3.0 * dt_4 * rz_r * ry_r;
         d.d220 = dt_5 * rx_r2 * ry_r2 + dt_4 * (rx_r2 + ry_r2) + dt_3;
         d.d202 = dt_5 * rx_r2 * rz_r2 + dt_4 * (rx_r2 + rz_r2) + dt_3;
         d.d022 = dt_5 * ry_r2 * rz_r2 + dt_4 * (ry_r2 + rz_r2) + dt_3;
@@ -511,27 +511,24 @@ impl PotentialDerivatives {
         d.d410 = dt_6 * rx_r4 * ry_r + 6.0 * dt_5 * rx_r2 * ry_r + 3.0 * dt_4 * ry_r;
         d.d401 = dt_6 * rx_r4 * rz_r + 6.0 * dt_5 * rx_r2 * rz_r + 3.0 * dt_4 * rz_r;
         d.d140 = dt_6 * ry_r4 * rx_r + 6.0 * dt_5 * ry_r2 * rx_r + 3.0 * dt_4 * rx_r;
-        d.d104 = dt_6 * ry_r4 * rz_r + 6.0 * dt_5 * ry_r2 * rz_r + 3.0 * dt_4 * rz_r;
-        d.d041 = dt_6 * rz_r4 * ry_r + 6.0 * dt_5 * rz_r2 * ry_r + 3.0 * dt_4 * ry_r;
-        d.d014 = dt_6 * rz_r4 * rx_r + 6.0 * dt_5 * rz_r2 * rx_r + 3.0 * dt_4 * rx_r;
-        d.d320 = dt_6 * rx_r3 * ry_r2 + 3.0 * dt_5 * rx_r * ry_r2 + dt_4 * rx_r;
-        d.d302 = dt_6 * rx_r3 * rz_r2 + 3.0 * dt_5 * rx_r * rz_r2 + dt_4 * rx_r;
-        d.d230 = dt_6 * ry_r3 * rx_r2 + 3.0 * dt_5 * ry_r * rx_r2 + dt_4 * ry_r;
-        d.d203 = dt_6 * ry_r3 * rz_r2 + 3.0 * dt_5 * ry_r * rz_r2 + dt_4 * ry_r;
-        d.d032 = dt_6 * rz_r3 * ry_r2 + 3.0 * dt_5 * rz_r * ry_r2 + dt_4 * rz_r;
-        d.d023 = dt_6 * rz_r3 * rx_r2 + 3.0 * dt_5 * rz_r * rx_r2 + dt_4 * rz_r;
-        d.d221 = dt_6 * rx_r2 * ry_r2 * rz_r
-            + dt_5 * (rx_r2 * rz_r + ry_r2 * rz_r)
-            + dt_4 * rz_r;
-        d.d212 = dt_6 * rx_r2 * rz_r2 * ry_r
-            + dt_5 * (rx_r2 * ry_r + rz_r2 * ry_r)
-            + dt_4 * ry_r;
-        d.d122 = dt_6 * ry_r2 * rz_r2 * rx_r
-            + dt_5 * (ry_r2 * rx_r + rz_r2 * rx_r)
-            + dt_4 * rx_r;
+        d.d041 = dt_6 * ry_r4 * rz_r + 6.0 * dt_5 * ry_r2 * rz_r + 3.0 * dt_4 * rz_r;
+        d.d104 = dt_6 * rz_r4 * rx_r + 6.0 * dt_5 * rz_r2 * rx_r + 3.0 * dt_4 * rx_r;
+        d.d014 = dt_6 * rz_r4 * ry_r + 6.0 * dt_5 * rz_r2 * ry_r + 3.0 * dt_4 * ry_r;
+        d.d320 = dt_6 * rx_r3 * ry_r2 + dt_5 * rx_r3 + 3.0 * dt_5 * rx_r * ry_r2 + 3.0 * dt_4 * rx_r;
+        d.d302 = dt_6 * rx_r3 * rz_r2 + dt_5 * rx_r3 + 3.0 * dt_5 * rx_r * rz_r2 + 3.0 * dt_4 * rx_r;
+        d.d230 = dt_6 * ry_r3 * rx_r2 + dt_5 * ry_r3 + 3.0 * dt_5 * ry_r * rx_r2 + 3.0 * dt_4 * ry_r;
+        d.d032 = dt_6 * ry_r3 * rz_r2 + dt_5 * ry_r3 + 3.0 * dt_5 * ry_r * rz_r2 + 3.0 * dt_4 * ry_r;
+        d.d203 = dt_6 * rz_r3 * rx_r2 + dt_5 * rz_r3 + 3.0 * dt_5 * rz_r * rx_r2 + 3.0 * dt_4 * rz_r;
+        d.d023 = dt_6 * rz_r3 * ry_r2 + dt_5 * rz_r3 + 3.0 * dt_5 * rz_r * ry_r2 + 3.0 * dt_4 * rz_r;
         d.d311 = dt_6 * rx_r3 * ry_r * rz_r + 3.0 * dt_5 * rx_r * ry_r * rz_r;
-        d.d131 = dt_6 * ry_r3 * rx_r * rz_r + 3.0 * dt_5 * ry_r * rx_r * rz_r;
-        d.d113 = dt_6 * rz_r3 * rx_r * ry_r + 3.0 * dt_5 * rz_r * rx_r * ry_r;
+        d.d131 = dt_6 * ry_r3 * rx_r * rz_r + 3.0 * dt_5 * rx_r * ry_r * rz_r;
+        d.d113 = dt_6 * rz_r3 * rx_r * ry_r + 3.0 * dt_5 * rx_r * ry_r * rz_r;
+        d.d122 = dt_6 * rx_r * ry_r2 * rz_r2 + dt_5 * rx_r * ry_r2 + dt_5 * rx_r * rz_r2 + dt_4 * rx_r;
+        d.d212 = dt_6 * ry_r * rx_r2 * rz_r2 + dt_5 * ry_r * rx_r2 + dt_5 * ry_r * rz_r2 + dt_4 * ry_r;
+        d.d221 = dt_6 * rz_r * rx_r2 * ry_r2 + dt_5 * rz_r * rx_r2 + dt_5 * rz_r * ry_r2 + dt_4 * rz_r;
+        d.d311 = dt_6 * rx_r3 * ry_r * rz_r + 3.0 * dt_5 * rx_r * ry_r * rz_r;
+        d.d131 = dt_6 * ry_r3 * rx_r * rz_r + 3.0 * dt_5 * rx_r * ry_r * rz_r;
+        d.d113 = dt_6 * rz_r3 * rx_r * ry_r + 3.0 * dt_5 * rx_r * ry_r * rz_r;
 
         d
     }
