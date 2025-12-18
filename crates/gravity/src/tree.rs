@@ -23,13 +23,13 @@ pub trait Tree3D {
         Self: Sized;
 
     /// Compute gravitational accelerations on all particles in-place.
-    fn compute_forces(&self, theta: f64, eps: f64, out: &mut [[f64; 3]]);
+    fn compute_accelerations(&self, theta: f64, eps: f64, out: &mut [[f64; 3]]);
 
     /// Compute gravitational potentials on all particles in-place.
     fn compute_potentials(&self, theta: f64, eps: f64, out: &mut [f64]);
 
     /// Compute gravitational accelerations at arbitrary query points.
-    fn force_at_points(
+    fn accelerations_at_points(
         &self,
         points: &[[f64; 3]],
         theta: f64,
@@ -38,7 +38,7 @@ pub trait Tree3D {
     );
 
     /// Compute gravitational potentials at arbitrary query points.
-    fn potential_at_points(
+    fn potentials_at_points(
         &self,
         points: &[[f64; 3]],
         theta: f64,
@@ -440,7 +440,7 @@ impl Octree {
         }
     }
 
-    fn force_traversal_cached(
+    fn acceleration_traversal_cached(
         &self,
         target: &[f64; 3],
         skip_self: Option<usize>,
@@ -573,7 +573,7 @@ impl Octree {
         self.potential_traversal_cached(target, Some(target_idx), node_idx, theta, eps2, out, bh, masses_opt);
     }
 
-    fn force_on_particle_node(
+    fn acceleration_on_particle_node(
         &self,
         target_idx: usize,
         node_idx: usize,
@@ -584,10 +584,10 @@ impl Octree {
         let target = &self.positions[target_idx];
         let bh = self.bh();
         let masses_opt = self.masses.as_deref();
-        self.force_traversal_cached(target, Some(target_idx), node_idx, theta, eps2, out, bh, masses_opt);
+        self.acceleration_traversal_cached(target, Some(target_idx), node_idx, theta, eps2, out, bh, masses_opt);
     }
 
-    fn force_at_point_node(
+    fn acceleration_at_point_node(
         &self,
         target: &[f64; 3],
         node_idx: usize,
@@ -597,7 +597,7 @@ impl Octree {
     ) {
         let bh = self.bh();
         let masses_opt = self.masses.as_deref();
-        self.force_traversal_cached(target, None, node_idx, theta, eps2, out, bh, masses_opt);
+        self.acceleration_traversal_cached(target, None, node_idx, theta, eps2, out, bh, masses_opt);
     }
 }
 
@@ -615,7 +615,7 @@ impl Tree3D for Octree {
         tree
     }
 
-    fn compute_forces(&self, theta: f64, eps: f64, out: &mut [[f64; 3]]) {
+    fn compute_accelerations(&self, theta: f64, eps: f64, out: &mut [[f64; 3]]) {
         let n = self.positions.len();
         let eps2 = eps * eps;
 
@@ -624,12 +624,12 @@ impl Tree3D for Octree {
                 out[i][0] = 0.0;
                 out[i][1] = 0.0;
                 out[i][2] = 0.0;
-                self.force_on_particle_node(i, 0, theta, eps2, &mut out[i]);
+                self.acceleration_on_particle_node(i, 0, theta, eps2, &mut out[i]);
             }
         } else {
             out.par_iter_mut().enumerate().for_each(|(i, out_i)| {
                 let mut tmp = [0.0f64; 3];
-                self.force_on_particle_node(i, 0, theta, eps2, &mut tmp);
+                self.acceleration_on_particle_node(i, 0, theta, eps2, &mut tmp);
                 out_i[0] = tmp[0];
                 out_i[1] = tmp[1];
                 out_i[2] = tmp[2];
@@ -655,7 +655,7 @@ impl Tree3D for Octree {
         }
     }
 
-    fn force_at_points(
+    fn accelerations_at_points(
         &self,
         points: &[[f64; 3]],
         theta: f64,
@@ -670,14 +670,14 @@ impl Tree3D for Octree {
                 out[i][0] = 0.0;
                 out[i][1] = 0.0;
                 out[i][2] = 0.0;
-                self.force_at_point_node(&points[i], 0, theta, eps2, &mut out[i]);
+                self.acceleration_at_point_node(&points[i], 0, theta, eps2, &mut out[i]);
             }
         } else {
             out.par_iter_mut()
                 .zip(points.par_iter())
                 .for_each(|(out_i, p)| {
                     let mut tmp = [0.0f64; 3];
-                    self.force_at_point_node(p, 0, theta, eps2, &mut tmp);
+                    self.acceleration_at_point_node(p, 0, theta, eps2, &mut tmp);
                     out_i[0] = tmp[0];
                     out_i[1] = tmp[1];
                     out_i[2] = tmp[2];
@@ -685,7 +685,7 @@ impl Tree3D for Octree {
         }
     }
 
-    fn potential_at_points(
+    fn potentials_at_points(
         &self,
         points: &[[f64; 3]],
         theta: f64,
