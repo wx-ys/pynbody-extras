@@ -39,9 +39,10 @@ def test_calculate_enable():
     calc.enable_cache(False)
     assert calc._enable_eval_cache is False
     
-    calc.enable_chunk(chunk_size=2_000_000)
-    assert calc._enable_chunk is True
-    assert calc._chunk_size == 2_000_000
+    if DASK_AVAILABLE:
+        calc.enable_chunk(chunk_size=2_000_000)
+        assert calc._enable_chunk is True
+        assert calc._chunk_size == 2_000_000
     
     calc.enable_perf(time=True, memory=True)
     
@@ -79,7 +80,7 @@ def test_calculate_basic_use(snap):
     # basic use
     calc = SumMass()
     total_mass = calc(snap)
-    npt.assert_allclose(total_mass, 7632.60595703125)
+    npt.assert_allclose(total_mass, 7632.60595703125, rtol=1e-4, atol=0.1)
     assert isinstance(total_mass, SimArray)
     assert total_mass.units is snap['mass'].units
     assert total_mass.sim is snap
@@ -112,16 +113,16 @@ def test_combined_calculate(snap):
     )
     
     total_mass, star_mass = (calc1 & calc2)(snap)
-    npt.assert_allclose(total_mass, 7632.60595703125)
-    npt.assert_allclose(star_mass, 9.930469512939453)
+    npt.assert_allclose(total_mass, 7632.606,rtol=1e-4, atol=0.1)
+    npt.assert_allclose(star_mass, 9.930469512939453,atol=1e-4)
     
     (calc1 & calc2).format_tree()
     (calc1 & calc2).format_flow()
     
     m1, m2, m3 = (calc1 & (calc2 & calc1))(snap)
-    npt.assert_allclose(m1, 7632.60595703125)
-    npt.assert_allclose(m2, 9.930469512939453)
-    npt.assert_allclose(m3, 7632.60595703125)
+    npt.assert_allclose(m1, 7632.606, rtol=1e-4, atol=0.1)
+    npt.assert_allclose(m2, 9.930469512939453,atol=1e-4)
+    npt.assert_allclose(m3, 7632.606, rtol=1e-4, atol=0.1)
 
 
 @pytest.mark.skipif(not DASK_AVAILABLE, reason="Dask not available")

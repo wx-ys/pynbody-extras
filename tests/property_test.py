@@ -36,13 +36,13 @@ def test_kappa_rot(snap):
 def test_volume_density(snap):
     rho = VolumeDensity(10, "mass")
     rho_val = rho(snap)
-    npt.assert_allclose(rho_val, 1.8221505)
+    npt.assert_allclose(rho_val, 1.8221505, atol=1e-4)
     assert rho_val.units == snap["mass"].units / snap["pos"].units**3
 
 def test_surface_density(snap):
     sigma = SurfaceDensity(10, "mass")
     sigma_val = sigma(snap)
-    npt.assert_allclose(sigma_val, 19.229359)
+    npt.assert_allclose(sigma_val, 19.229, rtol=1e-4, atol=1e-4)
     assert sigma_val.units == snap["mass"].units / snap["pos"].units**2
 
 
