@@ -590,23 +590,53 @@ pub fn gravity_accel_multipole(
     d: &PotentialDerivatives,
     order: u8,
 ) -> [f64; 3] {
-    // For now, derive acceleration from monopole + quadrupole pieces via
-    // analytic derivatives of the potential; higher-order terms can be
-    // added here in the same pattern if needed.
+
     let mut ax = 0.0f64;
     let mut ay = 0.0f64;
     let mut az = 0.0f64;
 
-    // Monopole contribution: grad(1/r) ~ (x, y, z)/r^3, which is already
-    // encoded in d100, d010, d001 scaled by m000.
-    ax += m.m000 * d.d100;
-    ay += m.m000 * d.d010;
-    az += m.m000 * d.d001;
+    ax -= m.m000 * d.d100;
+    ay -= m.m000 * d.d010;
+    az -= m.m000 * d.d001;
 
-    if order >= 1 {
-        ax += m.m100 * d.d200 + m.m010 * d.d110 + m.m001 * d.d101;
-        ay += m.m100 * d.d110 + m.m010 * d.d020 + m.m001 * d.d011;
-        az += m.m100 * d.d101 + m.m010 * d.d011 + m.m001 * d.d002;
+    if order >=2 {
+        // should be zero for center-of-mass expansion
+        ax -= m.m100 * d.d200 + m.m010 * d.d110 + m.m001 * d.d101;
+        ay -= m.m100 * d.d110 + m.m010 * d.d020 + m.m001 * d.d011;
+        az -= m.m100 * d.d101 + m.m010 * d.d011 + m.m001 * d.d002;
+    }
+    if order >= 3{
+        ax -= m.m200 * d.d300 + m.m020 * d.d120 + m.m002 * d.d102;
+        ax -= m.m110 * d.d210 + m.m101 * d.d201 + m.m011 * d.d111;
+        ay -= m.m200 * d.d210 + m.m020 * d.d030 + m.m002 * d.d012;
+        ay -= m.m110 * d.d120 + m.m101 * d.d111 + m.m011 * d.d021;
+        az -= m.m200 * d.d201 + m.m020 * d.d021 + m.m002 * d.d003;
+        az -= m.m110 * d.d111 + m.m101 * d.d102 + m.m011 * d.d012;
+    }
+    if order >= 4 {
+        ax -= m.m003 * d.d103 + m.m012 * d.d112 + m.m021 * d.d121 + m.m030 * d.d130 +
+              m.m102 * d.d202 + m.m111 * d.d211 + m.m120 * d.d220 + m.m201 * d.d301 +
+              m.m210 * d.d310 + m.m300 * d.d400;
+        ay -= m.m003 * d.d013 + m.m012 * d.d022 + m.m021 * d.d031 + m.m030 * d.d040 +
+              m.m102 * d.d112 + m.m111 * d.d121 + m.m120 * d.d130 + m.m201 * d.d211 +
+              m.m210 * d.d220 + m.m300 * d.d310;
+        az -= m.m003 * d.d004 + m.m012 * d.d013 + m.m021 * d.d022 + m.m030 * d.d031 +
+              m.m102 * d.d103 + m.m111 * d.d112 + m.m120 * d.d121 + m.m201 * d.d202 +
+              m.m210 * d.d211 + m.m300 * d.d301;
+    }
+    if order >= 5{
+        ax -= m.m004 * d.d104 + m.m013 * d.d113 + m.m022 * d.d122 + m.m031 * d.d131 +
+              m.m040 * d.d140 + m.m103 * d.d203 + m.m112 * d.d212 + m.m121 * d.d221 +
+              m.m130 * d.d230 + m.m202 * d.d302 + m.m211 * d.d311 + m.m220 * d.d320 +
+              m.m301 * d.d401 + m.m310 * d.d410 + m.m400 * d.d500;
+        ay -= m.m004 * d.d014 + m.m013 * d.d023 + m.m022 * d.d032 + m.m031 * d.d041 +
+              m.m040 * d.d050 + m.m103 * d.d113 + m.m112 * d.d122 + m.m121 * d.d131 +
+              m.m130 * d.d140 + m.m202 * d.d212 + m.m211 * d.d221 + m.m220 * d.d230 +
+              m.m301 * d.d311 + m.m310 * d.d320 + m.m400 * d.d410;
+        az -= m.m004 * d.d005 + m.m013 * d.d014 + m.m022 * d.d023 + m.m031 * d.d032 +
+              m.m040 * d.d041 + m.m103 * d.d104 + m.m112 * d.d113 + m.m121 * d.d122 +
+              m.m130 * d.d131 + m.m202 * d.d203 + m.m211 * d.d212 + m.m220 * d.d221 +
+              m.m301 * d.d302 + m.m310 * d.d311 + m.m400 * d.d401;
     }
 
     [ax, ay, az]
