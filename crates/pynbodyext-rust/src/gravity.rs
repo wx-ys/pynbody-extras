@@ -80,7 +80,7 @@ impl Octree {
     }
 
     #[pyo3(signature = (theta, eps, threads=0))]
-    fn compute_forces<'py>(
+    fn compute_accelerations<'py>(
         &self,
         py: Python<'py>,
         theta: f64,
@@ -89,7 +89,7 @@ impl Octree {
     ) -> PyResult<&'py PyArray2<f64>> {
         if self.inner.bh.is_none() {
             return Err(PyValueError::new_err(
-                "mass payload not built; call build_mass() before compute_forces",
+                "mass payload not built; call build_mass() before compute_accelerations",
             ));
         }
         let n = self.inner.positions.len();
@@ -98,11 +98,11 @@ impl Octree {
         py.allow_threads(|| {
             if threads == 0 {
                 // Use global Rayon thread pool (default parallelism).
-                <CoreOctree as Tree3D>::compute_forces(&self.inner, theta, eps, &mut out);
+                <CoreOctree as Tree3D>::compute_accelerations(&self.inner, theta, eps, &mut out);
             } else {
                 // Use a dedicated pool with exactly `threads` workers.
                 with_thread_pool(threads, || {
-                    <CoreOctree as Tree3D>::compute_forces(&self.inner, theta, eps, &mut out);
+                    <CoreOctree as Tree3D>::compute_accelerations(&self.inner, theta, eps, &mut out);
                 });
             }
         });
@@ -147,7 +147,7 @@ impl Octree {
     }
 
     #[pyo3(signature = (points, theta, eps, threads=0))]
-    fn forces_at_points<'py>(
+    fn accelerations_at_points<'py>(
         &self,
         py: Python<'py>,
         points: &PyArray2<f64>,
@@ -157,7 +157,7 @@ impl Octree {
     ) -> PyResult<&'py PyArray2<f64>> {
         if self.inner.bh.is_none() {
             return Err(PyValueError::new_err(
-                "mass payload not built; call build_mass() before forces_at_points",
+                "mass payload not built; call build_mass() before accelerations_at_points",
             ));
         }
 
@@ -175,10 +175,10 @@ impl Octree {
 
         py.allow_threads(|| {
             if threads == 0 {
-                <CoreOctree as Tree3D>::force_at_points(&self.inner, &pts, theta, eps, &mut out);
+                <CoreOctree as Tree3D>::accelerations_at_points(&self.inner, &pts, theta, eps, &mut out);
             } else {
                 with_thread_pool(threads, || {
-                    <CoreOctree as Tree3D>::force_at_points(&self.inner, &pts, theta, eps, &mut out);
+                    <CoreOctree as Tree3D>::accelerations_at_points(&self.inner, &pts, theta, eps, &mut out);
                 });
             }
         });
@@ -222,10 +222,10 @@ impl Octree {
 
         py.allow_threads(|| {
             if threads == 0 {
-                <CoreOctree as Tree3D>::potential_at_points(&self.inner, &pts, theta, eps, &mut out);
+                <CoreOctree as Tree3D>::potentials_at_points(&self.inner, &pts, theta, eps, &mut out);
             } else {
                 with_thread_pool(threads, || {
-                    <CoreOctree as Tree3D>::potential_at_points(&self.inner, &pts, theta, eps, &mut out);
+                    <CoreOctree as Tree3D>::potentials_at_points(&self.inner, &pts, theta, eps, &mut out);
                 });
             }
         });
@@ -283,6 +283,66 @@ pub fn direct_accelerations_py<'py>(
     Ok(array.into_pyarray(py))
 }
 
+#[pyfunction]
+#[pyo3(signature = (positions, targets, masses=None, eps=0.0, threads=0))]
+pub fn direct_accelerations_at_points_py<'py>(
+    py: Python<'py>,
+    positions: &PyArray2<f64>,
+    targets: &PyArray2<f64>,
+    masses: Option<&PyArray1<f64>>,
+    eps: f64,
+    threads: usize,
+) -> PyResult<&'py PyArray2<f64>> {
+    let pos_arr: ArrayView2<'_, f64> = unsafe { positions.as_array() };
+    if pos_arr.ndim() != 2 || pos_arr.shape()[1] != 3 {
+        return Err(PyValueError::new_err("positions must be (N,3) float64 array"));
+    }
+    let n = pos_arr.shape()[0];
+    let mut pos: Vec<[f64; 3]> = Vec::with_capacity(n);
+    for i in 0..n {
+        pos.push([pos_arr[[i, 0]], pos_arr[[i, 1]], pos_arr[[i, 2]]]);
+    }
+    let masses_slice: Option<Vec<f64>> = if let Some(m_arr) = masses {
+        let slice = unsafe { m_arr.as_slice()? };
+        if slice.len() != n {
+            return Err(PyValueError::new_err("masses must be length N"));
+        }
+        Some(slice.to_vec())
+    } else {
+        None
+    };
+
+    let target_arr: ArrayView2<'_, f64> = unsafe { targets.as_array() };
+    if target_arr.ndim() != 2 || target_arr.shape()[1] != 3 {
+        return Err(PyValueError::new_err("targets must be (M,3) float64 array"));
+    }
+    let m = target_arr.shape()[0];
+    let mut tgt: Vec<[f64; 3]> = Vec::with_capacity(m);
+    for i in 0..m {
+        tgt.push([target_arr[[i, 0]], target_arr[[i, 1]], target_arr[[i, 2]]]);
+    }
+
+    let acc = py.allow_threads(|| {
+        if threads == 0 {
+            direct::direct_accelerations_at_points(&pos, masses_slice.as_deref(), &tgt, eps)
+        } else {
+            with_thread_pool(threads, || {
+                direct::direct_accelerations_at_points(&pos, masses_slice.as_deref(), &tgt, eps)
+            })
+        }
+    });
+    let mut flat = Vec::with_capacity(m * 3);
+    for i in 0..m {
+        flat.push(acc[i][0]);
+        flat.push(acc[i][1]);
+        flat.push(acc[i][2]);
+    }
+    let array = Array2FromVec::from_vec((m, 3), flat);
+    Ok(array.into_pyarray(py))
+}
+
+
+
 /// Direct-sum O(N^2) potentials.
 #[pyfunction]
 #[pyo3(signature = (positions, masses=None, eps=0.0, threads=0))]
@@ -325,6 +385,55 @@ pub fn direct_potentials_py<'py>(
     Ok(pot.into_pyarray(py))
 }
 
+#[pyfunction]
+#[pyo3(signature = (positions, targets, masses=None, eps=0.0, threads=0))]
+pub fn direct_potentials_at_points_py<'py>(
+    py: Python<'py>,
+    positions: &PyArray2<f64>,
+    targets: &PyArray2<f64>,
+    masses: Option<&PyArray1<f64>>,
+    eps: f64,
+    threads: usize,
+) -> PyResult<&'py PyArray1<f64>> {
+    let pos_arr: ArrayView2<'_, f64> = unsafe { positions.as_array() };
+    if pos_arr.ndim() != 2 || pos_arr.shape()[1] != 3 {
+        return Err(PyValueError::new_err("positions must be (N,3) float64 array"));
+    }
+    let n = pos_arr.shape()[0];
+    let mut pos: Vec<[f64; 3]> = Vec::with_capacity(n);
+    for i in 0..n {
+        pos.push([pos_arr[[i, 0]], pos_arr[[i, 1]], pos_arr[[i, 2]]]);
+    }
+    let masses_slice: Option<Vec<f64>> = if let Some(m_arr) = masses {
+        let slice = unsafe { m_arr.as_slice()? };
+        if slice.len() != n {
+            return Err(PyValueError::new_err("masses must be length N"));
+        }
+        Some(slice.to_vec())
+    } else {
+        None
+    };
+    let target_arr: ArrayView2<'_, f64> = unsafe { targets.as_array() };
+    if target_arr.ndim() != 2 || target_arr.shape()[1] != 3 {
+        return Err(PyValueError::new_err("targets must be (M,3) float64 array"));
+    }
+    let m = target_arr.shape()[0];
+    let mut tgt: Vec<[f64; 3]> = Vec::with_capacity(m);
+    for i in 0..m {
+        tgt.push([target_arr[[i, 0]], target_arr[[i, 1]], target_arr[[i, 2]]]);
+    }
+    let pot = py.allow_threads(|| {
+        if threads == 0 {
+            direct::direct_potentials_at_points(&pos, masses_slice.as_deref(), &tgt, eps)
+        } else {
+            with_thread_pool(threads, || {
+                direct::direct_potentials_at_points(&pos, masses_slice.as_deref(), &tgt, eps)
+            })
+        }
+    });
+
+    Ok(pot.into_pyarray(py))
+}
 struct Array2FromVec {
     shape: (usize, usize),
     data: Vec<f64>,
