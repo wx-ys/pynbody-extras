@@ -16,9 +16,19 @@ Example
 >>> from pynbodyext.gravity import calculate_acceleration
 >>> a = calculate_acceleration(sim, method="tree", theta=0.7)
 """
+from pynbodyext.util.deps import GRAVITY_RUST_AVAILABLE
 
+__all__ = ["GRAVITY_RUST_AVAILABLE"]
 
-from .base import Gravity
-from .pyn_gravity import calculate_acceleration, calculate_potential
+if GRAVITY_RUST_AVAILABLE:
+    from .base import Gravity
+    from .pyn_gravity import calculate_acceleration, calculate_potential
 
-__all__ = ["Gravity", "calculate_potential", "calculate_acceleration"]
+    __all__ += ["Gravity", "calculate_potential", "calculate_acceleration"]
+else:
+    warning_msg = (
+        "pynbodyext.gravity: Rust extension not available; "
+        "gravity calculations will be unavailable."
+    )
+    import warnings
+    warnings.warn(warning_msg, ImportWarning, stacklevel=2)
