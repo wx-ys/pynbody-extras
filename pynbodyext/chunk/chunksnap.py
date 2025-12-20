@@ -1,4 +1,3 @@
-
 from typing import Any, Union
 
 import dask
@@ -9,11 +8,22 @@ from pynbody.filt import Filter
 from pynbody.snapshot import SimSnap
 
 from pynbodyext.log import logger
+from pynbodyext.util.deps import PYNBODY_VERSION
 
 from .chunk import ChunkManager
 from .simdaskarray import SimDaskArray, sim_from_dask
 from .snapview import MiniSimSnap, SimSnapView
 
+
+def _check_pynbody_version_warn() -> None:
+    import warnings
+    m = PYNBODY_VERSION.split(".")
+    major, minor = int(m[0]), int(m[1])
+    if (major, minor) < (2, 4):
+        warnings.warn(
+            f"ChunkSimSnap: detected pynbody {PYNBODY_VERSION} — versions older than 2.4 may have issues with "
+            "Gadget HDF partial loading. Consider upgrading to pynbody>=2.4.", stacklevel=3
+        )
 
 class ChunkDaskArrayLoader:
 
@@ -65,6 +75,7 @@ class ChunkDaskArrayLoader:
 
 class ChunkSimSnap(ChunkDaskArrayLoader, SimSnapView):
     def __init__(self, simsnap: SimSnap, chunk_size: int = 1000_000, **kwargs: Any):
+        _check_pynbody_version_warn()
         if simsnap.keys():
             logger.warning("Creating ChunkSimSnap from a SimSnap with loaded arrays. Loaded arrays will be ignored.")
         ChunkDaskArrayLoader.__init__(self, simsnap, chunk_size, **kwargs)
