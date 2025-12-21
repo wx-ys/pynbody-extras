@@ -1,15 +1,11 @@
 
-from importlib.util import find_spec
+from pynbodyext.util.deps import DASK_AVAILABLE
 
-DASK_AVAILABLE: bool = False
 _dask_array_type: type | None = None
 
-
-if find_spec("dask") is not None:
-    DASK_AVAILABLE = True
+if DASK_AVAILABLE:
     from dask.array import Array as DaskArray
     _dask_array_type = DaskArray
-
 
 def is_dask_array(obj: object) -> bool:
     """Check if an object is a Dask array."""
