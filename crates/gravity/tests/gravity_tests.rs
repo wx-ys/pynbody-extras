@@ -19,19 +19,37 @@ fn gen_masses(seed: u64, n: usize) -> Vec<f64> {
     (0..n).map(|_| 0.5 + rng.gen::<f64>()).collect()
 }
 
+fn rms_scalar(a: &[f64], b: &[f64]) -> f64 {
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+    let mut s = 0.0f64;
+    for i in 0..n {
+        let d = a[i] - b[i];
+        s += d * d;
+    }
+    (s / (n as f64)).sqrt()
+}
+
 fn max_abs3(a: &[f64; 3], b: &[f64; 3]) -> f64 {
-    (a[0] - b[0]).abs().max((a[1] - b[1]).abs()).max((a[2] - b[2]).abs())
+    (a[0] - b[0])
+        .abs()
+        .max((a[1] - b[1]).abs())
+        .max((a[2] - b[2]).abs())
 }
 
 fn rms_vec3(a: &[[f64; 3]], b: &[[f64; 3]]) -> f64 {
     let n = a.len().min(b.len());
-    if n == 0 { return 0.0; }
+    if n == 0 {
+        return 0.0;
+    }
     let mut s = 0.0f64;
     for i in 0..n {
         let dx = a[i][0] - b[i][0];
         let dy = a[i][1] - b[i][1];
         let dz = a[i][2] - b[i][2];
-        s += dx*dx + dy*dy + dz*dz;
+        s += dx * dx + dy * dy + dz * dz;
     }
     (s / (n as f64)).sqrt()
 }
@@ -136,21 +154,22 @@ fn error_decreases_with_multipole_order_accel() {
 
     // Ensure non-increasing with some slack for numerical noise
     for i in 1..errs.len() {
-        assert!(errs[i] <= errs[i-1], "error did not decrease sufficiently: order {} vs {} -> {} > {}", orders[i-1], orders[i], errs[i], errs[i-1]);
+        assert!(
+            errs[i] <= errs[i - 1],
+            "error did not decrease sufficiently: order {} vs {} -> {} > {}",
+            orders[i - 1],
+            orders[i],
+            errs[i],
+            errs[i - 1]
+        );
     }
     // And significant improvement from order 0 to highest order
-    assert!(errs.last().unwrap() <= &(errs[0] * 0.8), "insufficient improvement: err_o0={} err_o5={}", errs[0], errs.last().unwrap());
-}
-
-fn rms_scalar(a: &[f64], b: &[f64]) -> f64 {
-    let n = a.len().min(b.len());
-    if n == 0 { return 0.0; }
-    let mut s = 0.0f64;
-    for i in 0..n {
-        let d = a[i] - b[i];
-        s += d*d;
-    }
-    (s / (n as f64)).sqrt()
+    assert!(
+        errs.last().unwrap() <= &(errs[0] * 0.8),
+        "insufficient improvement: err_o0={} err_o5={}",
+        errs[0],
+        errs.last().unwrap()
+    );
 }
 
 #[test]
@@ -176,6 +195,13 @@ fn error_decreases_with_multipole_order_potential() {
     }
 
     for i in 1..errs.len() {
-        assert!(errs[i] <= errs[i-1], "potential error did not decrease sufficiently: order {} -> {}: {} > {}", orders[i-1], orders[i], errs[i], errs[i-1]);
+        assert!(
+            errs[i] <= errs[i - 1],
+            "potential error did not decrease sufficiently: order {} -> {}: {} > {}",
+            orders[i - 1],
+            orders[i],
+            errs[i],
+            errs[i - 1]
+        );
     }
 }

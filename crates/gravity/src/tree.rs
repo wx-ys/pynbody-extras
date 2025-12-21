@@ -1,10 +1,7 @@
 use rayon::prelude::*;
 
 use crate::multipole::{
-    gravity_accel_multipole,
-    gravity_potential_multipole,
-    translate_multipole,
-    MultipoleMoment,
+    gravity_accel_multipole, gravity_potential_multipole, translate_multipole, MultipoleMoment,
     PotentialDerivatives,
 };
 
@@ -38,13 +35,7 @@ pub trait Tree3D {
     );
 
     /// Compute gravitational potentials at arbitrary query points.
-    fn potentials_at_points(
-        &self,
-        points: &[[f64; 3]],
-        theta: f64,
-        eps: f64,
-        out: &mut [f64],
-    );
+    fn potentials_at_points(&self, points: &[[f64; 3]], theta: f64, eps: f64, out: &mut [f64]);
 }
 
 #[derive(Clone)]
@@ -67,7 +58,7 @@ pub struct NodeBh {
 #[derive(Clone)]
 pub struct Octree {
     pub positions: Vec<[f64; 3]>,
-    pub masses: Option<Vec<f64>>,      // optional per-particle masses
+    pub masses: Option<Vec<f64>>, // optional per-particle masses
     pub nodes: Vec<Node>,
     // Optional BH payload (mass + COM per node).
     pub bh: Option<Vec<NodeBh>>,
@@ -77,14 +68,26 @@ pub struct Octree {
     pub leaf_capacity: usize,
 }
 
+#[derive(Clone, Copy)]
+struct TraversalCtx<'a> {
+    bh: &'a [NodeBh],
+    masses_opt: Option<&'a [f64]>,
+    theta2: f64,
+    eps2: f64,
+}
+
 impl Octree {
     fn bbox_of_points(pts: &[[f64; 3]]) -> ([f64; 3], f64) {
         let mut minp = [f64::INFINITY; 3];
         let mut maxp = [f64::NEG_INFINITY; 3];
         for p in pts {
             for i in 0..3 {
-                if p[i] < minp[i] { minp[i] = p[i]; }
-                if p[i] > maxp[i] { maxp[i] = p[i]; }
+                if p[i] < minp[i] {
+                    minp[i] = p[i];
+                }
+                if p[i] > maxp[i] {
+                    maxp[i] = p[i];
+                }
             }
         }
         let center = [
@@ -152,14 +155,22 @@ impl Octree {
             for &pi in &parent_indices {
                 let p = self.positions[pi];
                 let mut oct = 0usize;
-                if p[0] >= center[0] { oct |= 1; }
-                if p[1] >= center[1] { oct |= 2; }
-                if p[2] >= center[2] { oct |= 4; }
+                if p[0] >= center[0] {
+                    oct |= 1;
+                }
+                if p[1] >= center[1] {
+                    oct |= 2;
+                }
+                if p[2] >= center[2] {
+                    oct |= 4;
+                }
                 buckets[oct].push(pi);
             }
         }
         for oct in 0..8 {
-            if buckets[oct].is_empty() { continue; }
+            if buckets[oct].is_empty() {
+                continue;
+            }
             let mut child_center = center;
             let offset = half / 2.0;
             child_center[0] += if (oct & 1) != 0 { offset } else { -offset };
@@ -185,7 +196,9 @@ impl Octree {
         self.subdivide_node(node_idx);
         if let Some(children) = self.nodes[node_idx].children {
             for &c in &children {
-                if c == usize::MAX { continue; }
+                if c == usize::MAX {
+                    continue;
+                }
                 self.build_recursive(c);
             }
         }
@@ -193,7 +206,13 @@ impl Octree {
 
     fn build_bh_payload(&self) -> Vec<NodeBh> {
         let masses_opt = self.masses.as_deref();
-        let mut bh = vec![NodeBh { mass: 0.0, com: [0.0; 3] }; self.nodes.len()];
+        let mut bh = vec![
+            NodeBh {
+                mass: 0.0,
+                com: [0.0; 3]
+            };
+            self.nodes.len()
+        ];
 
         for idx in (0..self.nodes.len()).rev() {
             let mut mass = 0.0f64;
@@ -255,8 +274,7 @@ impl Octree {
 
     #[inline]
     fn bh(&self) -> &Vec<NodeBh> {
-        self
-            .bh
+        self.bh
             .as_ref()
             .expect("BH payload not initialized; call build_mass() before gravity queries")
     }
@@ -304,9 +322,13 @@ impl Octree {
                 let center = node_bh.com;
                 let mut acc = MultipoleMoment::zero();
                 for &c in &children {
-                    if c == usize::MAX { continue; }
+                    if c == usize::MAX {
+                        continue;
+                    }
                     let child_bh = &bh[c];
-                    if child_bh.mass == 0.0 { continue; }
+                    if child_bh.mass == 0.0 {
+                        continue;
+                    }
                     let shift = [
                         center[0] - child_bh.com[0],
                         center[1] - child_bh.com[1],
@@ -351,11 +373,8 @@ impl Octree {
         target: &[f64; 3],
         skip_self: Option<usize>,
         node_idx: usize,
-        theta: f64,
-        eps2: f64,
         out: &mut f64,
-        bh: &[NodeBh],
-        masses_opt: Option<&[f64]>,
+        ctx: &TraversalCtx<'_>,
     ) {
         let mut stack: Vec<usize> = Vec::with_capacity(64);
         stack.push(node_idx);
@@ -364,14 +383,14 @@ impl Octree {
 
         while let Some(idx) = stack.pop() {
             let node = &self.nodes[idx];
-            let node_bh = &bh[idx];
+            let node_bh = &ctx.bh[idx];
 
             if node_bh.mass == 0.0 {
                 continue;
             }
 
             if node.children.is_none() {
-                match masses_opt {
+                match ctx.masses_opt {
                     Some(masses) => {
                         for &pi in &node.indices {
                             if Some(pi) == skip_self {
@@ -381,7 +400,7 @@ impl Octree {
                             let ddx = p[0] - target[0];
                             let ddy = p[1] - target[1];
                             let ddz = p[2] - target[2];
-                            let d2 = ddx * ddx + ddy * ddy + ddz * ddz + eps2;
+                            let d2 = ddx * ddx + ddy * ddy + ddz * ddz + ctx.eps2;
                             if d2 == 0.0 {
                                 continue;
                             }
@@ -399,12 +418,12 @@ impl Octree {
                             let ddx = p[0] - target[0];
                             let ddy = p[1] - target[1];
                             let ddz = p[2] - target[2];
-                            let d2 = ddx * ddx + ddy * ddy + ddz * ddz + eps2;
+                            let d2 = ddx * ddx + ddy * ddy + ddz * ddz + ctx.eps2;
                             if d2 == 0.0 {
                                 continue;
                             }
                             let invr = 1.0 / d2.sqrt();
-                            *out += -1.0 * invr;
+                            *out += -invr;
                         }
                     }
                 }
@@ -414,16 +433,17 @@ impl Octree {
             let dx = node_bh.com[0] - target[0];
             let dy = node_bh.com[1] - target[1];
             let dz = node_bh.com[2] - target[2];
-            let dist2 = dx * dx + dy * dy + dz * dz + eps2;
+            let dist2 = dx * dx + dy * dy + dz * dz + ctx.eps2;
 
             if dist2 == 0.0 {
                 continue;
             }
 
             let s = node.half_size * 2.0;
-            if (s * s) / dist2 < theta * theta {
+            if (s * s) / dist2 < ctx.theta2 {
                 if let Some(multipoles) = multipoles_opt {
-                    *out += self.node_potential_multipole(target, idx, eps2, bh, multipoles);
+                    *out +=
+                        self.node_potential_multipole(target, idx, ctx.eps2, ctx.bh, multipoles);
                 } else {
                     let invr = 1.0 / dist2.sqrt();
                     let mass = node_bh.mass;
@@ -445,11 +465,8 @@ impl Octree {
         target: &[f64; 3],
         skip_self: Option<usize>,
         node_idx: usize,
-        theta: f64,
-        eps2: f64,
         out: &mut [f64; 3],
-        bh: &[NodeBh],
-        masses_opt: Option<&[f64]>,
+        ctx: &TraversalCtx<'_>,
     ) {
         let mut stack: Vec<usize> = Vec::with_capacity(64);
         stack.push(node_idx);
@@ -458,14 +475,14 @@ impl Octree {
 
         while let Some(idx) = stack.pop() {
             let node = &self.nodes[idx];
-            let node_bh = &bh[idx];
+            let node_bh = &ctx.bh[idx];
 
             if node_bh.mass == 0.0 {
                 continue;
             }
 
             if node.children.is_none() {
-                match masses_opt {
+                match ctx.masses_opt {
                     Some(masses) => {
                         for &pi in &node.indices {
                             if Some(pi) == skip_self {
@@ -475,7 +492,7 @@ impl Octree {
                             let ddx = p[0] - target[0];
                             let ddy = p[1] - target[1];
                             let ddz = p[2] - target[2];
-                            let d2 = ddx * ddx + ddy * ddy + ddz * ddz + eps2;
+                            let d2 = ddx * ddx + ddy * ddy + ddz * ddz + ctx.eps2;
                             if d2 == 0.0 {
                                 continue;
                             }
@@ -495,7 +512,7 @@ impl Octree {
                             let ddx = p[0] - target[0];
                             let ddy = p[1] - target[1];
                             let ddz = p[2] - target[2];
-                            let d2 = ddx * ddx + ddy * ddy + ddz * ddz + eps2;
+                            let d2 = ddx * ddx + ddy * ddy + ddz * ddz + ctx.eps2;
                             if d2 == 0.0 {
                                 continue;
                             }
@@ -513,16 +530,22 @@ impl Octree {
             let dx = node_bh.com[0] - target[0];
             let dy = node_bh.com[1] - target[1];
             let dz = node_bh.com[2] - target[2];
-            let dist2 = dx * dx + dy * dy + dz * dz + eps2;
+            let dist2 = dx * dx + dy * dy + dz * dz + ctx.eps2;
 
             if dist2 == 0.0 {
                 continue;
             }
 
             let s = node.half_size * 2.0;
-            if (s * s) / dist2 < theta * theta {
+            if (s * s) / dist2 < ctx.theta2 {
                 if let Some(multipoles) = multipoles_opt {
-                    let d = PotentialDerivatives::new(dx, dy, dz, eps2, self.multipole_order.min(5));
+                    let d = PotentialDerivatives::new(
+                        dx,
+                        dy,
+                        dz,
+                        ctx.eps2,
+                        self.multipole_order.min(5),
+                    );
                     let m = &multipoles[idx];
                     let acc = gravity_accel_multipole(m, &d, self.multipole_order.min(5));
                     out[0] += acc[0];
@@ -554,9 +577,13 @@ impl Octree {
         eps2: f64,
         out: &mut f64,
     ) {
-        let bh = self.bh();
-        let masses_opt = self.masses.as_deref();
-        self.potential_traversal_cached(target, None, node_idx, theta, eps2, out, bh, masses_opt);
+        let ctx = TraversalCtx {
+            bh: self.bh(),
+            masses_opt: self.masses.as_deref(),
+            theta2: theta * theta,
+            eps2,
+        };
+        self.potential_traversal_cached(target, None, node_idx, out, &ctx);
     }
 
     fn potential_on_particle_node(
@@ -568,9 +595,13 @@ impl Octree {
         out: &mut f64,
     ) {
         let target = &self.positions[target_idx];
-        let bh = self.bh();
-        let masses_opt = self.masses.as_deref();
-        self.potential_traversal_cached(target, Some(target_idx), node_idx, theta, eps2, out, bh, masses_opt);
+        let ctx = TraversalCtx {
+            bh: self.bh(),
+            masses_opt: self.masses.as_deref(),
+            theta2: theta * theta,
+            eps2,
+        };
+        self.potential_traversal_cached(target, Some(target_idx), node_idx, out, &ctx);
     }
 
     fn acceleration_on_particle_node(
@@ -582,9 +613,13 @@ impl Octree {
         out: &mut [f64; 3],
     ) {
         let target = &self.positions[target_idx];
-        let bh = self.bh();
-        let masses_opt = self.masses.as_deref();
-        self.acceleration_traversal_cached(target, Some(target_idx), node_idx, theta, eps2, out, bh, masses_opt);
+        let ctx = TraversalCtx {
+            bh: self.bh(),
+            masses_opt: self.masses.as_deref(),
+            theta2: theta * theta,
+            eps2,
+        };
+        self.acceleration_traversal_cached(target, Some(target_idx), node_idx, out, &ctx);
     }
 
     fn acceleration_at_point_node(
@@ -595,9 +630,13 @@ impl Octree {
         eps2: f64,
         out: &mut [f64; 3],
     ) {
-        let bh = self.bh();
-        let masses_opt = self.masses.as_deref();
-        self.acceleration_traversal_cached(target, None, node_idx, theta, eps2, out, bh, masses_opt);
+        let ctx = TraversalCtx {
+            bh: self.bh(),
+            masses_opt: self.masses.as_deref(),
+            theta2: theta * theta,
+            eps2,
+        };
+        self.acceleration_traversal_cached(target, None, node_idx, out, &ctx);
     }
 }
 
@@ -610,7 +649,8 @@ impl Tree3D for Octree {
     ) -> Self {
         let positions_vec = positions.to_vec();
         let masses_vec = masses.map(|m| m.to_vec());
-        let mut tree = Octree::from_owned(positions_vec, masses_vec, leaf_capacity, multipole_order);
+        let mut tree =
+            Octree::from_owned(positions_vec, masses_vec, leaf_capacity, multipole_order);
         tree.build_mass_payload();
         tree
     }
@@ -620,11 +660,11 @@ impl Tree3D for Octree {
         let eps2 = eps * eps;
 
         if n < 1024 {
-            for i in 0..n {
-                out[i][0] = 0.0;
-                out[i][1] = 0.0;
-                out[i][2] = 0.0;
-                self.acceleration_on_particle_node(i, 0, theta, eps2, &mut out[i]);
+            for (i, out_i) in out.iter_mut().enumerate() {
+                out_i[0] = 0.0;
+                out_i[1] = 0.0;
+                out_i[2] = 0.0;
+                self.acceleration_on_particle_node(i, 0, theta, eps2, out_i);
             }
         } else {
             out.par_iter_mut().enumerate().for_each(|(i, out_i)| {
@@ -642,9 +682,9 @@ impl Tree3D for Octree {
         let eps2 = eps * eps;
 
         if n < 1024 {
-            for i in 0..n {
-                out[i] = 0.0;
-                self.potential_on_particle_node(i, 0, theta, eps2, &mut out[i]);
+            for (i, out_i) in out.iter_mut().enumerate() {
+                *out_i = 0.0;
+                self.potential_on_particle_node(i, 0, theta, eps2, out_i);
             }
         } else {
             out.par_iter_mut().enumerate().for_each(|(i, out_i)| {
@@ -666,12 +706,12 @@ impl Tree3D for Octree {
         let eps2 = eps * eps;
 
         if n < 1024 {
-            for i in 0..n {
-                out[i][0] = 0.0;
-                out[i][1] = 0.0;
-                out[i][2] = 0.0;
-                self.acceleration_at_point_node(&points[i], 0, theta, eps2, &mut out[i]);
-            }
+            out.iter_mut().zip(points.iter()).for_each(|(out_i, p)| {
+                out_i[0] = 0.0;
+                out_i[1] = 0.0;
+                out_i[2] = 0.0;
+                self.acceleration_at_point_node(p, 0, theta, eps2, out_i);
+            });
         } else {
             out.par_iter_mut()
                 .zip(points.par_iter())
@@ -685,21 +725,15 @@ impl Tree3D for Octree {
         }
     }
 
-    fn potentials_at_points(
-        &self,
-        points: &[[f64; 3]],
-        theta: f64,
-        eps: f64,
-        out: &mut [f64],
-    ) {
+    fn potentials_at_points(&self, points: &[[f64; 3]], theta: f64, eps: f64, out: &mut [f64]) {
         let n = points.len();
         let eps2 = eps * eps;
 
         if n < 1024 {
-            for i in 0..n {
-                out[i] = 0.0;
-                self.potential_at_point_node(&points[i], 0, theta, eps2, &mut out[i]);
-            }
+            out.iter_mut().zip(points.iter()).for_each(|(out_i, p)| {
+                *out_i = 0.0;
+                self.potential_at_point_node(p, 0, theta, eps2, out_i);
+            });
         } else {
             out.par_iter_mut()
                 .zip(points.par_iter())

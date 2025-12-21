@@ -1,19 +1,16 @@
-use gravity::multipole::{MultipoleMoment, PotentialDerivatives, gravity_potential_multipole};
+use gravity::multipole::{gravity_potential_multipole, MultipoleMoment, PotentialDerivatives};
 use rand::Rng;
 
-fn direct_potential(
-    positions: &[[f64; 3]],
-    masses: &[f64],
-    target: [f64; 3],
-    eps2: f64,
-) -> f64 {
+fn direct_potential(positions: &[[f64; 3]], masses: &[f64], target: [f64; 3], eps2: f64) -> f64 {
     let mut phi = 0.0;
     for (p, &m) in positions.iter().zip(masses.iter()) {
         let dx = p[0] - target[0];
         let dy = p[1] - target[1];
         let dz = p[2] - target[2];
         let r2 = dx * dx + dy * dy + dz * dz + eps2;
-        if r2 == 0.0 { continue; }
+        if r2 == 0.0 {
+            continue;
+        }
         phi += -m / r2.sqrt();
     }
     phi
@@ -68,18 +65,16 @@ fn single_node_multipole_vs_direct() {
             vy = rng.gen_range(-1.0..1.0);
             vz = rng.gen_range(-1.0..1.0);
             let r2 = vx * vx + vy * vy + vz * vz;
-            if r2 > 1e-6 && r2 <= 1.0 { break; }
+            if r2 > 1e-6 && r2 <= 1.0 {
+                break;
+            }
         }
         let norm = (vx * vx + vy * vy + vz * vz).sqrt();
         vx /= norm;
         vy /= norm;
         vz /= norm;
         let r = rng.gen_range(20.0..30.0);
-        let target = [
-            com[0] + r * vx,
-            com[1] + r * vy,
-            com[2] + r * vz,
-        ];
+        let target = [com[0] + r * vx, com[1] + r * vy, com[2] + r * vz];
 
         let phi_direct = direct_potential(&positions, &masses, target, eps2);
 

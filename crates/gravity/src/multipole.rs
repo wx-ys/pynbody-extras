@@ -1,6 +1,5 @@
 use std::f64;
 
-
 /// Cartesian multipole moments up to order 5.
 ///
 /// The notation follows example_multipole.py: M_lmn stores
@@ -360,7 +359,7 @@ fn set_moment(m: &mut MultipoleMoment, l: usize, mm: usize, n: usize, value: f64
         (3, 1, 1) => m.m311 = value,
         (1, 3, 1) => m.m131 = value,
         (1, 1, 3) => m.m113 = value,
-        _ => {},
+        _ => {}
     }
 }
 
@@ -427,7 +426,6 @@ pub struct PotentialDerivatives {
 
 impl PotentialDerivatives {
     pub fn new(dx: f64, dy: f64, dz: f64, eps2: f64, order: u8) -> Self {
-
         let max = (order as usize).min(5);
 
         let r2 = dx * dx + dy * dy + dz * dz + eps2;
@@ -435,7 +433,7 @@ impl PotentialDerivatives {
         let r_inv = 1.0 / r;
 
         let dt_1 = r_inv; // 1/r
-        let mut dt_2 = -1.0 * dt_1 * r_inv; // -1/r^2
+        let mut dt_2 = -dt_1 * r_inv; // -1/r^2
         let mut dt_3 = -3.0 * dt_2 * r_inv; // 3/r^3
         let mut dt_4 = -5.0 * dt_3 * r_inv; // -15/r^4
         let mut dt_5 = -7.0 * dt_4 * r_inv; // 105/r^5
@@ -461,9 +459,10 @@ impl PotentialDerivatives {
         let ry_r5 = ry_r4 * ry_r;
         let rz_r5 = rz_r4 * rz_r;
 
-        let mut d = PotentialDerivatives::default();
-
-        d.d000 = dt_1;
+        let mut d = PotentialDerivatives {
+            d000: dt_1,
+            ..Default::default()
+        };
 
         if max == 0 {
             return d;
@@ -534,18 +533,27 @@ impl PotentialDerivatives {
         d.d041 = dt_6 * ry_r4 * rz_r + 6.0 * dt_5 * ry_r2 * rz_r + 3.0 * dt_4 * rz_r;
         d.d104 = dt_6 * rz_r4 * rx_r + 6.0 * dt_5 * rz_r2 * rx_r + 3.0 * dt_4 * rx_r;
         d.d014 = dt_6 * rz_r4 * ry_r + 6.0 * dt_5 * rz_r2 * ry_r + 3.0 * dt_4 * ry_r;
-        d.d320 = dt_6 * rx_r3 * ry_r2 + dt_5 * rx_r3 + 3.0 * dt_5 * rx_r * ry_r2 + 3.0 * dt_4 * rx_r;
-        d.d302 = dt_6 * rx_r3 * rz_r2 + dt_5 * rx_r3 + 3.0 * dt_5 * rx_r * rz_r2 + 3.0 * dt_4 * rx_r;
-        d.d230 = dt_6 * ry_r3 * rx_r2 + dt_5 * ry_r3 + 3.0 * dt_5 * ry_r * rx_r2 + 3.0 * dt_4 * ry_r;
-        d.d032 = dt_6 * ry_r3 * rz_r2 + dt_5 * ry_r3 + 3.0 * dt_5 * ry_r * rz_r2 + 3.0 * dt_4 * ry_r;
-        d.d203 = dt_6 * rz_r3 * rx_r2 + dt_5 * rz_r3 + 3.0 * dt_5 * rz_r * rx_r2 + 3.0 * dt_4 * rz_r;
-        d.d023 = dt_6 * rz_r3 * ry_r2 + dt_5 * rz_r3 + 3.0 * dt_5 * rz_r * ry_r2 + 3.0 * dt_4 * rz_r;
+        d.d320 =
+            dt_6 * rx_r3 * ry_r2 + dt_5 * rx_r3 + 3.0 * dt_5 * rx_r * ry_r2 + 3.0 * dt_4 * rx_r;
+        d.d302 =
+            dt_6 * rx_r3 * rz_r2 + dt_5 * rx_r3 + 3.0 * dt_5 * rx_r * rz_r2 + 3.0 * dt_4 * rx_r;
+        d.d230 =
+            dt_6 * ry_r3 * rx_r2 + dt_5 * ry_r3 + 3.0 * dt_5 * ry_r * rx_r2 + 3.0 * dt_4 * ry_r;
+        d.d032 =
+            dt_6 * ry_r3 * rz_r2 + dt_5 * ry_r3 + 3.0 * dt_5 * ry_r * rz_r2 + 3.0 * dt_4 * ry_r;
+        d.d203 =
+            dt_6 * rz_r3 * rx_r2 + dt_5 * rz_r3 + 3.0 * dt_5 * rz_r * rx_r2 + 3.0 * dt_4 * rz_r;
+        d.d023 =
+            dt_6 * rz_r3 * ry_r2 + dt_5 * rz_r3 + 3.0 * dt_5 * rz_r * ry_r2 + 3.0 * dt_4 * rz_r;
         d.d311 = dt_6 * rx_r3 * ry_r * rz_r + 3.0 * dt_5 * rx_r * ry_r * rz_r;
         d.d131 = dt_6 * ry_r3 * rx_r * rz_r + 3.0 * dt_5 * rx_r * ry_r * rz_r;
         d.d113 = dt_6 * rz_r3 * rx_r * ry_r + 3.0 * dt_5 * rx_r * ry_r * rz_r;
-        d.d122 = dt_6 * rx_r * ry_r2 * rz_r2 + dt_5 * rx_r * ry_r2 + dt_5 * rx_r * rz_r2 + dt_4 * rx_r;
-        d.d212 = dt_6 * ry_r * rx_r2 * rz_r2 + dt_5 * ry_r * rx_r2 + dt_5 * ry_r * rz_r2 + dt_4 * ry_r;
-        d.d221 = dt_6 * rz_r * rx_r2 * ry_r2 + dt_5 * rz_r * rx_r2 + dt_5 * rz_r * ry_r2 + dt_4 * rz_r;
+        d.d122 =
+            dt_6 * rx_r * ry_r2 * rz_r2 + dt_5 * rx_r * ry_r2 + dt_5 * rx_r * rz_r2 + dt_4 * rx_r;
+        d.d212 =
+            dt_6 * ry_r * rx_r2 * rz_r2 + dt_5 * ry_r * rx_r2 + dt_5 * ry_r * rz_r2 + dt_4 * ry_r;
+        d.d221 =
+            dt_6 * rz_r * rx_r2 * ry_r2 + dt_5 * rz_r * rx_r2 + dt_5 * rz_r * ry_r2 + dt_4 * rz_r;
 
         d
     }
@@ -564,7 +572,7 @@ pub fn gravity_potential_multipole(
 
     if order >= 1 {
         // should be zero for center-of-mass expansion
-       // phi -= m.m100 * d.d100 + m.m010 * d.d010 + m.m001 * d.d001;
+        // phi -= m.m100 * d.d100 + m.m010 * d.d010 + m.m001 * d.d001;
     }
 
     if order >= 2 {
@@ -606,7 +614,6 @@ pub fn gravity_accel_multipole(
     d: &PotentialDerivatives,
     order: u8,
 ) -> [f64; 3] {
-
     let mut ax = 0.0f64;
     let mut ay = 0.0f64;
     let mut az = 0.0f64;
@@ -615,13 +622,13 @@ pub fn gravity_accel_multipole(
     ay -= m.m000 * d.d010;
     az -= m.m000 * d.d001;
 
-    if order >=2 {
+    if order >= 2 {
         // should be zero for center-of-mass expansion
         ax -= m.m100 * d.d200 + m.m010 * d.d110 + m.m001 * d.d101;
         ay -= m.m100 * d.d110 + m.m010 * d.d020 + m.m001 * d.d011;
         az -= m.m100 * d.d101 + m.m010 * d.d011 + m.m001 * d.d002;
     }
-    if order >= 3{
+    if order >= 3 {
         ax -= m.m200 * d.d300 + m.m020 * d.d120 + m.m002 * d.d102;
         ax -= m.m110 * d.d210 + m.m101 * d.d201 + m.m011 * d.d111;
         ay -= m.m200 * d.d210 + m.m020 * d.d030 + m.m002 * d.d012;
@@ -630,29 +637,83 @@ pub fn gravity_accel_multipole(
         az -= m.m110 * d.d111 + m.m101 * d.d102 + m.m011 * d.d012;
     }
     if order >= 4 {
-        ax -= m.m003 * d.d103 + m.m012 * d.d112 + m.m021 * d.d121 + m.m030 * d.d130 +
-              m.m102 * d.d202 + m.m111 * d.d211 + m.m120 * d.d220 + m.m201 * d.d301 +
-              m.m210 * d.d310 + m.m300 * d.d400;
-        ay -= m.m003 * d.d013 + m.m012 * d.d022 + m.m021 * d.d031 + m.m030 * d.d040 +
-              m.m102 * d.d112 + m.m111 * d.d121 + m.m120 * d.d130 + m.m201 * d.d211 +
-              m.m210 * d.d220 + m.m300 * d.d310;
-        az -= m.m003 * d.d004 + m.m012 * d.d013 + m.m021 * d.d022 + m.m030 * d.d031 +
-              m.m102 * d.d103 + m.m111 * d.d112 + m.m120 * d.d121 + m.m201 * d.d202 +
-              m.m210 * d.d211 + m.m300 * d.d301;
+        ax -= m.m003 * d.d103
+            + m.m012 * d.d112
+            + m.m021 * d.d121
+            + m.m030 * d.d130
+            + m.m102 * d.d202
+            + m.m111 * d.d211
+            + m.m120 * d.d220
+            + m.m201 * d.d301
+            + m.m210 * d.d310
+            + m.m300 * d.d400;
+        ay -= m.m003 * d.d013
+            + m.m012 * d.d022
+            + m.m021 * d.d031
+            + m.m030 * d.d040
+            + m.m102 * d.d112
+            + m.m111 * d.d121
+            + m.m120 * d.d130
+            + m.m201 * d.d211
+            + m.m210 * d.d220
+            + m.m300 * d.d310;
+        az -= m.m003 * d.d004
+            + m.m012 * d.d013
+            + m.m021 * d.d022
+            + m.m030 * d.d031
+            + m.m102 * d.d103
+            + m.m111 * d.d112
+            + m.m120 * d.d121
+            + m.m201 * d.d202
+            + m.m210 * d.d211
+            + m.m300 * d.d301;
     }
-    if order >= 5{
-        ax -= m.m004 * d.d104 + m.m013 * d.d113 + m.m022 * d.d122 + m.m031 * d.d131 +
-              m.m040 * d.d140 + m.m103 * d.d203 + m.m112 * d.d212 + m.m121 * d.d221 +
-              m.m130 * d.d230 + m.m202 * d.d302 + m.m211 * d.d311 + m.m220 * d.d320 +
-              m.m301 * d.d401 + m.m310 * d.d410 + m.m400 * d.d500;
-        ay -= m.m004 * d.d014 + m.m013 * d.d023 + m.m022 * d.d032 + m.m031 * d.d041 +
-              m.m040 * d.d050 + m.m103 * d.d113 + m.m112 * d.d122 + m.m121 * d.d131 +
-              m.m130 * d.d140 + m.m202 * d.d212 + m.m211 * d.d221 + m.m220 * d.d230 +
-              m.m301 * d.d311 + m.m310 * d.d320 + m.m400 * d.d410;
-        az -= m.m004 * d.d005 + m.m013 * d.d014 + m.m022 * d.d023 + m.m031 * d.d032 +
-              m.m040 * d.d041 + m.m103 * d.d104 + m.m112 * d.d113 + m.m121 * d.d122 +
-              m.m130 * d.d131 + m.m202 * d.d203 + m.m211 * d.d212 + m.m220 * d.d221 +
-              m.m301 * d.d302 + m.m310 * d.d311 + m.m400 * d.d401;
+    if order >= 5 {
+        ax -= m.m004 * d.d104
+            + m.m013 * d.d113
+            + m.m022 * d.d122
+            + m.m031 * d.d131
+            + m.m040 * d.d140
+            + m.m103 * d.d203
+            + m.m112 * d.d212
+            + m.m121 * d.d221
+            + m.m130 * d.d230
+            + m.m202 * d.d302
+            + m.m211 * d.d311
+            + m.m220 * d.d320
+            + m.m301 * d.d401
+            + m.m310 * d.d410
+            + m.m400 * d.d500;
+        ay -= m.m004 * d.d014
+            + m.m013 * d.d023
+            + m.m022 * d.d032
+            + m.m031 * d.d041
+            + m.m040 * d.d050
+            + m.m103 * d.d113
+            + m.m112 * d.d122
+            + m.m121 * d.d131
+            + m.m130 * d.d140
+            + m.m202 * d.d212
+            + m.m211 * d.d221
+            + m.m220 * d.d230
+            + m.m301 * d.d311
+            + m.m310 * d.d320
+            + m.m400 * d.d410;
+        az -= m.m004 * d.d005
+            + m.m013 * d.d014
+            + m.m022 * d.d023
+            + m.m031 * d.d032
+            + m.m040 * d.d041
+            + m.m103 * d.d104
+            + m.m112 * d.d113
+            + m.m121 * d.d122
+            + m.m130 * d.d131
+            + m.m202 * d.d203
+            + m.m211 * d.d212
+            + m.m220 * d.d221
+            + m.m301 * d.d302
+            + m.m310 * d.d311
+            + m.m400 * d.d401;
     }
 
     [ax, ay, az]
@@ -693,14 +754,25 @@ pub fn translate_multipole(
                             let pow = if dl + dm + dn == 0 {
                                 1.0
                             } else {
-                                let sx = if dl > 0 { shift[0].powi(dl as i32) } else { 1.0 };
-                                let sy = if dm > 0 { shift[1].powi(dm as i32) } else { 1.0 };
-                                let sz = if dn > 0 { shift[2].powi(dn as i32) } else { 1.0 };
+                                let sx = if dl > 0 {
+                                    shift[0].powi(dl as i32)
+                                } else {
+                                    1.0
+                                };
+                                let sy = if dm > 0 {
+                                    shift[1].powi(dm as i32)
+                                } else {
+                                    1.0
+                                };
+                                let sz = if dn > 0 {
+                                    shift[2].powi(dn as i32)
+                                } else {
+                                    1.0
+                                };
                                 sx * sy * sz
                             };
                             let sign = if (dl + dm + dn) % 2 == 0 { 1.0 } else { -1.0 };
-                            let coeff = sign * pow
-                                / (FACT[dl] * FACT[dm] * FACT[dn]);
+                            let coeff = sign * pow / (FACT[dl] * FACT[dm] * FACT[dn]);
                             sum += coeff * base;
                         }
                     }

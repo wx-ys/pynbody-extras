@@ -1,4 +1,3 @@
-
 use rayon::prelude::*;
 
 // Wrapper types for raw pointers used in parallel regions.
@@ -14,6 +13,7 @@ struct PotPtr(*mut f64);
 unsafe impl Send for PotPtr {}
 unsafe impl Sync for PotPtr {} // same reasoning for potentials
 
+#[allow(clippy::too_many_arguments)]
 #[allow(dead_code)]
 #[inline]
 unsafe fn accumulate_pair_acc(
@@ -41,21 +41,13 @@ unsafe fn accumulate_pair_acc(
 
 #[allow(dead_code)]
 #[inline]
-unsafe fn accumulate_pair_pot(
-    pot: PotPtr,
-    i: usize,
-    j: usize,
-    mi: f64,
-    mj: f64,
-    phi_pair: f64,
-) {
+unsafe fn accumulate_pair_pot(pot: PotPtr, i: usize, j: usize, mi: f64, mj: f64, phi_pair: f64) {
     let pi_ptr = pot.0.add(i);
     let pj_ptr = pot.0.add(j);
 
     *pi_ptr += phi_pair * mj;
     *pj_ptr += phi_pair * mi;
 }
-
 
 // Generates all unique pairs (i, j) for i < j in a round-robin fashion,
 // and applies the provided function `f` to each batch of pairs per round.
@@ -80,27 +72,21 @@ where
     let mut pairs: Vec<(usize, usize)> = vec![(0, 0); pairs_per_round];
 
     for r in 0..rounds {
+        pairs.par_iter_mut().enumerate().for_each(|(k, pair)| {
+            let a = (r + k) % (m - 1);
+            let b = if k == 0 {
+                m - 1
+            } else {
+                (r + m - 1 - k) % (m - 1)
+            };
 
-        pairs
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(k, pair)| {
-
-                let a = (r + k) % (m - 1);
-                let b = if k == 0 {
-                    m - 1
-                } else {
-                    (r + m - 1 - k) % (m - 1)
-                };
-
-                if has_dummy && (a == dummy || b == dummy) {
-
-                    *pair = (usize::MAX, usize::MAX);
-                } else {
-                    let (i, j) = if a < b { (a, b) } else { (b, a) };
-                    *pair = (i, j);
-                }
-            });
+            if has_dummy && (a == dummy || b == dummy) {
+                *pair = (usize::MAX, usize::MAX);
+            } else {
+                let (i, j) = if a < b { (a, b) } else { (b, a) };
+                *pair = (i, j);
+            }
+        });
 
         let valid_len = if has_dummy {
             if let Some(pos) = pairs.iter().position(|&(i, _)| i == usize::MAX) {
@@ -167,7 +153,7 @@ pub fn direct_accelerations(
             }
         }
     } else {
-        // Parallel version for per particles, N*(N-1) interactions, 
+        // Parallel version for per particles, N*(N-1) interactions,
         // how to parallel over unique pairs more efficiently? that N(N-1)/2 interactions.
         acc.par_iter_mut().enumerate().for_each(|(i, acc_i)| {
             let pi = positions[i];
@@ -194,7 +180,6 @@ pub fn direct_accelerations(
     }
     acc
 }
-
 
 pub fn direct_accelerations_at_points(
     positions: &[[f64; 3]],
@@ -262,15 +247,9 @@ pub fn direct_accelerations_at_points(
     acc
 }
 
-
-
 /// Simple O(N^2) direct-sum gravitational potential solver
 /// (reference implementation, mainly for testing).
-pub fn direct_potentials(
-    positions: &[[f64; 3]],
-    masses: Option<&[f64]>,
-    eps: f64,
-) -> Vec<f64> {
+pub fn direct_potentials(positions: &[[f64; 3]], masses: Option<&[f64]>, eps: f64) -> Vec<f64> {
     let n = positions.len();
     let mut pot = vec![0.0f64; n];
     if n == 0 {
@@ -330,7 +309,6 @@ pub fn direct_potentials(
     }
     pot
 }
-
 
 pub fn direct_potentials_at_points(
     positions: &[[f64; 3]],

@@ -1,4 +1,4 @@
-use gravity::multipole::{MultipoleMoment, translate_multipole};
+use gravity::multipole::{translate_multipole, MultipoleMoment};
 use rand::Rng;
 
 #[test]
@@ -13,13 +13,18 @@ fn compare_translate_vs_direct() {
 
     let center_b = [0.3, 0.4, 0.5];
     let center_a = [0.8, -0.2, 0.1];
-    let delta = [center_a[0] - center_b[0], center_a[1] - center_b[1], center_a[2] - center_b[2]];
+    let delta = [
+        center_a[0] - center_b[0],
+        center_a[1] - center_b[1],
+        center_a[2] - center_b[2],
+    ];
     let indices: Vec<usize> = (0..n).collect();
 
     let order = 5u8;
     let m_b = MultipoleMoment::from_points(&positions, Some(&masses), &indices, center_b, order);
     let m_trans = translate_multipole(&m_b, delta, order);
-    let m_direct = MultipoleMoment::from_points(&positions, Some(&masses), &indices, center_a, order);
+    let m_direct =
+        MultipoleMoment::from_points(&positions, Some(&masses), &indices, center_a, order);
 
     let tol = 1e-10;
     let mut maxdiff = 0.0f64;
@@ -28,7 +33,9 @@ fn compare_translate_vs_direct() {
     macro_rules! chk {
         ($name:expr, $a:expr, $b:expr) => {{
             let d = ($a - $b).abs();
-            if d > maxdiff { maxdiff = d; }
+            if d > maxdiff {
+                maxdiff = d;
+            }
             if d > tol {
                 bad.push(($name, $a, $b, d));
             }
@@ -95,7 +102,10 @@ fn compare_translate_vs_direct() {
     if !bad.is_empty() {
         eprintln!("translate vs direct: maxdiff = {}", maxdiff);
         for (name, a, b, d) in bad.iter() {
-            eprintln!("{}: trans = {:e}, direct = {:e}, diff = {:e}", name, a, b, d);
+            eprintln!(
+                "{}: trans = {:e}, direct = {:e}, diff = {:e}",
+                name, a, b, d
+            );
         }
     }
 

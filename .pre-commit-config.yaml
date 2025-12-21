@@ -19,7 +19,7 @@ repos:
         pass_filenames: true
       - id: cargo-fmt-gravity
         name: cargo fmt (gravity)
-        entry: bash -c "cd crates/gravity && cargo fmt -- --check"
+        entry: bash -c "cd crates/gravity && cargo fmt"
         language: system
         types: [rust]
         files: '^crates/gravity/'
@@ -40,7 +40,7 @@ repos:
         pass_filenames: false
       - id: cargo-fmt-pynbodyext-rust
         name: cargo fmt (pynbodyext-rust)
-        entry: bash -c "cd crates/pynbodyext-rust && cargo fmt -- --check"
+        entry: bash -c "cd crates/pynbodyext-rust && cargo fmt"
         language: system
         types: [rust]
         files: '^crates/pynbodyext-rust/'
