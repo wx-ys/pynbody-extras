@@ -2,16 +2,19 @@
 use rayon::prelude::*;
 
 // Wrapper types for raw pointers used in parallel regions.
+#[allow(dead_code)]
 #[derive(Copy, Clone)]
 struct AccPtr(*mut [f64; 3]);
 unsafe impl Send for AccPtr {}
 unsafe impl Sync for AccPtr {} // we guarantee no concurrent writes to same index per round
 
+#[allow(dead_code)]
 #[derive(Copy, Clone)]
 struct PotPtr(*mut f64);
 unsafe impl Send for PotPtr {}
 unsafe impl Sync for PotPtr {} // same reasoning for potentials
 
+#[allow(dead_code)]
 #[inline]
 unsafe fn accumulate_pair_acc(
     acc: AccPtr,
@@ -36,6 +39,7 @@ unsafe fn accumulate_pair_acc(
     (*aj)[2] -= mi * dz * invr3;
 }
 
+#[allow(dead_code)]
 #[inline]
 unsafe fn accumulate_pair_pot(
     pot: PotPtr,
