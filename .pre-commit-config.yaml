@@ -17,3 +17,45 @@ repos:
         files: '^pynbodyext/'               # only trigger in src
         args: ["--config-file=pyproject.toml"]
         pass_filenames: true
+      - id: cargo-fmt-gravity
+        name: cargo fmt (gravity)
+        entry: bash -c "cd crates/gravity && cargo fmt -- --check"
+        language: system
+        types: [rust]
+        files: '^crates/gravity/'
+        pass_filenames: false
+      - id: cargo-clippy-gravity
+        name: cargo clippy (gravity)
+        entry: bash -c "cd crates/gravity && cargo clippy -p gravity -- -D warnings"
+        language: system
+        types: [rust]
+        files: '^crates/gravity/'
+        pass_filenames: false
+      - id: cargo-test-gravity
+        name: cargo test (gravity)
+        entry: bash -c "cd crates/gravity && cargo test"
+        language: system
+        types: [rust]
+        files: '^crates/gravity/'
+        pass_filenames: false
+      - id: cargo-fmt-pynbodyext-rust
+        name: cargo fmt (pynbodyext-rust)
+        entry: bash -c "cd crates/pynbodyext-rust && cargo fmt -- --check"
+        language: system
+        types: [rust]
+        files: '^crates/pynbodyext-rust/'
+        pass_filenames: false
+      - id: cargo-clippy-pynbodyext-rust
+        name: cargo clippy (pynbodyext-rust)
+        entry: bash -c "cd crates/pynbodyext-rust && cargo clippy -p pynbodyext-rust -- -D warnings"
+        language: system
+        types: [rust]
+        files: '^crates/pynbodyext-rust/'
+        pass_filenames: false
+      - id: cargo-test-pynbodyext-rust
+        name: cargo test (pynbodyext-rust)
+        entry: bash -c "cd crates/pynbodyext-rust && cargo test"
+        language: system
+        types: [rust]
+        files: '^crates/pynbodyext-rust/'
+        pass_filenames: false
