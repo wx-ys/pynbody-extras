@@ -14,3 +14,8 @@ ndarray = { version = "0.15", optional = true }
 
 [dev-dependencies]
 rand = "0.8"
+criterion = "0.5"
+
+[[bench]]
+name = "gravity_bench"
+harness = false

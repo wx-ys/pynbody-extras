@@ -239,6 +239,7 @@ impl MultipoleMoment {
 // Factorials up to 5! as f64.
 const FACT: [f64; 6] = [1.0, 1.0, 2.0, 6.0, 24.0, 120.0];
 
+#[inline]
 fn get_moment(m: &MultipoleMoment, l: usize, mm: usize, n: usize) -> f64 {
     match (l, mm, n) {
         (0, 0, 0) => m.m000,
@@ -425,7 +426,10 @@ pub struct PotentialDerivatives {
 }
 
 impl PotentialDerivatives {
-    pub fn new(dx: f64, dy: f64, dz: f64, eps2: f64, _order: u8) -> Self {
+    pub fn new(dx: f64, dy: f64, dz: f64, eps2: f64, order: u8) -> Self {
+
+        let max = (order as usize).min(5);
+
         let r2 = dx * dx + dy * dy + dz * dz + eps2;
         let r = r2.sqrt();
         let r_inv = 1.0 / r;
@@ -461,9 +465,16 @@ impl PotentialDerivatives {
 
         d.d000 = dt_1;
 
+        if max == 0 {
+            return d;
+        }
+
         d.d100 = dt_2 * rx_r;
         d.d010 = dt_2 * ry_r;
         d.d001 = dt_2 * rz_r;
+        if max == 1 {
+            return d;
+        }
 
         dt_2 *= r_inv;
         d.d200 = dt_3 * rx_r2 + dt_2;
@@ -472,6 +483,9 @@ impl PotentialDerivatives {
         d.d110 = dt_3 * rx_r * ry_r;
         d.d101 = dt_3 * rx_r * rz_r;
         d.d011 = dt_3 * ry_r * rz_r;
+        if max == 2 {
+            return d;
+        }
 
         dt_3 *= r_inv;
         d.d300 = dt_4 * rx_r3 + 3.0 * dt_3 * rx_r;
@@ -484,6 +498,9 @@ impl PotentialDerivatives {
         d.d021 = dt_4 * ry_r2 * rz_r + dt_3 * rz_r;
         d.d012 = dt_4 * rz_r2 * ry_r + dt_3 * ry_r;
         d.d111 = dt_4 * rx_r * ry_r * rz_r;
+        if max == 3 {
+            return d;
+        }
 
         dt_3 *= r_inv;
         dt_4 *= r_inv;
@@ -502,6 +519,9 @@ impl PotentialDerivatives {
         d.d211 = dt_5 * rx_r2 * ry_r * rz_r + dt_4 * ry_r * rz_r;
         d.d121 = dt_5 * ry_r2 * rx_r * rz_r + dt_4 * rx_r * rz_r;
         d.d112 = dt_5 * rz_r2 * rx_r * ry_r + dt_4 * rx_r * ry_r;
+        if max == 4 {
+            return d;
+        }
 
         dt_4 *= r_inv;
         dt_5 *= r_inv;
@@ -526,9 +546,6 @@ impl PotentialDerivatives {
         d.d122 = dt_6 * rx_r * ry_r2 * rz_r2 + dt_5 * rx_r * ry_r2 + dt_5 * rx_r * rz_r2 + dt_4 * rx_r;
         d.d212 = dt_6 * ry_r * rx_r2 * rz_r2 + dt_5 * ry_r * rx_r2 + dt_5 * ry_r * rz_r2 + dt_4 * ry_r;
         d.d221 = dt_6 * rz_r * rx_r2 * ry_r2 + dt_5 * rz_r * rx_r2 + dt_5 * rz_r * ry_r2 + dt_4 * rz_r;
-        d.d311 = dt_6 * rx_r3 * ry_r * rz_r + 3.0 * dt_5 * rx_r * ry_r * rz_r;
-        d.d131 = dt_6 * ry_r3 * rx_r * rz_r + 3.0 * dt_5 * rx_r * ry_r * rz_r;
-        d.d113 = dt_6 * rz_r3 * rx_r * ry_r + 3.0 * dt_5 * rx_r * ry_r * rz_r;
 
         d
     }
@@ -545,7 +562,6 @@ pub fn gravity_potential_multipole(
     // Monopole
     phi -= m.m000 * d.d000;
 
-    // higher-order terms (about center-of-mass) follow example_multipole.py
     if order >= 1 {
         // should be zero for center-of-mass expansion
        // phi -= m.m100 * d.d100 + m.m010 * d.d010 + m.m001 * d.d001;
