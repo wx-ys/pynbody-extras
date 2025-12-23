@@ -639,7 +639,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
                         trans_obj = self._apply_transform(sim)
                     except Exception as e:
                         logger.error("Error applying pre-transformation: %s, when calculating %s", e, self)
-                        raise RuntimeError(f"Error applying pre-transformation {self._transformation}") from e
+                        raise
                     return trans_obj
         return None
 
@@ -677,7 +677,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
                         sim_masked = self._apply_filter(sim)
                     except Exception as e:
                         logger.error("Error applying pre-filter: %s, when calculating %s", e, self)
-                        raise RuntimeError(f"Error applying pre-filter {self._filter}") from e
+                        raise
                 return sim_masked
         return sim
 
@@ -727,7 +727,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
                 logger.debug("[%s] reverting transformation due to error: %s", self, self._transformation)
                 trans_obj.revert()
             logger.error("Error during calculation: %s, when calculating %s", e, self)
-            raise RuntimeError(f"Error during calculation in {self}") from e
+            raise
         return result
 
     def _apply_calculation(self, sim: SimSnap, trans_obj: Transformation | None, sim_masked: SimSnap) -> ReturnT:
