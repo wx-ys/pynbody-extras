@@ -201,7 +201,7 @@ class ProfileArray(SimArray):
         n_bins = profile.nbins
         arr_len = len(array)
 
-
+        base: SimNpArray
         if arr_len == n_particles:
             # per-particle → compute mean as default (or `mode` if provided)
             arr_pp = array
