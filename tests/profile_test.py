@@ -17,6 +17,7 @@ def test_radial_profile_builder(snap):
     pr[snap["x"]<5]
     pr.s['density']
     pr.g["temp"]["med"]
+    npt.assert_allclose(pr.g["temp"]["med"] , pr.g["temp_p50"])
     pr.particles_at_bin[:2]
     
     assert len(pr.particles_at_bin[3]) == (len(pr.s.particles_at_bin[3]) + len(pr.g.particles_at_bin[3]) + len(pr.dm.particles_at_bin[3]))

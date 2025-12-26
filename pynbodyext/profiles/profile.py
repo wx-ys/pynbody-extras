@@ -417,6 +417,8 @@ class ProfileBase:
 
         - String key → return :class:`~pynbodyext.profiles.proarray.ProfileArray`
           (base representation; chain another string to compute a statistic).
+        - String key with a statistic suffix, e.g. ``"mass_mean"``, ``"mass_p16"``,
+            → shorthand for ``self["mass"]["mean"]``, ``self["mass"]["p16"]``.
         - Filter-like key (pynbody filter, family, boolean mask, slice, etc.) →
           return :class:`~pynbodyext.profiles.profile.SubProfile`.
 
@@ -425,11 +427,24 @@ class ProfileBase:
         >>> mprof = prof["mass"]           # base per-bin array (mean by default)
         >>> m50 = prof["mass"]["p50"]      # median via percentile syntax
         >>> disp = prof["vel"]["disp"]     # dispersion
+        >>> m16 = prof["mass_p16"]         # shorthand for prof["mass"]["p16"]
         """
 
         # str -> ProfileArray
         if isinstance(key, str):
-            return self._resolve_field(key)
+            try:
+                return self._resolve_field(key)
+            except KeyError:
+                if "_" not in key:
+                    raise
+                # try splitting key into field + statistic
+                field, stat = key.rsplit("_", 1)
+                if not field:
+                    raise
+                if ProfileArray.get_statistic(stat) is None:
+                    raise
+                base_arr = self._resolve_field(field)
+                return base_arr[stat]
 
         # FilterLike → subset
         subset = self.sim[key]
