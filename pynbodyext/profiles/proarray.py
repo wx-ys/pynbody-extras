@@ -90,6 +90,32 @@ __all__ = [
     "Dispersion",
 ]
 
+class _ProfileArrayStatAccessor:
+    """Lightweight view object to access statistics as arr.stat['key']."""
+    def __init__(self, owner: "ProfileArray") -> None:
+        if not owner._check_base_for_stats():
+            raise RuntimeError("Cannot compute statistics on this ProfileArray")
+        self._owner = owner
+
+    def __getitem__(self, key: str) -> "ProfileArray":
+        owner = self._owner
+
+        profile = cast("ProfileBase", owner._profile)
+        name = owner._name
+
+        # cache lookup
+        if profile.is_cached(name, key):
+            return profile.get_cached(name, key)
+
+        # compute and cache
+        out, mode = owner._compute(profile, name, compute_mode=key)
+        res = ProfileArray(profile, name=name, array=out, mode=mode)
+        profile.cache(res)
+        return res
+
+    def _ipython_key_completions_(self) -> list[str]:
+        return self._owner.keys()
+
 class ProfileArray(SimArray):
     """
     A profile-valued 1D array bound to a specific profile definition and source field.
@@ -333,6 +359,23 @@ class ProfileArray(SimArray):
                 return res
         return None
 
+    @property
+    def stat(self) -> _ProfileArrayStatAccessor:
+        """
+        Access statistics, computed on demand from the per-particle source.
+
+        Example
+        -------
+        >>> vr_median = pr.stat["med"]
+        >>> vr_p16 = pr.stat["p16"]
+
+        Returns
+        -------
+        :class:`~pynbodyext.profiles.proarray._ProfileArrayStatAccessor`
+            The statistic accessor.
+        """
+        return _ProfileArrayStatAccessor(self)
+
     def __array_finalize__(self, obj: Union["ProfileArray", None]) -> None:
         """
         NumPy/pynbody subclass hook for view creation.
@@ -440,16 +483,7 @@ class ProfileArray(SimArray):
         """
         # dispatch on stats name vs normal indexing
         if isinstance(item, str):
-            if not self._check_base_for_stats():
-                raise RuntimeError("Cannot compute statistics on this ProfileArray")
-            profile = cast("ProfileBase", self._profile)
-            name = self._name
-            if profile.is_cached(name,item):
-                return profile.get_cached(name,item)
-            out,mode = self._compute(profile, name, compute_mode=item)
-            res = ProfileArray(profile, name=name, array=out, mode=mode)
-            profile.cache(res)
-            return res
+            return self.stat[item]
         # normal ndarray-like indexing
         return super().__getitem__(item)
 
