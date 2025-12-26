@@ -17,6 +17,11 @@ def test_radial_profile_builder(snap):
     pr[snap["x"]<5]
     pr.s['density']
     pr.g["temp"]["med"]
+    pr.particles_at_bin[:2]
+    
+    assert len(pr.particles_at_bin[3]) == (len(pr.s.particles_at_bin[3]) + len(pr.g.particles_at_bin[3]) + len(pr.dm.particles_at_bin[3]))
+    assert len(pr.particles_at_bin[:3]) == len(pr.particles_at_bin[0,1,2]) 
+    assert len(pr.particles_at_bin[:3]) == len(pr.particles_at_bin[np.array([True,True,True]+[False]*(pr.nbins-3))])
 
 
 def test_time_profile(snap):
