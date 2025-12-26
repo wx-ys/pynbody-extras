@@ -19,8 +19,10 @@ from __future__ import annotations
 
 import warnings
 from collections import defaultdict
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, cast, overload
 
+import numpy as np
 from pynbody.snapshot import SimSnap
 
 from .bins import BinsSet
@@ -29,7 +31,6 @@ from .proarray import ProfileArray
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    import numpy as np
     from matplotlib.axes import Axes
     from matplotlib.lines import Line2D
 
@@ -57,6 +58,43 @@ __all__ = ["Profile", "SubProfile", "ProfileBase"]
 
 def _is_sim_like(x: Any) -> bool:
     return isinstance(x, SimSnap)
+
+
+class _ProfileParticle:
+
+    def __init__(self, profile: ProfileBase):
+        self._profile = profile
+
+    def __getitem__(self, bin_idx: int | slice | np.ndarray | Sequence[int]) -> SimSnap:
+        """
+        Return a :class:`~pynbody.snapshot.SimSnap` view of the particles in the specified bin.
+
+        Parameters
+        ----------
+        bin_idx : int, slice, array-like of bool, or sequence of int
+            The bin index/indices to retrieve particles from.
+
+        Returns
+        -------
+        :class:`~pynbody.snapshot.SimSnap`
+            The subset snapshot for particles in the specified bin.
+        """
+        pr = self._profile
+        if isinstance(bin_idx, slice):
+            selected = [pr.binind[i] for i in range(*bin_idx.indices(pr.nbins))]
+            indices = np.concatenate(selected) if selected else np.array([], dtype=int)
+        elif isinstance(bin_idx, np.ndarray) and bin_idx.dtype == bool:
+            if bin_idx.size != pr.nbins:
+                raise ValueError("Boolean array length must match number of bins.")
+            selected_indices = [pr.binind[i] for i in range(pr.nbins) if bin_idx[i]]
+            indices = np.concatenate(selected_indices) if selected_indices else np.array([], dtype=int)
+        elif isinstance(bin_idx, Sequence):
+            selected_indices = [pr.binind[i] for i in bin_idx]
+            indices = np.concatenate(selected_indices) if selected_indices else np.array([], dtype=int)
+        else:  # single int
+            indices = pr.binind[bin_idx]
+        indices = np.sort(indices)
+        return pr.sim[indices]
 
 # ------------------------------------------------------------------
 # Profile base
@@ -188,6 +226,20 @@ class ProfileBase:
     def npart_bins(self) -> np.ndarray | None:
         """Number of particles per bin."""
         return self._bins.npart_bins
+
+    @property
+    def particles_at_bin(self) -> _ProfileParticle:
+        """
+        Return a :class:`~pynbody.snapshot.SimSnap` view of the particles in the specified bin.
+
+        Example
+        -------
+        >>> prof.particles_at_bin[0]          # particles in the first bin
+        >>> prof.particles_at_bin[0:5]       # particles in the first five bins
+        >>> prof.particles_at_bin[[0, 2, 4]] # particles in bins 0, 2, and 4
+        >>> prof.particles_at_bin[mask]       # particles in bins where mask is True
+        """
+        return _ProfileParticle(self)
 
     def families(self):
         """Proxy for :meth:`~pynbody.snapshot.SimSnap.families`."""
