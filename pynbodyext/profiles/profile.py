@@ -432,19 +432,40 @@ class ProfileBase:
 
         # str -> ProfileArray
         if isinstance(key, str):
+            # 1) try direct resolution
             try:
                 return self._resolve_field(key)
-            except KeyError:
+            except KeyError as orig_err:
+                # 2) try statistic suffix
                 if "_" not in key:
-                    raise
-                # try splitting key into field + statistic
-                field, stat = key.rsplit("_", 1)
-                if not field:
-                    raise
-                if ProfileArray.get_statistic(stat) is None:
-                    raise
-                base_arr = self._resolve_field(field)
-                return base_arr[stat]
+                    raise orig_err
+                # all possible splits of key into field + statistic
+                # v_x_abs_p16 → try:
+                #   v_x_abs | p16
+                #   v_x     | abs_p16
+                underscore_pos = [i for i, ch in enumerate(key) if ch == "_"]
+
+                for pos in reversed(underscore_pos):
+                    field = key[:pos]
+                    stat = key[pos + 1 :]
+
+                    if not field or not stat:
+                        continue
+
+                    # the suffix must be a registered statistic key
+                    if ProfileArray.get_statistic(stat) is None:
+                        continue
+
+                    # must successfully resolve base field, else continue
+                    try:
+                        base_arr = self._resolve_field(field)
+                    except KeyError:
+                        continue
+
+                    # self[field][stat]
+                    return base_arr[stat]
+
+                raise orig_err
 
         # FilterLike → subset
         subset = self.sim[key]
