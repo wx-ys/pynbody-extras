@@ -966,6 +966,7 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         value:  UnitLike | float | int | SingleElementArray,
         sim_parameter: str,
         sim: SimSnap,
+        target_units: UnitLike | None = None,
     ) -> float:
         """
         Convert a value into the simulation's native units for a given array.
@@ -991,16 +992,20 @@ class CalculatorBase(SimCallable[ReturnT], Generic[ReturnT], ABC):
         float
             The numeric value in the native units of `sim[sim_parameter]`.
         """
+        if target_units is not None:
+            target_unit = units.Unit(target_units)
+        if target_units is None:
+            target_unit = sim[sim_parameter].units
         if isinstance(value, str):
             value = units.Unit(value)
         if isinstance(value, units.UnitBase):
-            value = float(value.in_units(sim[sim_parameter].units,
-                                          **sim[sim_parameter].conversion_context()))
+            value = float(value.in_units(target_unit,
+                                          **sim.conversion_context()))
         if isinstance(value, np.ndarray):
             if value.ndim == 0 or value.size == 1:
                 if isinstance(value, SimArray):
-                    value = value.in_units(sim[sim_parameter].units,
-                                       **sim[sim_parameter].conversion_context()).item()
+                    value = value.in_units(target_unit,
+                                       **sim.conversion_context()).item()
                 else:
                     value = value.item()
             else:
