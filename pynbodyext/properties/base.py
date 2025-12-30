@@ -135,7 +135,7 @@ from pynbodyext.chunk import is_dask_array
 from pynbodyext.util._type import get_signature_safe
 
 __all__ = ["PropertyBase", "ConstantProperty", "LambdaProperty", "OpProperty",
-           "ParamSum", "ParameterContain","VolumeDensity", "SurfaceDensity"]
+           "ParamSum", "ParameterContain","VolumeDensity", "SurfaceDensity", "RadiusAtSurfaceDensity"]
 
 from pynbodyext.filters.filt import Annulus, BandPass, ValueLike, ValueLikeFunc, VolumeFilter
 
@@ -699,3 +699,171 @@ class SurfaceDensity(PropertyBase[SimArray]):
         den.units = sim[self.parameter].units / sim["pos"].units**2
         den.sim = sim.ancestor
         return den
+
+class RadiusAtSurfaceDensity(PropertyBase[SimArray]):
+    """
+    Calculate the radius at which the surface density equals a given value.
+
+    In ``mode='shell'`` the surface density at radius r is measured in the
+    shell [r - eps/2, r + eps/2].
+
+    In ``mode='total'`` the surface density is Σ(<r) = M(<r) / (π r^2).
+
+    A 1D bisection in r is used to solve Σ(r) = target.
+    """
+
+    def __init__(self, target: ValueLike | ValueLikeFunc, parameter: str = "mass", mode: str = "shell", r_key: str = "rxy", eps: float = 0.01):
+        """
+        Parameters
+        ----------
+        target : float, SimArray, or callable
+            Target surface density (in Σ units) or a callable `target(sim)`.
+        parameter : str, default 'mass'
+            Parameter to compute surface density from (e.g., 'mass', 'sfr').
+        mode : {'shell', 'total'}, default 'shell'
+            'shell' -> Σ_shell(r) in shell [r - eps/2, r + eps/2]
+            'total' -> Σ(<r) = M(<r) / (π r^2)
+        r_key : str, default 'rxy'
+            Radius key in the snapshot.
+        eps : float, default 0.01
+            Shell width in radius units (same units as `r_key`).
+        """
+        if mode not in ("shell", "total"):
+            raise ValueError("mode must be 'shell' or 'total'")
+        self.target = target
+        self.parameter = parameter
+        self.mode = mode
+        self.r_key = r_key
+        self.eps = eps
+
+    def instance_signature(self) -> tuple:
+        return (
+            self.__class__.__name__,
+            get_signature_safe(self.target, fallback_to_id=True),
+            self.parameter,
+            self.mode,
+            self.r_key,
+            self.eps,
+        )
+
+    def _target_value(self, sim: SimSnap) -> float:
+        """Target surface density as scalar in sim surface-density units."""
+        surf_units = sim[self.parameter].units / sim["pos"].units**2
+        if callable(self.target):
+            raw_target = self.target(sim)
+        else:
+            raw_target = self.target
+        return  self._in_sim_units(raw_target, surf_units, sim, target_units=surf_units)
+
+    @staticmethod
+    def _sigma_at_radius(
+        r_val: float,
+        r_sorted: np.ndarray,
+        m_cum: np.ndarray,
+        eps: float,
+        mode: str,
+    ) -> float:
+        """
+        Surface density at radius r_val using sorted radii & cumulative mass.
+
+        All inputs are in base units: r in pos-units, mass in parameter-units.
+        """
+        sigma = 0.0
+        if r_val <= 0:
+            return sigma
+
+        if mode == "total":
+            hi = np.searchsorted(r_sorted, r_val, side="right")
+            if hi > 0:
+                m_inside = m_cum[hi - 1]
+                area = np.pi * (r_val**2)
+                if area > 0:
+                    sigma = float(m_inside / area)
+            return sigma
+
+        # mode == "shell": shell [r_val - eps/2, r_val + eps/2]
+        rin = r_val - 0.5 * eps
+        rout = r_val + 0.5 * eps
+        if rout <= 0:
+            return 0.0
+        rin = max(rin, 0.0)
+
+        lo = np.searchsorted(r_sorted, rin, side="left")
+        hi = np.searchsorted(r_sorted, rout, side="right")
+
+        if hi > 0 and hi > lo:
+            m_shell = m_cum[hi - 1] - (m_cum[lo - 1] if lo > 0 else 0.0)
+            area_shell = np.pi * (rout ** 2 - rin ** 2)
+            if area_shell > 0:
+                sigma = float(m_shell / area_shell)
+        return sigma
+
+
+    def calculate(self, sim: SimSnap) -> SimArray:
+        r_arr = sim[self.r_key]
+        m_arr = sim[self.parameter]
+
+        if is_dask_array(r_arr) or is_dask_array(m_arr):
+            raise NotImplementedError(
+                "RadiusAtSurfaceDensity currently only supports non-dask arrays"
+            )
+
+        # Work in base units
+        pos_units = sim["pos"].units
+        mass_units = sim[self.parameter].units
+
+        r_vals = np.asarray(r_arr.in_units(pos_units))
+        m_vals = np.asarray(m_arr.in_units(mass_units))
+
+        # Sort and build cumulative mass
+        idx = np.argsort(r_vals)
+        r_sorted = r_vals[idx]
+        m_sorted = m_vals[idx]
+        m_cum = np.cumsum(m_sorted)
+
+        r_min = float(r_sorted[0])
+        r_max = float(r_sorted[-1])
+        if r_max <= r_min:
+            raise ValueError("Degenerate radius distribution")
+
+        t = self._target_value(sim)
+
+        # Choose a bracket where Σ(r) crosses t.
+        # For shell mode we avoid the very edges so shells are well-defined.
+        half_eps = 0.5 * self.eps
+        r_lo = max(r_min + half_eps, r_min * 1.0001)
+        r_hi = max(r_lo + self.eps, r_max - half_eps)
+
+        sigma_lo = self._sigma_at_radius(r_lo, r_sorted, m_cum, self.eps, self.mode)
+        sigma_hi = self._sigma_at_radius(r_hi, r_sorted, m_cum, self.eps, self.mode)
+
+        # Expect monotonically decreasing profile with radius
+        s_max, s_min = sigma_lo, sigma_hi
+        if t > s_max or t < s_min:
+            raise ValueError(
+                f"Target surface density {t} outside profile range "
+                f"[{s_min}, {s_max}] in units "
+                f"{sim[self.parameter].units / sim['pos'].units**2}"
+            )
+
+        # Ensure (sigma_lo - t) and (sigma_hi - t) have opposite signs
+        if (sigma_lo - t) * (sigma_hi - t) > 0:
+            raise ValueError("Could not bracket the root for Σ(r) = target")
+
+        # Bisection until interval smaller than eps/4
+        while (r_hi - r_lo) > (self.eps / 4.0):
+            r_mid = 0.5 * (r_lo + r_hi)
+            sigma_mid = self._sigma_at_radius(
+                r_mid, r_sorted, m_cum, self.eps, self.mode
+            )
+            if (sigma_lo - t) * (sigma_mid - t) <= 0:
+                r_hi, sigma_hi = r_mid, sigma_mid
+            else:
+                r_lo, sigma_lo = r_mid, sigma_mid
+
+        r_star = 0.5 * (r_lo + r_hi)
+
+        r_out = SimArray(r_star)
+        r_out.units = pos_units
+        r_out.sim = sim.ancestor
+        return r_out

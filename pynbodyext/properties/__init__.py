@@ -12,6 +12,7 @@ __all__ = [
     "ParameterContain",
     "VolumeDensity",
     "SurfaceDensity",
+    "RadiusAtSurfaceDensity",
 ]
 
 from .generic import AngMomVec, CenPos, CenVel, KappaRot, SpinParam, VirialRadius
