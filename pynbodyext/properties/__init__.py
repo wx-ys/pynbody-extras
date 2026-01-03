@@ -4,7 +4,7 @@ module for property calculations.
 """
 
 
-from .base import ParameterContain, ParamSum, PropertyBase, SurfaceDensity, VolumeDensity
+from .base import ParameterContain, ParamSum, PropertyBase, RadiusAtSurfaceDensity, SurfaceDensity, VolumeDensity
 
 __all__ = [
     "PropertyBase",
