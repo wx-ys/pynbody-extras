@@ -57,7 +57,6 @@ fn rms_vec3(a: &[[f64; 3]], b: &[[f64; 3]]) -> f64 {
 #[test]
 fn accelerations_match_direct_small_n() {
     let n = 256;
-    let eps = 1e-3f64;
     let theta = 0.0f64; // force full traversal down to leaves
 
     let pts = gen_points(1, n);
@@ -66,9 +65,9 @@ fn accelerations_match_direct_small_n() {
     let tree = Octree::build(&pts, Some(&masses), 32, 2);
 
     let mut acc_tree = vec![[0.0f64; 3]; n];
-    tree.compute_accelerations(theta, eps, &mut acc_tree);
+    tree.compute_accelerations(theta, &mut acc_tree);
 
-    let acc_direct = direct::direct_accelerations(&pts, Some(&masses), eps);
+    let acc_direct = direct::direct_accelerations(&pts, Some(&masses));
 
     for i in 0..n {
         let diff = max_abs3(&acc_tree[i], &acc_direct[i]);
@@ -79,7 +78,6 @@ fn accelerations_match_direct_small_n() {
 #[test]
 fn potentials_match_direct_small_n() {
     let n = 256;
-    let eps = 1e-3f64;
     let theta = 0.0f64; // force full traversal down to leaves
 
     let pts = gen_points(3, n);
@@ -88,9 +86,9 @@ fn potentials_match_direct_small_n() {
     let tree = Octree::build(&pts, Some(&masses), 32, 2);
 
     let mut pot_tree = vec![0.0f64; n];
-    tree.compute_potentials(theta, eps, &mut pot_tree);
+    tree.compute_potentials(theta, &mut pot_tree);
 
-    let pot_direct = direct::direct_potentials(&pts, Some(&masses), eps);
+    let pot_direct = direct::direct_potentials(&pts, Some(&masses));
 
     for i in 0..n {
         let diff = (pot_tree[i] - pot_direct[i]).abs();
@@ -102,7 +100,6 @@ fn potentials_match_direct_small_n() {
 fn queries_match_direct_at_points() {
     let n_src = 512;
     let n_tgt = 128;
-    let eps = 1e-3f64;
     let theta = 0.0f64; // force full traversal down to leaves
 
     let src = gen_points(11, n_src);
@@ -114,11 +111,11 @@ fn queries_match_direct_at_points() {
     let mut acc_tree = vec![[0.0f64; 3]; n_tgt];
     let mut pot_tree = vec![0.0f64; n_tgt];
 
-    tree.accelerations_at_points(&queries, theta, eps, &mut acc_tree);
-    tree.potentials_at_points(&queries, theta, eps, &mut pot_tree);
+    tree.accelerations_at_points(&queries, theta, &mut acc_tree);
+    tree.potentials_at_points(&queries, theta, &mut pot_tree);
 
-    let acc_direct = direct::direct_accelerations_at_points(&src, Some(&masses), &queries, eps);
-    let pot_direct = direct::direct_potentials_at_points(&src, Some(&masses), &queries, eps);
+    let acc_direct = direct::direct_accelerations_at_points(&src, Some(&masses), &queries);
+    let pot_direct = direct::direct_potentials_at_points(&src, Some(&masses), &queries);
 
     for i in 0..n_tgt {
         let d_acc = max_abs3(&acc_tree[i], &acc_direct[i]);
@@ -133,21 +130,20 @@ fn error_decreases_with_multipole_order_accel() {
     // For a fixed theta, higher multipole order should reduce error.
     // Use moderate N to keep test fast yet meaningful.
     let n = 800;
-    let eps = 1e-3f64;
     let theta = 0.7f64; // approximate regime to expose truncation error
 
     let pts = gen_points(21, n);
     let masses = gen_masses(22, n);
 
     // Reference (exact) accelerations
-    let acc_ref = direct::direct_accelerations(&pts, Some(&masses), eps);
+    let acc_ref = direct::direct_accelerations(&pts, Some(&masses));
 
     let orders = [0u8, 3u8, 4u8, 5u8];
     let mut errs = Vec::with_capacity(orders.len());
     for &ord in &orders {
         let tree = Octree::build(&pts, Some(&masses), 64, ord);
         let mut acc_tree = vec![[0.0f64; 3]; n];
-        tree.compute_accelerations(theta, eps, &mut acc_tree);
+        tree.compute_accelerations(theta, &mut acc_tree);
         let e = rms_vec3(&acc_tree, &acc_ref);
         errs.push(e);
     }
@@ -176,20 +172,19 @@ fn error_decreases_with_multipole_order_accel() {
 fn error_decreases_with_multipole_order_potential() {
     // For a fixed theta, higher multipole order should reduce potential error.
     let n = 800;
-    let eps = 1e-3f64;
     let theta = 0.7f64;
 
     let pts = gen_points(31, n);
     let masses = gen_masses(32, n);
 
-    let pot_ref = direct::direct_potentials(&pts, Some(&masses), eps);
+    let pot_ref = direct::direct_potentials(&pts, Some(&masses));
 
     let orders = [0u8, 2u8, 3u8, 4u8, 5u8];
     let mut errs = Vec::with_capacity(orders.len());
     for &ord in &orders {
         let tree = Octree::build(&pts, Some(&masses), 64, ord);
         let mut pot_tree = vec![0.0f64; n];
-        tree.compute_potentials(theta, eps, &mut pot_tree);
+        tree.compute_potentials(theta, &mut pot_tree);
         let e = rms_scalar(&pot_tree, &pot_ref);
         errs.push(e);
     }

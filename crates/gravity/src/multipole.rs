@@ -1,5 +1,8 @@
 use std::f64;
 
+// Tiny additive term to avoid division by zero in 1/sqrt(r2).
+const R2_TINY: f64 = f64::MIN_POSITIVE;
+
 /// Cartesian multipole moments up to order 5.
 ///
 /// The notation follows example_multipole.py: M_lmn stores
@@ -75,6 +78,97 @@ impl MultipoleMoment {
         Self::default()
     }
 
+    #[inline]
+    fn from_points_const<const O: u8>(
+        positions: &[[f64; 3]],
+        masses_opt: Option<&[f64]>,
+        indices: &[usize],
+        center: [f64; 3],
+    ) -> Self {
+        let mut m = MultipoleMoment::default();
+        if indices.is_empty() {
+            return m;
+        }
+
+        for &pi in indices {
+            let p = positions[pi];
+            let mass = masses_opt.map(|mm| mm[pi]).unwrap_or(1.0);
+            let x = p[0] - center[0];
+            let y = p[1] - center[1];
+            let z = p[2] - center[2];
+
+            m.m000 += mass;
+
+            if O >= 1 {
+                m.m100 += mass * x;
+                m.m010 += mass * y;
+                m.m001 += mass * z;
+            }
+            if O >= 2 {
+                m.m200 += 0.5 * mass * x * x;
+                m.m020 += 0.5 * mass * y * y;
+                m.m002 += 0.5 * mass * z * z;
+                m.m110 += mass * x * y;
+                m.m101 += mass * x * z;
+                m.m011 += mass * y * z;
+            }
+            if O >= 3 {
+                m.m300 += (1.0 / 6.0) * mass * x.powi(3);
+                m.m030 += (1.0 / 6.0) * mass * y.powi(3);
+                m.m003 += (1.0 / 6.0) * mass * z.powi(3);
+                m.m210 += 0.5 * mass * x * x * y;
+                m.m201 += 0.5 * mass * x * x * z;
+                m.m120 += 0.5 * mass * y * y * x;
+                m.m102 += 0.5 * mass * x * z * z;
+                m.m021 += 0.5 * mass * y * y * z;
+                m.m012 += 0.5 * mass * y * z * z;
+                m.m111 += mass * x * y * z;
+            }
+            if O >= 4 {
+                m.m400 += (1.0 / 24.0) * mass * x.powi(4);
+                m.m040 += (1.0 / 24.0) * mass * y.powi(4);
+                m.m004 += (1.0 / 24.0) * mass * z.powi(4);
+                m.m310 += (1.0 / 6.0) * mass * x.powi(3) * y;
+                m.m301 += (1.0 / 6.0) * mass * x.powi(3) * z;
+                m.m130 += (1.0 / 6.0) * mass * y.powi(3) * x;
+                m.m103 += (1.0 / 6.0) * mass * x * z.powi(3);
+                m.m031 += (1.0 / 6.0) * mass * y.powi(3) * z;
+                m.m013 += (1.0 / 6.0) * mass * y * z.powi(3);
+                m.m220 += 0.25 * mass * x * x * y * y;
+                m.m202 += 0.25 * mass * x * x * z * z;
+                m.m022 += 0.25 * mass * y * y * z * z;
+                m.m211 += 0.5 * mass * x * x * y * z;
+                m.m121 += 0.5 * mass * y * y * x * z;
+                m.m112 += 0.5 * mass * z * z * x * y;
+            }
+            if O >= 5 {
+                m.m500 += (1.0 / 120.0) * mass * x.powi(5);
+                m.m050 += (1.0 / 120.0) * mass * y.powi(5);
+                m.m005 += (1.0 / 120.0) * mass * z.powi(5);
+                m.m410 += (1.0 / 24.0) * mass * x.powi(4) * y;
+                m.m401 += (1.0 / 24.0) * mass * x.powi(4) * z;
+                m.m140 += (1.0 / 24.0) * mass * y.powi(4) * x;
+                m.m104 += (1.0 / 24.0) * mass * z.powi(4) * x;
+                m.m041 += (1.0 / 24.0) * mass * y.powi(4) * z;
+                m.m014 += (1.0 / 24.0) * mass * z.powi(4) * y;
+                m.m320 += (1.0 / 12.0) * mass * x.powi(3) * y.powi(2);
+                m.m302 += (1.0 / 12.0) * mass * x.powi(3) * z.powi(2);
+                m.m230 += (1.0 / 12.0) * mass * x.powi(2) * y.powi(3);
+                m.m203 += (1.0 / 12.0) * mass * x.powi(2) * z.powi(3);
+                m.m032 += (1.0 / 12.0) * mass * y.powi(3) * z.powi(2);
+                m.m023 += (1.0 / 12.0) * mass * y.powi(2) * z.powi(3);
+                m.m221 += 0.25 * mass * x * x * y * y * z;
+                m.m212 += 0.25 * mass * x * x * z * z * y;
+                m.m122 += 0.25 * mass * y * y * z * z * x;
+                m.m311 += (1.0 / 6.0) * mass * x.powi(3) * y * z;
+                m.m131 += (1.0 / 6.0) * mass * y.powi(3) * x * z;
+                m.m113 += (1.0 / 6.0) * mass * z.powi(3) * x * y;
+            }
+        }
+
+        m
+    }
+
     /// In-place addition of another multipole moment (same expansion center).
     pub fn add_assign(&mut self, other: &MultipoleMoment) {
         self.m000 += other.m000;
@@ -147,93 +241,788 @@ impl MultipoleMoment {
         center: [f64; 3],
         order: u8,
     ) -> Self {
-        let mut m = MultipoleMoment::default();
-        if indices.is_empty() {
-            return m;
+        match order.min(5) {
+            0 => Self::from_points_const::<0>(positions, masses_opt, indices, center),
+            1 => Self::from_points_const::<1>(positions, masses_opt, indices, center),
+            2 => Self::from_points_const::<2>(positions, masses_opt, indices, center),
+            3 => Self::from_points_const::<3>(positions, masses_opt, indices, center),
+            4 => Self::from_points_const::<4>(positions, masses_opt, indices, center),
+            _ => Self::from_points_const::<5>(positions, masses_opt, indices, center),
         }
-
-        for &pi in indices {
-            let p = positions[pi];
-            let mass = masses_opt.map(|mm| mm[pi]).unwrap_or(1.0);
-            let x = p[0] - center[0];
-            let y = p[1] - center[1];
-            let z = p[2] - center[2];
-
-            m.m000 += mass;
-
-            if order >= 1 {
-                m.m100 += mass * x;
-                m.m010 += mass * y;
-                m.m001 += mass * z;
-            }
-            if order >= 2 {
-                m.m200 += 0.5 * mass * x * x;
-                m.m020 += 0.5 * mass * y * y;
-                m.m002 += 0.5 * mass * z * z;
-                m.m110 += mass * x * y;
-                m.m101 += mass * x * z;
-                m.m011 += mass * y * z;
-            }
-            if order >= 3 {
-                m.m300 += (1.0 / 6.0) * mass * x.powi(3);
-                m.m030 += (1.0 / 6.0) * mass * y.powi(3);
-                m.m003 += (1.0 / 6.0) * mass * z.powi(3);
-                m.m210 += 0.5 * mass * x * x * y;
-                m.m201 += 0.5 * mass * x * x * z;
-                m.m120 += 0.5 * mass * y * y * x;
-                // (l,m,n) = (1,0,2): x^1 z^2
-                m.m102 += 0.5 * mass * x * z * z;
-                // (0,2,1): y^2 z
-                m.m021 += 0.5 * mass * y * y * z;
-                // (0,1,2): y z^2
-                m.m012 += 0.5 * mass * y * z * z;
-                m.m111 += mass * x * y * z;
-            }
-            if order >= 4 {
-                m.m400 += (1.0 / 24.0) * mass * x.powi(4);
-                m.m040 += (1.0 / 24.0) * mass * y.powi(4);
-                m.m004 += (1.0 / 24.0) * mass * z.powi(4);
-                m.m310 += (1.0 / 6.0) * mass * x.powi(3) * y;
-                m.m301 += (1.0 / 6.0) * mass * x.powi(3) * z;
-                m.m130 += (1.0 / 6.0) * mass * y.powi(3) * x;
-                m.m103 += (1.0 / 6.0) * mass * x * z.powi(3);
-                m.m031 += (1.0 / 6.0) * mass * y.powi(3) * z;
-                m.m013 += (1.0 / 6.0) * mass * y * z.powi(3);
-                m.m220 += 0.25 * mass * x * x * y * y;
-                m.m202 += 0.25 * mass * x * x * z * z;
-                m.m022 += 0.25 * mass * y * y * z * z;
-                m.m211 += 0.5 * mass * x * x * y * z;
-                m.m121 += 0.5 * mass * y * y * x * z;
-                m.m112 += 0.5 * mass * z * z * x * y;
-            }
-            if order >= 5 {
-                m.m500 += (1.0 / 120.0) * mass * x.powi(5);
-                m.m050 += (1.0 / 120.0) * mass * y.powi(5);
-                m.m005 += (1.0 / 120.0) * mass * z.powi(5);
-                m.m410 += (1.0 / 24.0) * mass * x.powi(4) * y;
-                m.m401 += (1.0 / 24.0) * mass * x.powi(4) * z;
-                m.m140 += (1.0 / 24.0) * mass * y.powi(4) * x;
-                m.m104 += (1.0 / 24.0) * mass * z.powi(4) * x;
-                m.m041 += (1.0 / 24.0) * mass * y.powi(4) * z;
-                m.m014 += (1.0 / 24.0) * mass * z.powi(4) * y;
-                m.m320 += (1.0 / 12.0) * mass * x.powi(3) * y.powi(2);
-                m.m302 += (1.0 / 12.0) * mass * x.powi(3) * z.powi(2);
-                m.m230 += (1.0 / 12.0) * mass * x.powi(2) * y.powi(3);
-                m.m203 += (1.0 / 12.0) * mass * x.powi(2) * z.powi(3);
-                m.m032 += (1.0 / 12.0) * mass * y.powi(3) * z.powi(2);
-                m.m023 += (1.0 / 12.0) * mass * y.powi(2) * z.powi(3);
-                m.m221 += 0.25 * mass * x * x * y * y * z;
-                m.m212 += 0.25 * mass * x * x * z * z * y;
-                m.m122 += 0.25 * mass * y * y * z * z * x;
-                m.m311 += (1.0 / 6.0) * mass * x.powi(3) * y * z;
-                m.m131 += (1.0 / 6.0) * mass * y.powi(3) * x * z;
-                m.m113 += (1.0 / 6.0) * mass * z.powi(3) * x * y;
-            }
-        }
-
-        m
     }
 }
+
+/// Compact multipole storage specialized for a fixed runtime `order`.
+///
+/// This avoids storing all 56 coefficients (order 5) when `order` is small.
+/// The tree has a single multipole order, so we can store one compact variant
+/// for all nodes and dispatch once per traversal.
+#[derive(Clone)]
+pub enum MultipoleMoments {
+    O0(Vec<Moment0>),
+    O2(Vec<Moment2>),
+    O3(Vec<Moment3>),
+    O4(Vec<Moment4>),
+    O5(Vec<Moment5>),
+}
+
+impl MultipoleMoments {
+    pub fn from_full(full: Vec<MultipoleMoment>, order: u8) -> Self {
+        match order.min(5) {
+            0 | 1 => Self::O0(full.into_iter().map(Moment0::from).collect()),
+            2 => Self::O2(full.into_iter().map(Moment2::from).collect()),
+            3 => Self::O3(full.into_iter().map(Moment3::from).collect()),
+            4 => Self::O4(full.into_iter().map(Moment4::from).collect()),
+            _ => Self::O5(full),
+        }
+    }
+}
+
+// ===============================
+// Compact multipole moment storage
+// ===============================
+
+macro_rules! define_moment_struct {
+    ($name:ident { $($field:ident),+ $(,)? }) => {
+        #[derive(Clone, Copy, Default)]
+        pub struct $name {
+            $(pub $field: f64,)+
+        }
+
+        impl From<MultipoleMoment> for $name {
+            fn from(value: MultipoleMoment) -> Self {
+                Self { $($field: value.$field,)+ }
+            }
+        }
+    };
+}
+
+define_moment_struct!(Moment0 { m000 });
+
+define_moment_struct!(Moment2 {
+    m000,
+    m100,
+    m010,
+    m001,
+    m200,
+    m020,
+    m002,
+    m110,
+    m101,
+    m011
+});
+
+define_moment_struct!(Moment3 {
+    m000,
+    m100,
+    m010,
+    m001,
+    m200,
+    m020,
+    m002,
+    m110,
+    m101,
+    m011,
+    m300,
+    m030,
+    m003,
+    m210,
+    m201,
+    m120,
+    m102,
+    m021,
+    m012,
+    m111
+});
+
+define_moment_struct!(Moment4 {
+    m000,
+    m100,
+    m010,
+    m001,
+    m200,
+    m020,
+    m002,
+    m110,
+    m101,
+    m011,
+    m300,
+    m030,
+    m003,
+    m210,
+    m201,
+    m120,
+    m102,
+    m021,
+    m012,
+    m111,
+    m400,
+    m040,
+    m004,
+    m310,
+    m301,
+    m130,
+    m103,
+    m031,
+    m013,
+    m220,
+    m202,
+    m022,
+    m211,
+    m121,
+    m112
+});
+
+/// Order-5 storage is identical to the full moment.
+pub type Moment5 = MultipoleMoment;
+
+// ==================================
+// Evaluators (macro-generated helpers)
+// ==================================
+
+macro_rules! define_multipole_potential_fn {
+    ($fname:ident, $Moment:ty, $Deriv:ty, $m:ident, $d:ident, $body:block) => {
+        #[inline]
+        pub fn $fname($m: &$Moment, $d: &$Deriv) -> f64 $body
+    };
+}
+
+macro_rules! define_multipole_accel_fn {
+    ($fname:ident, $Moment:ty, $Deriv:ty, $m:ident, $d:ident, $body:block) => {
+        #[inline]
+        pub fn $fname($m: &$Moment, $d: &$Deriv) -> [f64; 3] $body
+    };
+}
+
+define_multipole_potential_fn!(
+    gravity_potential_multipole_o0,
+    Moment0,
+    PotentialDerivatives,
+    m,
+    d,
+    { -m.m000 * d.d000 }
+);
+
+define_multipole_potential_fn!(
+    gravity_potential_multipole_o2,
+    Moment2,
+    PotentialDerivatives,
+    m,
+    d,
+    {
+        let mut phi = -m.m000 * d.d000;
+        phi -= m.m200 * d.d200 + m.m020 * d.d020 + m.m002 * d.d002;
+        phi -= m.m110 * d.d110 + m.m101 * d.d101 + m.m011 * d.d011;
+        phi
+    }
+);
+
+define_multipole_potential_fn!(
+    gravity_potential_multipole_o3,
+    Moment3,
+    PotentialDerivatives,
+    m,
+    d,
+    {
+        let mut phi = -m.m000 * d.d000;
+        phi -= m.m200 * d.d200 + m.m020 * d.d020 + m.m002 * d.d002;
+        phi -= m.m110 * d.d110 + m.m101 * d.d101 + m.m011 * d.d011;
+        phi -= m.m300 * d.d300 + m.m030 * d.d030 + m.m003 * d.d003;
+        phi -= m.m210 * d.d210 + m.m201 * d.d201 + m.m120 * d.d120;
+        phi -= m.m102 * d.d102 + m.m021 * d.d021 + m.m012 * d.d012;
+        phi -= m.m111 * d.d111;
+        phi
+    }
+);
+
+define_multipole_potential_fn!(
+    gravity_potential_multipole_o4,
+    Moment4,
+    PotentialDerivatives,
+    m,
+    d,
+    {
+        let mut phi = -m.m000 * d.d000;
+        phi -= m.m200 * d.d200 + m.m020 * d.d020 + m.m002 * d.d002;
+        phi -= m.m110 * d.d110 + m.m101 * d.d101 + m.m011 * d.d011;
+        phi -= m.m300 * d.d300 + m.m030 * d.d030 + m.m003 * d.d003;
+        phi -= m.m210 * d.d210 + m.m201 * d.d201 + m.m120 * d.d120;
+        phi -= m.m102 * d.d102 + m.m021 * d.d021 + m.m012 * d.d012;
+        phi -= m.m111 * d.d111;
+        phi -= m.m400 * d.d400 + m.m040 * d.d040 + m.m004 * d.d004;
+        phi -= m.m310 * d.d310 + m.m301 * d.d301 + m.m130 * d.d130;
+        phi -= m.m103 * d.d103 + m.m031 * d.d031 + m.m013 * d.d013;
+        phi -= m.m220 * d.d220 + m.m202 * d.d202 + m.m022 * d.d022;
+        phi -= m.m211 * d.d211 + m.m121 * d.d121 + m.m112 * d.d112;
+        phi
+    }
+);
+
+#[inline]
+pub fn gravity_potential_multipole_o5(m: &Moment5, d: &PotentialDerivatives) -> f64 {
+    gravity_potential_multipole(m, d, 5)
+}
+
+define_multipole_accel_fn!(
+    gravity_accel_multipole_o0,
+    Moment0,
+    PotentialDerivatives,
+    m,
+    d,
+    { [-m.m000 * d.d100, -m.m000 * d.d010, -m.m000 * d.d001] }
+);
+
+define_multipole_accel_fn!(
+    gravity_accel_multipole_o2,
+    Moment2,
+    PotentialDerivatives,
+    m,
+    d,
+    {
+        let mut ax = -m.m000 * d.d100;
+        let mut ay = -m.m000 * d.d010;
+        let mut az = -m.m000 * d.d001;
+
+        ax -= m.m100 * d.d200 + m.m010 * d.d110 + m.m001 * d.d101;
+        ay -= m.m100 * d.d110 + m.m010 * d.d020 + m.m001 * d.d011;
+        az -= m.m100 * d.d101 + m.m010 * d.d011 + m.m001 * d.d002;
+
+        [ax, ay, az]
+    }
+);
+
+define_multipole_accel_fn!(
+    gravity_accel_multipole_o3,
+    Moment3,
+    PotentialDerivatives,
+    m,
+    d,
+    {
+        let mut ax = -m.m000 * d.d100;
+        let mut ay = -m.m000 * d.d010;
+        let mut az = -m.m000 * d.d001;
+
+        ax -= m.m100 * d.d200 + m.m010 * d.d110 + m.m001 * d.d101;
+        ay -= m.m100 * d.d110 + m.m010 * d.d020 + m.m001 * d.d011;
+        az -= m.m100 * d.d101 + m.m010 * d.d011 + m.m001 * d.d002;
+
+        ax -= m.m200 * d.d300 + m.m020 * d.d120 + m.m002 * d.d102;
+        ax -= m.m110 * d.d210 + m.m101 * d.d201 + m.m011 * d.d111;
+        ay -= m.m200 * d.d210 + m.m020 * d.d030 + m.m002 * d.d012;
+        ay -= m.m110 * d.d120 + m.m101 * d.d111 + m.m011 * d.d021;
+        az -= m.m200 * d.d201 + m.m020 * d.d021 + m.m002 * d.d003;
+        az -= m.m110 * d.d111 + m.m101 * d.d102 + m.m011 * d.d012;
+
+        [ax, ay, az]
+    }
+);
+
+define_multipole_accel_fn!(
+    gravity_accel_multipole_o4,
+    Moment4,
+    PotentialDerivatives,
+    m,
+    d,
+    {
+        let mut ax = -m.m000 * d.d100;
+        let mut ay = -m.m000 * d.d010;
+        let mut az = -m.m000 * d.d001;
+
+        ax -= m.m100 * d.d200 + m.m010 * d.d110 + m.m001 * d.d101;
+        ay -= m.m100 * d.d110 + m.m010 * d.d020 + m.m001 * d.d011;
+        az -= m.m100 * d.d101 + m.m010 * d.d011 + m.m001 * d.d002;
+
+        ax -= m.m200 * d.d300 + m.m020 * d.d120 + m.m002 * d.d102;
+        ax -= m.m110 * d.d210 + m.m101 * d.d201 + m.m011 * d.d111;
+        ay -= m.m200 * d.d210 + m.m020 * d.d030 + m.m002 * d.d012;
+        ay -= m.m110 * d.d120 + m.m101 * d.d111 + m.m011 * d.d021;
+        az -= m.m200 * d.d201 + m.m020 * d.d021 + m.m002 * d.d003;
+        az -= m.m110 * d.d111 + m.m101 * d.d102 + m.m011 * d.d012;
+
+        ax -= m.m003 * d.d103
+            + m.m012 * d.d112
+            + m.m021 * d.d121
+            + m.m030 * d.d130
+            + m.m102 * d.d202
+            + m.m111 * d.d211
+            + m.m120 * d.d220
+            + m.m201 * d.d301
+            + m.m210 * d.d310
+            + m.m300 * d.d400;
+        ay -= m.m003 * d.d013
+            + m.m012 * d.d022
+            + m.m021 * d.d031
+            + m.m030 * d.d040
+            + m.m102 * d.d112
+            + m.m111 * d.d121
+            + m.m120 * d.d130
+            + m.m201 * d.d211
+            + m.m210 * d.d220
+            + m.m300 * d.d310;
+        az -= m.m003 * d.d004
+            + m.m012 * d.d013
+            + m.m021 * d.d022
+            + m.m030 * d.d031
+            + m.m102 * d.d103
+            + m.m111 * d.d112
+            + m.m120 * d.d121
+            + m.m201 * d.d202
+            + m.m210 * d.d211
+            + m.m300 * d.d301;
+
+        [ax, ay, az]
+    }
+);
+
+#[inline]
+pub fn gravity_accel_multipole_o5(m: &Moment5, d: &PotentialDerivatives) -> [f64; 3] {
+    gravity_accel_multipole(m, d, 5)
+}
+
+/// Compact derivatives for order 1 (enough for monopole acceleration).
+#[derive(Clone, Copy, Default)]
+pub struct PotentialDerivatives1 {
+    pub d000: f64,
+    pub d100: f64,
+    pub d010: f64,
+    pub d001: f64,
+}
+
+impl PotentialDerivatives1 {
+    #[inline]
+    pub fn new(dx: f64, dy: f64, dz: f64, eps2: f64) -> Self {
+        let r2 = dx * dx + dy * dy + dz * dz + eps2 + R2_TINY;
+        let r = r2.sqrt();
+        let r_inv = 1.0 / r;
+
+        let dt_1 = r_inv;
+        let dt_2 = -dt_1 * r_inv;
+
+        let rx_r = dx * r_inv;
+        let ry_r = dy * r_inv;
+        let rz_r = dz * r_inv;
+
+        Self {
+            d000: dt_1,
+            d100: dt_2 * rx_r,
+            d010: dt_2 * ry_r,
+            d001: dt_2 * rz_r,
+        }
+    }
+}
+
+/// Compact derivatives for order 2.
+#[derive(Clone, Copy, Default)]
+pub struct PotentialDerivatives2 {
+    pub d000: f64,
+    pub d100: f64,
+    pub d010: f64,
+    pub d001: f64,
+    pub d200: f64,
+    pub d020: f64,
+    pub d002: f64,
+    pub d110: f64,
+    pub d101: f64,
+    pub d011: f64,
+}
+
+impl PotentialDerivatives2 {
+    #[inline]
+    pub fn new(dx: f64, dy: f64, dz: f64, eps2: f64) -> Self {
+        let r2 = dx * dx + dy * dy + dz * dz + eps2 + R2_TINY;
+        let r = r2.sqrt();
+        let r_inv = 1.0 / r;
+
+        let dt_1 = r_inv;
+        let mut dt_2 = -dt_1 * r_inv;
+        let dt_3 = -3.0 * dt_2 * r_inv;
+
+        let rx_r = dx * r_inv;
+        let ry_r = dy * r_inv;
+        let rz_r = dz * r_inv;
+
+        let rx_r2 = rx_r * rx_r;
+        let ry_r2 = ry_r * ry_r;
+        let rz_r2 = rz_r * rz_r;
+
+        let d100 = dt_2 * rx_r;
+        let d010 = dt_2 * ry_r;
+        let d001 = dt_2 * rz_r;
+
+        dt_2 *= r_inv;
+        let d200 = dt_3 * rx_r2 + dt_2;
+        let d020 = dt_3 * ry_r2 + dt_2;
+        let d002 = dt_3 * rz_r2 + dt_2;
+        let d110 = dt_3 * rx_r * ry_r;
+        let d101 = dt_3 * rx_r * rz_r;
+        let d011 = dt_3 * ry_r * rz_r;
+
+        Self {
+            d000: dt_1,
+            d100,
+            d010,
+            d001,
+            d200,
+            d020,
+            d002,
+            d110,
+            d101,
+            d011,
+        }
+    }
+}
+
+/// Compact derivatives for order 3.
+#[derive(Clone, Copy, Default)]
+pub struct PotentialDerivatives3 {
+    pub d000: f64,
+    pub d100: f64,
+    pub d010: f64,
+    pub d001: f64,
+    pub d200: f64,
+    pub d020: f64,
+    pub d002: f64,
+    pub d110: f64,
+    pub d101: f64,
+    pub d011: f64,
+    pub d300: f64,
+    pub d030: f64,
+    pub d003: f64,
+    pub d210: f64,
+    pub d201: f64,
+    pub d120: f64,
+    pub d102: f64,
+    pub d021: f64,
+    pub d012: f64,
+    pub d111: f64,
+}
+
+impl PotentialDerivatives3 {
+    #[inline]
+    pub fn new(dx: f64, dy: f64, dz: f64, eps2: f64) -> Self {
+        let r2 = dx * dx + dy * dy + dz * dz + eps2 + R2_TINY;
+        let r = r2.sqrt();
+        let r_inv = 1.0 / r;
+
+        let dt_1 = r_inv;
+        let mut dt_2 = -dt_1 * r_inv;
+        let mut dt_3 = -3.0 * dt_2 * r_inv;
+        let dt_4 = -5.0 * dt_3 * r_inv;
+
+        let rx_r = dx * r_inv;
+        let ry_r = dy * r_inv;
+        let rz_r = dz * r_inv;
+
+        let rx_r2 = rx_r * rx_r;
+        let ry_r2 = ry_r * ry_r;
+        let rz_r2 = rz_r * rz_r;
+
+        let rx_r3 = rx_r2 * rx_r;
+        let ry_r3 = ry_r2 * ry_r;
+        let rz_r3 = rz_r2 * rz_r;
+
+        let d100 = dt_2 * rx_r;
+        let d010 = dt_2 * ry_r;
+        let d001 = dt_2 * rz_r;
+
+        dt_2 *= r_inv;
+        let d200 = dt_3 * rx_r2 + dt_2;
+        let d020 = dt_3 * ry_r2 + dt_2;
+        let d002 = dt_3 * rz_r2 + dt_2;
+        let d110 = dt_3 * rx_r * ry_r;
+        let d101 = dt_3 * rx_r * rz_r;
+        let d011 = dt_3 * ry_r * rz_r;
+
+        dt_3 *= r_inv;
+        let d300 = dt_4 * rx_r3 + 3.0 * dt_3 * rx_r;
+        let d030 = dt_4 * ry_r3 + 3.0 * dt_3 * ry_r;
+        let d003 = dt_4 * rz_r3 + 3.0 * dt_3 * rz_r;
+        let d210 = dt_4 * rx_r2 * ry_r + dt_3 * ry_r;
+        let d201 = dt_4 * rx_r2 * rz_r + dt_3 * rz_r;
+        let d120 = dt_4 * ry_r2 * rx_r + dt_3 * rx_r;
+        let d102 = dt_4 * rz_r2 * rx_r + dt_3 * rx_r;
+        let d021 = dt_4 * ry_r2 * rz_r + dt_3 * rz_r;
+        let d012 = dt_4 * rz_r2 * ry_r + dt_3 * ry_r;
+        let d111 = dt_4 * rx_r * ry_r * rz_r;
+
+        Self {
+            d000: dt_1,
+            d100,
+            d010,
+            d001,
+            d200,
+            d020,
+            d002,
+            d110,
+            d101,
+            d011,
+            d300,
+            d030,
+            d003,
+            d210,
+            d201,
+            d120,
+            d102,
+            d021,
+            d012,
+            d111,
+        }
+    }
+}
+
+/// Compact derivatives for order 4.
+#[derive(Clone, Copy, Default)]
+pub struct PotentialDerivatives4 {
+    pub d000: f64,
+    pub d100: f64,
+    pub d010: f64,
+    pub d001: f64,
+    pub d200: f64,
+    pub d020: f64,
+    pub d002: f64,
+    pub d110: f64,
+    pub d101: f64,
+    pub d011: f64,
+    pub d300: f64,
+    pub d030: f64,
+    pub d003: f64,
+    pub d210: f64,
+    pub d201: f64,
+    pub d120: f64,
+    pub d102: f64,
+    pub d021: f64,
+    pub d012: f64,
+    pub d111: f64,
+    pub d400: f64,
+    pub d040: f64,
+    pub d004: f64,
+    pub d310: f64,
+    pub d301: f64,
+    pub d130: f64,
+    pub d103: f64,
+    pub d031: f64,
+    pub d013: f64,
+    pub d220: f64,
+    pub d202: f64,
+    pub d022: f64,
+    pub d211: f64,
+    pub d121: f64,
+    pub d112: f64,
+}
+
+impl PotentialDerivatives4 {
+    #[inline]
+    pub fn new(dx: f64, dy: f64, dz: f64, eps2: f64) -> Self {
+        // Reuse the existing full implementation and truncate.
+        let d = PotentialDerivatives::new(dx, dy, dz, eps2, 4);
+        Self {
+            d000: d.d000,
+            d100: d.d100,
+            d010: d.d010,
+            d001: d.d001,
+            d200: d.d200,
+            d020: d.d020,
+            d002: d.d002,
+            d110: d.d110,
+            d101: d.d101,
+            d011: d.d011,
+            d300: d.d300,
+            d030: d.d030,
+            d003: d.d003,
+            d210: d.d210,
+            d201: d.d201,
+            d120: d.d120,
+            d102: d.d102,
+            d021: d.d021,
+            d012: d.d012,
+            d111: d.d111,
+            d400: d.d400,
+            d040: d.d040,
+            d004: d.d004,
+            d310: d.d310,
+            d301: d.d301,
+            d130: d.d130,
+            d103: d.d103,
+            d031: d.d031,
+            d013: d.d013,
+            d220: d.d220,
+            d202: d.d202,
+            d022: d.d022,
+            d211: d.d211,
+            d121: d.d121,
+            d112: d.d112,
+        }
+    }
+}
+
+define_multipole_potential_fn!(
+    gravity_potential_multipole_o0_d1,
+    Moment0,
+    PotentialDerivatives1,
+    m,
+    d,
+    { -m.m000 * d.d000 }
+);
+define_multipole_potential_fn!(
+    gravity_potential_multipole_o2_d2,
+    Moment2,
+    PotentialDerivatives2,
+    m,
+    d,
+    {
+        let mut phi = -m.m000 * d.d000;
+        phi -= m.m200 * d.d200 + m.m020 * d.d020 + m.m002 * d.d002;
+        phi -= m.m110 * d.d110 + m.m101 * d.d101 + m.m011 * d.d011;
+        phi
+    }
+);
+define_multipole_potential_fn!(
+    gravity_potential_multipole_o3_d3,
+    Moment3,
+    PotentialDerivatives3,
+    m,
+    d,
+    {
+        let mut phi = -m.m000 * d.d000;
+        phi -= m.m200 * d.d200 + m.m020 * d.d020 + m.m002 * d.d002;
+        phi -= m.m110 * d.d110 + m.m101 * d.d101 + m.m011 * d.d011;
+        phi -= m.m300 * d.d300 + m.m030 * d.d030 + m.m003 * d.d003;
+        phi -= m.m210 * d.d210 + m.m201 * d.d201 + m.m120 * d.d120;
+        phi -= m.m102 * d.d102 + m.m021 * d.d021 + m.m012 * d.d012;
+        phi -= m.m111 * d.d111;
+        phi
+    }
+);
+define_multipole_potential_fn!(
+    gravity_potential_multipole_o4_d4,
+    Moment4,
+    PotentialDerivatives4,
+    m,
+    d,
+    {
+        let mut phi = -m.m000 * d.d000;
+        phi -= m.m200 * d.d200 + m.m020 * d.d020 + m.m002 * d.d002;
+        phi -= m.m110 * d.d110 + m.m101 * d.d101 + m.m011 * d.d011;
+        phi -= m.m300 * d.d300 + m.m030 * d.d030 + m.m003 * d.d003;
+        phi -= m.m210 * d.d210 + m.m201 * d.d201 + m.m120 * d.d120;
+        phi -= m.m102 * d.d102 + m.m021 * d.d021 + m.m012 * d.d012;
+        phi -= m.m111 * d.d111;
+        phi -= m.m400 * d.d400 + m.m040 * d.d040 + m.m004 * d.d004;
+        phi -= m.m310 * d.d310 + m.m301 * d.d301 + m.m130 * d.d130;
+        phi -= m.m103 * d.d103 + m.m031 * d.d031 + m.m013 * d.d013;
+        phi -= m.m220 * d.d220 + m.m202 * d.d202 + m.m022 * d.d022;
+        phi -= m.m211 * d.d211 + m.m121 * d.d121 + m.m112 * d.d112;
+        phi
+    }
+);
+
+define_multipole_accel_fn!(
+    gravity_accel_multipole_o0_d1,
+    Moment0,
+    PotentialDerivatives1,
+    m,
+    d,
+    { [-m.m000 * d.d100, -m.m000 * d.d010, -m.m000 * d.d001] }
+);
+define_multipole_accel_fn!(
+    gravity_accel_multipole_o2_d2,
+    Moment2,
+    PotentialDerivatives2,
+    m,
+    d,
+    {
+        let mut ax = -m.m000 * d.d100;
+        let mut ay = -m.m000 * d.d010;
+        let mut az = -m.m000 * d.d001;
+
+        ax -= m.m100 * d.d200 + m.m010 * d.d110 + m.m001 * d.d101;
+        ay -= m.m100 * d.d110 + m.m010 * d.d020 + m.m001 * d.d011;
+        az -= m.m100 * d.d101 + m.m010 * d.d011 + m.m001 * d.d002;
+
+        [ax, ay, az]
+    }
+);
+define_multipole_accel_fn!(
+    gravity_accel_multipole_o3_d3,
+    Moment3,
+    PotentialDerivatives3,
+    m,
+    d,
+    {
+        let mut ax = -m.m000 * d.d100;
+        let mut ay = -m.m000 * d.d010;
+        let mut az = -m.m000 * d.d001;
+
+        ax -= m.m100 * d.d200 + m.m010 * d.d110 + m.m001 * d.d101;
+        ay -= m.m100 * d.d110 + m.m010 * d.d020 + m.m001 * d.d011;
+        az -= m.m100 * d.d101 + m.m010 * d.d011 + m.m001 * d.d002;
+
+        ax -= m.m200 * d.d300 + m.m020 * d.d120 + m.m002 * d.d102;
+        ax -= m.m110 * d.d210 + m.m101 * d.d201 + m.m011 * d.d111;
+        ay -= m.m200 * d.d210 + m.m020 * d.d030 + m.m002 * d.d012;
+        ay -= m.m110 * d.d120 + m.m101 * d.d111 + m.m011 * d.d021;
+        az -= m.m200 * d.d201 + m.m020 * d.d021 + m.m002 * d.d003;
+        az -= m.m110 * d.d111 + m.m101 * d.d102 + m.m011 * d.d012;
+
+        [ax, ay, az]
+    }
+);
+define_multipole_accel_fn!(
+    gravity_accel_multipole_o4_d4,
+    Moment4,
+    PotentialDerivatives4,
+    m,
+    d,
+    {
+        let mut ax = -m.m000 * d.d100;
+        let mut ay = -m.m000 * d.d010;
+        let mut az = -m.m000 * d.d001;
+
+        ax -= m.m100 * d.d200 + m.m010 * d.d110 + m.m001 * d.d101;
+        ay -= m.m100 * d.d110 + m.m010 * d.d020 + m.m001 * d.d011;
+        az -= m.m100 * d.d101 + m.m010 * d.d011 + m.m001 * d.d002;
+
+        ax -= m.m200 * d.d300 + m.m020 * d.d120 + m.m002 * d.d102;
+        ax -= m.m110 * d.d210 + m.m101 * d.d201 + m.m011 * d.d111;
+        ay -= m.m200 * d.d210 + m.m020 * d.d030 + m.m002 * d.d012;
+        ay -= m.m110 * d.d120 + m.m101 * d.d111 + m.m011 * d.d021;
+        az -= m.m200 * d.d201 + m.m020 * d.d021 + m.m002 * d.d003;
+        az -= m.m110 * d.d111 + m.m101 * d.d102 + m.m011 * d.d012;
+
+        ax -= m.m003 * d.d103
+            + m.m012 * d.d112
+            + m.m021 * d.d121
+            + m.m030 * d.d130
+            + m.m102 * d.d202
+            + m.m111 * d.d211
+            + m.m120 * d.d220
+            + m.m201 * d.d301
+            + m.m210 * d.d310
+            + m.m300 * d.d400;
+        ay -= m.m003 * d.d013
+            + m.m012 * d.d022
+            + m.m021 * d.d031
+            + m.m030 * d.d040
+            + m.m102 * d.d112
+            + m.m111 * d.d121
+            + m.m120 * d.d130
+            + m.m201 * d.d211
+            + m.m210 * d.d220
+            + m.m300 * d.d310;
+        az -= m.m003 * d.d004
+            + m.m012 * d.d013
+            + m.m021 * d.d022
+            + m.m030 * d.d031
+            + m.m102 * d.d103
+            + m.m111 * d.d112
+            + m.m120 * d.d121
+            + m.m201 * d.d202
+            + m.m210 * d.d211
+            + m.m300 * d.d301;
+
+        [ax, ay, az]
+    }
+);
 
 // Factorials up to 5! as f64.
 const FACT: [f64; 6] = [1.0, 1.0, 2.0, 6.0, 24.0, 120.0];
@@ -428,7 +1217,7 @@ impl PotentialDerivatives {
     pub fn new(dx: f64, dy: f64, dz: f64, eps2: f64, order: u8) -> Self {
         let max = (order as usize).min(5);
 
-        let r2 = dx * dx + dy * dy + dz * dz + eps2;
+        let r2 = dx * dx + dy * dy + dz * dz + eps2 + R2_TINY;
         let r = r2.sqrt();
         let r_inv = 1.0 / r;
 
@@ -565,47 +1354,54 @@ pub fn gravity_potential_multipole(
     d: &PotentialDerivatives,
     order: u8,
 ) -> f64 {
-    let mut phi = 0.0;
-
-    // Monopole
-    phi -= m.m000 * d.d000;
-
-    if order >= 1 {
-        // should be zero for center-of-mass expansion
-        // phi -= m.m100 * d.d100 + m.m010 * d.d010 + m.m001 * d.d001;
+    match order.min(5) {
+        0 | 1 => {
+            // Monopole only
+            -m.m000 * d.d000
+        }
+        2 => {
+            let mut phi = -m.m000 * d.d000;
+            phi -= m.m200 * d.d200 + m.m020 * d.d020 + m.m002 * d.d002;
+            phi -= m.m110 * d.d110 + m.m101 * d.d101 + m.m011 * d.d011;
+            phi
+        }
+        3 => {
+            let mut phi = -m.m000 * d.d000;
+            phi -= m.m200 * d.d200 + m.m020 * d.d020 + m.m002 * d.d002;
+            phi -= m.m110 * d.d110 + m.m101 * d.d101 + m.m011 * d.d011;
+            phi -= m.m300 * d.d300 + m.m030 * d.d030 + m.m003 * d.d003;
+            phi -= m.m210 * d.d210 + m.m201 * d.d201 + m.m120 * d.d120;
+            phi -= m.m102 * d.d102 + m.m021 * d.d021 + m.m012 * d.d012;
+            phi -= m.m111 * d.d111;
+            phi
+        }
+        4 => {
+            let mut phi = -m.m000 * d.d000;
+            phi -= m.m200 * d.d200 + m.m020 * d.d020 + m.m002 * d.d002;
+            phi -= m.m110 * d.d110 + m.m101 * d.d101 + m.m011 * d.d011;
+            phi -= m.m300 * d.d300 + m.m030 * d.d030 + m.m003 * d.d003;
+            phi -= m.m210 * d.d210 + m.m201 * d.d201 + m.m120 * d.d120;
+            phi -= m.m102 * d.d102 + m.m021 * d.d021 + m.m012 * d.d012;
+            phi -= m.m111 * d.d111;
+            phi -= m.m400 * d.d400 + m.m040 * d.d040 + m.m004 * d.d004;
+            phi -= m.m310 * d.d310 + m.m301 * d.d301 + m.m130 * d.d130;
+            phi -= m.m103 * d.d103 + m.m031 * d.d031 + m.m013 * d.d013;
+            phi -= m.m220 * d.d220 + m.m202 * d.d202 + m.m022 * d.d022;
+            phi -= m.m211 * d.d211 + m.m121 * d.d121 + m.m112 * d.d112;
+            phi
+        }
+        _ => {
+            let mut phi = gravity_potential_multipole(m, d, 4);
+            phi -= m.m500 * d.d500 + m.m050 * d.d050 + m.m005 * d.d005;
+            phi -= m.m410 * d.d410 + m.m401 * d.d401 + m.m140 * d.d140;
+            phi -= m.m104 * d.d104 + m.m041 * d.d041 + m.m014 * d.d014;
+            phi -= m.m320 * d.d320 + m.m302 * d.d302 + m.m230 * d.d230;
+            phi -= m.m203 * d.d203 + m.m032 * d.d032 + m.m023 * d.d023;
+            phi -= m.m221 * d.d221 + m.m212 * d.d212 + m.m122 * d.d122;
+            phi -= m.m311 * d.d311 + m.m131 * d.d131 + m.m113 * d.d113;
+            phi
+        }
     }
-
-    if order >= 2 {
-        phi -= m.m200 * d.d200 + m.m020 * d.d020 + m.m002 * d.d002;
-        phi -= m.m110 * d.d110 + m.m101 * d.d101 + m.m011 * d.d011;
-    }
-
-    if order >= 3 {
-        phi -= m.m300 * d.d300 + m.m030 * d.d030 + m.m003 * d.d003;
-        phi -= m.m210 * d.d210 + m.m201 * d.d201 + m.m120 * d.d120;
-        phi -= m.m102 * d.d102 + m.m021 * d.d021 + m.m012 * d.d012;
-        phi -= m.m111 * d.d111;
-    }
-
-    if order >= 4 {
-        phi -= m.m400 * d.d400 + m.m040 * d.d040 + m.m004 * d.d004;
-        phi -= m.m310 * d.d310 + m.m301 * d.d301 + m.m130 * d.d130;
-        phi -= m.m103 * d.d103 + m.m031 * d.d031 + m.m013 * d.d013;
-        phi -= m.m220 * d.d220 + m.m202 * d.d202 + m.m022 * d.d022;
-        phi -= m.m211 * d.d211 + m.m121 * d.d121 + m.m112 * d.d112;
-    }
-
-    if order >= 5 {
-        phi -= m.m500 * d.d500 + m.m050 * d.d050 + m.m005 * d.d005;
-        phi -= m.m410 * d.d410 + m.m401 * d.d401 + m.m140 * d.d140;
-        phi -= m.m104 * d.d104 + m.m041 * d.d041 + m.m014 * d.d014;
-        phi -= m.m320 * d.d320 + m.m302 * d.d302 + m.m230 * d.d230;
-        phi -= m.m203 * d.d203 + m.m032 * d.d032 + m.m023 * d.d023;
-        phi -= m.m221 * d.d221 + m.m212 * d.d212 + m.m122 * d.d122;
-        phi -= m.m311 * d.d311 + m.m131 * d.d131 + m.m113 * d.d113;
-    }
-
-    phi
 }
 
 /// Compute gravitational acceleration vector from multipole moments.
@@ -614,106 +1410,118 @@ pub fn gravity_accel_multipole(
     d: &PotentialDerivatives,
     order: u8,
 ) -> [f64; 3] {
-    let mut ax = 0.0f64;
-    let mut ay = 0.0f64;
-    let mut az = 0.0f64;
+    let mut ax = -m.m000 * d.d100;
+    let mut ay = -m.m000 * d.d010;
+    let mut az = -m.m000 * d.d001;
 
-    ax -= m.m000 * d.d100;
-    ay -= m.m000 * d.d010;
-    az -= m.m000 * d.d001;
+    match order.min(5) {
+        0 | 1 => {}
+        2 => {
+            ax -= m.m100 * d.d200 + m.m010 * d.d110 + m.m001 * d.d101;
+            ay -= m.m100 * d.d110 + m.m010 * d.d020 + m.m001 * d.d011;
+            az -= m.m100 * d.d101 + m.m010 * d.d011 + m.m001 * d.d002;
+        }
+        3 => {
+            ax -= m.m100 * d.d200 + m.m010 * d.d110 + m.m001 * d.d101;
+            ay -= m.m100 * d.d110 + m.m010 * d.d020 + m.m001 * d.d011;
+            az -= m.m100 * d.d101 + m.m010 * d.d011 + m.m001 * d.d002;
 
-    if order >= 2 {
-        // should be zero for center-of-mass expansion
-        ax -= m.m100 * d.d200 + m.m010 * d.d110 + m.m001 * d.d101;
-        ay -= m.m100 * d.d110 + m.m010 * d.d020 + m.m001 * d.d011;
-        az -= m.m100 * d.d101 + m.m010 * d.d011 + m.m001 * d.d002;
-    }
-    if order >= 3 {
-        ax -= m.m200 * d.d300 + m.m020 * d.d120 + m.m002 * d.d102;
-        ax -= m.m110 * d.d210 + m.m101 * d.d201 + m.m011 * d.d111;
-        ay -= m.m200 * d.d210 + m.m020 * d.d030 + m.m002 * d.d012;
-        ay -= m.m110 * d.d120 + m.m101 * d.d111 + m.m011 * d.d021;
-        az -= m.m200 * d.d201 + m.m020 * d.d021 + m.m002 * d.d003;
-        az -= m.m110 * d.d111 + m.m101 * d.d102 + m.m011 * d.d012;
-    }
-    if order >= 4 {
-        ax -= m.m003 * d.d103
-            + m.m012 * d.d112
-            + m.m021 * d.d121
-            + m.m030 * d.d130
-            + m.m102 * d.d202
-            + m.m111 * d.d211
-            + m.m120 * d.d220
-            + m.m201 * d.d301
-            + m.m210 * d.d310
-            + m.m300 * d.d400;
-        ay -= m.m003 * d.d013
-            + m.m012 * d.d022
-            + m.m021 * d.d031
-            + m.m030 * d.d040
-            + m.m102 * d.d112
-            + m.m111 * d.d121
-            + m.m120 * d.d130
-            + m.m201 * d.d211
-            + m.m210 * d.d220
-            + m.m300 * d.d310;
-        az -= m.m003 * d.d004
-            + m.m012 * d.d013
-            + m.m021 * d.d022
-            + m.m030 * d.d031
-            + m.m102 * d.d103
-            + m.m111 * d.d112
-            + m.m120 * d.d121
-            + m.m201 * d.d202
-            + m.m210 * d.d211
-            + m.m300 * d.d301;
-    }
-    if order >= 5 {
-        ax -= m.m004 * d.d104
-            + m.m013 * d.d113
-            + m.m022 * d.d122
-            + m.m031 * d.d131
-            + m.m040 * d.d140
-            + m.m103 * d.d203
-            + m.m112 * d.d212
-            + m.m121 * d.d221
-            + m.m130 * d.d230
-            + m.m202 * d.d302
-            + m.m211 * d.d311
-            + m.m220 * d.d320
-            + m.m301 * d.d401
-            + m.m310 * d.d410
-            + m.m400 * d.d500;
-        ay -= m.m004 * d.d014
-            + m.m013 * d.d023
-            + m.m022 * d.d032
-            + m.m031 * d.d041
-            + m.m040 * d.d050
-            + m.m103 * d.d113
-            + m.m112 * d.d122
-            + m.m121 * d.d131
-            + m.m130 * d.d140
-            + m.m202 * d.d212
-            + m.m211 * d.d221
-            + m.m220 * d.d230
-            + m.m301 * d.d311
-            + m.m310 * d.d320
-            + m.m400 * d.d410;
-        az -= m.m004 * d.d005
-            + m.m013 * d.d014
-            + m.m022 * d.d023
-            + m.m031 * d.d032
-            + m.m040 * d.d041
-            + m.m103 * d.d104
-            + m.m112 * d.d113
-            + m.m121 * d.d122
-            + m.m130 * d.d131
-            + m.m202 * d.d203
-            + m.m211 * d.d212
-            + m.m220 * d.d221
-            + m.m301 * d.d302
-            + m.m310 * d.d311
-            + m.m400 * d.d401;
+            ax -= m.m200 * d.d300 + m.m020 * d.d120 + m.m002 * d.d102;
+            ax -= m.m110 * d.d210 + m.m101 * d.d201 + m.m011 * d.d111;
+            ay -= m.m200 * d.d210 + m.m020 * d.d030 + m.m002 * d.d012;
+            ay -= m.m110 * d.d120 + m.m101 * d.d111 + m.m011 * d.d021;
+            az -= m.m200 * d.d201 + m.m020 * d.d021 + m.m002 * d.d003;
+            az -= m.m110 * d.d111 + m.m101 * d.d102 + m.m011 * d.d012;
+        }
+        4 => {
+            let a3 = gravity_accel_multipole(m, d, 3);
+            ax = a3[0];
+            ay = a3[1];
+            az = a3[2];
+
+            ax -= m.m003 * d.d103
+                + m.m012 * d.d112
+                + m.m021 * d.d121
+                + m.m030 * d.d130
+                + m.m102 * d.d202
+                + m.m111 * d.d211
+                + m.m120 * d.d220
+                + m.m201 * d.d301
+                + m.m210 * d.d310
+                + m.m300 * d.d400;
+            ay -= m.m003 * d.d013
+                + m.m012 * d.d022
+                + m.m021 * d.d031
+                + m.m030 * d.d040
+                + m.m102 * d.d112
+                + m.m111 * d.d121
+                + m.m120 * d.d130
+                + m.m201 * d.d211
+                + m.m210 * d.d220
+                + m.m300 * d.d310;
+            az -= m.m003 * d.d004
+                + m.m012 * d.d013
+                + m.m021 * d.d022
+                + m.m030 * d.d031
+                + m.m102 * d.d103
+                + m.m111 * d.d112
+                + m.m120 * d.d121
+                + m.m201 * d.d202
+                + m.m210 * d.d211
+                + m.m300 * d.d301;
+        }
+        _ => {
+            let a4 = gravity_accel_multipole(m, d, 4);
+            ax = a4[0];
+            ay = a4[1];
+            az = a4[2];
+
+            ax -= m.m004 * d.d104
+                + m.m013 * d.d113
+                + m.m022 * d.d122
+                + m.m031 * d.d131
+                + m.m040 * d.d140
+                + m.m103 * d.d203
+                + m.m112 * d.d212
+                + m.m121 * d.d221
+                + m.m130 * d.d230
+                + m.m202 * d.d302
+                + m.m211 * d.d311
+                + m.m220 * d.d320
+                + m.m301 * d.d401
+                + m.m310 * d.d410
+                + m.m400 * d.d500;
+            ay -= m.m004 * d.d014
+                + m.m013 * d.d023
+                + m.m022 * d.d032
+                + m.m031 * d.d041
+                + m.m040 * d.d050
+                + m.m103 * d.d113
+                + m.m112 * d.d122
+                + m.m121 * d.d131
+                + m.m130 * d.d140
+                + m.m202 * d.d212
+                + m.m211 * d.d221
+                + m.m220 * d.d230
+                + m.m301 * d.d311
+                + m.m310 * d.d320
+                + m.m400 * d.d410;
+            az -= m.m004 * d.d005
+                + m.m013 * d.d014
+                + m.m022 * d.d023
+                + m.m031 * d.d032
+                + m.m040 * d.d041
+                + m.m103 * d.d104
+                + m.m112 * d.d113
+                + m.m121 * d.d122
+                + m.m130 * d.d131
+                + m.m202 * d.d203
+                + m.m211 * d.d212
+                + m.m220 * d.d221
+                + m.m301 * d.d302
+                + m.m310 * d.d311
+                + m.m400 * d.d401;
+        }
     }
 
     [ax, ay, az]

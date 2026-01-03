@@ -1,5 +1,11 @@
 use rayon::prelude::*;
 
+use crate::kernel::{kernel_accel_factor, kernel_potential_per_unit_mass, KernelKind};
+
+// Tiny additive term to avoid division by zero in 1/sqrt(r2).
+// Analogous to FLT_MIN in float code, but for f64.
+const R2_TINY: f64 = f64::MIN_POSITIVE;
+
 // Wrapper types for raw pointers used in parallel regions.
 #[allow(dead_code)]
 #[derive(Copy, Clone)]
@@ -106,17 +112,12 @@ where
 }
 
 /// Simple O(N^2) direct-sum gravity solver (reference implementation).
-pub fn direct_accelerations(
-    positions: &[[f64; 3]],
-    masses: Option<&[f64]>,
-    eps: f64,
-) -> Vec<[f64; 3]> {
+pub fn direct_accelerations(positions: &[[f64; 3]], masses: Option<&[f64]>) -> Vec<[f64; 3]> {
     let n = positions.len();
     let mut acc = vec![[0.0f64; 3]; n];
     if n == 0 {
         return acc;
     }
-    let eps2 = eps * eps;
     // If masses are not provided, assume unit mass for all particles.
     let masses_slice_owned;
     let masses_slice: &[f64] = if let Some(m) = masses {
@@ -136,8 +137,9 @@ pub fn direct_accelerations(
                 let dx = pj[0] - pi[0];
                 let dy = pj[1] - pi[1];
                 let dz = pj[2] - pi[2];
-                let r2 = dx * dx + dy * dy + dz * dz + eps2;
-                let invr3 = 1.0 / (r2.sqrt() * r2);
+                let r2 = dx * dx + dy * dy + dz * dz;
+                let s2 = r2 + R2_TINY;
+                let invr3 = 1.0 / (s2.sqrt() * s2);
 
                 let mj = masses_slice[j];
 
@@ -168,8 +170,9 @@ pub fn direct_accelerations(
                 let dx = pj[0] - pi[0];
                 let dy = pj[1] - pi[1];
                 let dz = pj[2] - pi[2];
-                let r2 = dx * dx + dy * dy + dz * dz + eps2;
-                let invr3 = 1.0 / (r2.sqrt() * r2);
+                let r2 = dx * dx + dy * dy + dz * dz;
+                let s2 = r2 + R2_TINY;
+                let invr3 = 1.0 / (s2.sqrt() * s2);
                 let mj = masses_slice[j];
                 ax += mj * dx * invr3;
                 ay += mj * dy * invr3;
@@ -185,7 +188,6 @@ pub fn direct_accelerations_at_points(
     positions: &[[f64; 3]],
     masses: Option<&[f64]>,
     targets: &[[f64; 3]],
-    eps: f64,
 ) -> Vec<[f64; 3]> {
     let n_src = positions.len();
     let n_tgt = targets.len();
@@ -193,7 +195,6 @@ pub fn direct_accelerations_at_points(
     if n_tgt == 0 || n_src == 0 {
         return acc;
     }
-    let eps2 = eps * eps;
     // If masses are not provided, assume unit mass for all particles.
     let masses_slice_owned;
     let masses_slice: &[f64] = if let Some(m) = masses {
@@ -214,8 +215,9 @@ pub fn direct_accelerations_at_points(
                 let dx = pj[0] - pi[0];
                 let dy = pj[1] - pi[1];
                 let dz = pj[2] - pi[2];
-                let r2 = dx * dx + dy * dy + dz * dz + eps2;
-                let invr3 = 1.0 / (r2.sqrt() * r2);
+                let r2 = dx * dx + dy * dy + dz * dz;
+                let s2 = r2 + R2_TINY;
+                let invr3 = 1.0 / (s2.sqrt() * s2);
                 let m = masses_slice[j];
                 ax += m * dx * invr3;
                 ay += m * dy * invr3;
@@ -234,8 +236,9 @@ pub fn direct_accelerations_at_points(
                 let dx = pj[0] - pi[0];
                 let dy = pj[1] - pi[1];
                 let dz = pj[2] - pi[2];
-                let r2 = dx * dx + dy * dy + dz * dz + eps2;
-                let invr3 = 1.0 / (r2.sqrt() * r2);
+                let r2 = dx * dx + dy * dy + dz * dz;
+                let s2 = r2 + R2_TINY;
+                let invr3 = 1.0 / (s2.sqrt() * s2);
                 let m = masses_slice[j];
                 ax += m * dx * invr3;
                 ay += m * dy * invr3;
@@ -249,13 +252,12 @@ pub fn direct_accelerations_at_points(
 
 /// Simple O(N^2) direct-sum gravitational potential solver
 /// (reference implementation, mainly for testing).
-pub fn direct_potentials(positions: &[[f64; 3]], masses: Option<&[f64]>, eps: f64) -> Vec<f64> {
+pub fn direct_potentials(positions: &[[f64; 3]], masses: Option<&[f64]>) -> Vec<f64> {
     let n = positions.len();
     let mut pot = vec![0.0f64; n];
     if n == 0 {
         return pot;
     }
-    let eps2 = eps * eps;
     // If masses are not provided, assume unit mass for all particles.
     let masses_slice_owned;
     let masses_slice: &[f64] = if let Some(m) = masses {
@@ -274,8 +276,8 @@ pub fn direct_potentials(positions: &[[f64; 3]], masses: Option<&[f64]>, eps: f6
                 let dx = pj[0] - pi[0];
                 let dy = pj[1] - pi[1];
                 let dz = pj[2] - pi[2];
-                let r2 = dx * dx + dy * dy + dz * dz + eps2;
-                let invr = 1.0 / r2.sqrt();
+                let r2 = dx * dx + dy * dy + dz * dz;
+                let invr = 1.0 / (r2 + R2_TINY).sqrt();
 
                 let mj = masses_slice[j];
                 let phi_pair = -invr;
@@ -299,8 +301,8 @@ pub fn direct_potentials(positions: &[[f64; 3]], masses: Option<&[f64]>, eps: f6
                 let dx = pj[0] - pi[0];
                 let dy = pj[1] - pi[1];
                 let dz = pj[2] - pi[2];
-                let r2 = dx * dx + dy * dy + dz * dz + eps2;
-                let invr = 1.0 / r2.sqrt();
+                let r2 = dx * dx + dy * dy + dz * dz;
+                let invr = 1.0 / (r2 + R2_TINY).sqrt();
                 let mj = masses_slice[j];
                 phi += -mj * invr;
             }
@@ -314,7 +316,6 @@ pub fn direct_potentials_at_points(
     positions: &[[f64; 3]],
     masses: Option<&[f64]>,
     targets: &[[f64; 3]],
-    eps: f64,
 ) -> Vec<f64> {
     let n_tgt = targets.len();
     let n_src = positions.len();
@@ -322,7 +323,6 @@ pub fn direct_potentials_at_points(
     if n_tgt == 0 || n_src == 0 {
         return pot;
     }
-    let eps2 = eps * eps;
     // If masses are not provided, assume unit mass for all particles.
     let masses_slice_owned;
     let masses_slice: &[f64] = if let Some(m) = masses {
@@ -340,8 +340,8 @@ pub fn direct_potentials_at_points(
                 let dx = pj[0] - pi[0];
                 let dy = pj[1] - pi[1];
                 let dz = pj[2] - pi[2];
-                let r2 = dx * dx + dy * dy + dz * dz + eps2;
-                let invr = 1.0 / r2.sqrt();
+                let r2 = dx * dx + dy * dy + dz * dz;
+                let invr = 1.0 / (r2 + R2_TINY).sqrt();
                 let m = masses_slice[j];
                 phi += -m * invr;
             }
@@ -356,8 +356,8 @@ pub fn direct_potentials_at_points(
                 let dx = pj[0] - pi[0];
                 let dy = pj[1] - pi[1];
                 let dz = pj[2] - pi[2];
-                let r2 = dx * dx + dy * dy + dz * dz + eps2;
-                let invr = 1.0 / r2.sqrt();
+                let r2 = dx * dx + dy * dy + dz * dz;
+                let invr = 1.0 / (r2 + R2_TINY).sqrt();
                 let m = masses_slice[j];
                 phi += -m * invr;
             }
@@ -365,4 +365,294 @@ pub fn direct_potentials_at_points(
         });
     }
     pot
+}
+
+pub fn direct_potentials_kernel(
+    positions: &[[f64; 3]],
+    masses: Option<&[f64]>,
+    softenings: Option<&[f64]>,
+    kernel: KernelKind,
+) -> Vec<f64> {
+    let n = positions.len();
+    let mut pot = vec![0.0f64; n];
+    if n == 0 {
+        return pot;
+    }
+
+    let masses_slice_owned;
+    let masses_slice: &[f64] = if let Some(m) = masses {
+        m
+    } else {
+        masses_slice_owned = vec![1.0; n];
+        &masses_slice_owned
+    };
+
+    // For small N, do the symmetric pairwise loop (each pair once).
+    // For larger N, parallelize per-target to avoid races (double-counts pairs).
+    if n < 512 {
+        for i in 0..n {
+            let pi = positions[i];
+            let mi = masses_slice[i];
+            let hi = softenings.map(|hs| hs[i]).unwrap_or(0.0);
+
+            for j in (i + 1)..n {
+                let pj = positions[j];
+                let mj = masses_slice[j];
+                let hj = softenings.map(|hs| hs[j]).unwrap_or(0.0);
+                let h = hi.max(hj);
+
+                let dx = pj[0] - pi[0];
+                let dy = pj[1] - pi[1];
+                let dz = pj[2] - pi[2];
+                let r2 = dx * dx + dy * dy + dz * dz;
+                let r = (r2 + R2_TINY).sqrt();
+                let phi_pair = kernel_potential_per_unit_mass(kernel, r, h);
+
+                pot[i] += mj * phi_pair;
+                pot[j] += mi * phi_pair;
+            }
+        }
+    } else {
+        pot.par_iter_mut().enumerate().for_each(|(i, pot_i)| {
+            let pi = positions[i];
+            let hi = softenings.map(|hs| hs[i]).unwrap_or(0.0);
+            let mut phi = 0.0f64;
+            for j in 0..n {
+                if j == i {
+                    continue;
+                }
+                let pj = positions[j];
+                let hj = softenings.map(|hs| hs[j]).unwrap_or(0.0);
+                let h = hi.max(hj);
+
+                let dx = pj[0] - pi[0];
+                let dy = pj[1] - pi[1];
+                let dz = pj[2] - pi[2];
+                let r2 = dx * dx + dy * dy + dz * dz;
+                let r = (r2 + R2_TINY).sqrt();
+                let phi_ij = kernel_potential_per_unit_mass(kernel, r, h);
+                phi += masses_slice[j] * phi_ij;
+            }
+            *pot_i = phi;
+        });
+    }
+
+    pot
+}
+
+pub fn direct_accelerations_kernel(
+    positions: &[[f64; 3]],
+    masses: Option<&[f64]>,
+    softenings: Option<&[f64]>,
+    kernel: KernelKind,
+) -> Vec<[f64; 3]> {
+    let n = positions.len();
+    let mut acc = vec![[0.0f64; 3]; n];
+    if n == 0 {
+        return acc;
+    }
+
+    let masses_slice_owned;
+    let masses_slice: &[f64] = if let Some(m) = masses {
+        m
+    } else {
+        masses_slice_owned = vec![1.0; n];
+        &masses_slice_owned
+    };
+
+    // For small N, do the symmetric pairwise loop (each pair once).
+    // For larger N, parallelize per-target to avoid races (double-counts pairs).
+    if n < 512 {
+        for i in 0..n {
+            let pi = positions[i];
+            let mi = masses_slice[i];
+            let hi = softenings.map(|hs| hs[i]).unwrap_or(0.0);
+
+            for j in (i + 1)..n {
+                let pj = positions[j];
+                let mj = masses_slice[j];
+                let hj = softenings.map(|hs| hs[j]).unwrap_or(0.0);
+                let h = hi.max(hj);
+
+                let dx = pj[0] - pi[0];
+                let dy = pj[1] - pi[1];
+                let dz = pj[2] - pi[2];
+                let r2 = dx * dx + dy * dy + dz * dz;
+                let r = (r2 + R2_TINY).sqrt();
+                let g = kernel_accel_factor(kernel, r, h);
+
+                acc[i][0] += mj * dx * g;
+                acc[i][1] += mj * dy * g;
+                acc[i][2] += mj * dz * g;
+
+                acc[j][0] -= mi * dx * g;
+                acc[j][1] -= mi * dy * g;
+                acc[j][2] -= mi * dz * g;
+            }
+        }
+    } else {
+        acc.par_iter_mut().enumerate().for_each(|(i, acc_i)| {
+            let pi = positions[i];
+            let hi = softenings.map(|hs| hs[i]).unwrap_or(0.0);
+            let mut ax = 0.0f64;
+            let mut ay = 0.0f64;
+            let mut az = 0.0f64;
+            for j in 0..n {
+                if j == i {
+                    continue;
+                }
+                let pj = positions[j];
+                let hj = softenings.map(|hs| hs[j]).unwrap_or(0.0);
+                let h = hi.max(hj);
+
+                let dx = pj[0] - pi[0];
+                let dy = pj[1] - pi[1];
+                let dz = pj[2] - pi[2];
+                let r2 = dx * dx + dy * dy + dz * dz;
+                let r = (r2 + R2_TINY).sqrt();
+                let g = kernel_accel_factor(kernel, r, h);
+                let mj = masses_slice[j];
+                ax += mj * dx * g;
+                ay += mj * dy * g;
+                az += mj * dz * g;
+            }
+            *acc_i = [ax, ay, az];
+        });
+    }
+
+    acc
+}
+
+pub fn direct_potentials_kernel_at_points(
+    positions: &[[f64; 3]],
+    masses: Option<&[f64]>,
+    softenings: Option<&[f64]>,
+    targets: &[[f64; 3]],
+    kernel: KernelKind,
+) -> Vec<f64> {
+    let n_src = positions.len();
+    let n_tgt = targets.len();
+    let mut pot = vec![0.0f64; n_tgt];
+    if n_tgt == 0 || n_src == 0 {
+        return pot;
+    }
+
+    let masses_slice_owned;
+    let masses_slice: &[f64] = if let Some(m) = masses {
+        m
+    } else {
+        masses_slice_owned = vec![1.0; n_src];
+        &masses_slice_owned
+    };
+
+    if n_tgt < 512 {
+        for i in 0..n_tgt {
+            let pi = targets[i];
+            let mut phi = 0.0f64;
+            for j in 0..n_src {
+                let pj = positions[j];
+                let dx = pj[0] - pi[0];
+                let dy = pj[1] - pi[1];
+                let dz = pj[2] - pi[2];
+                let r2 = dx * dx + dy * dy + dz * dz;
+                let r = (r2 + R2_TINY).sqrt();
+                let hj = softenings.map(|hs| hs[j]).unwrap_or(0.0);
+                let h = hj.max(0.0);
+                phi += masses_slice[j] * kernel_potential_per_unit_mass(kernel, r, h);
+            }
+            pot[i] = phi;
+        }
+    } else {
+        pot.par_iter_mut().enumerate().for_each(|(i, pot_i)| {
+            let pi = targets[i];
+            let mut phi = 0.0f64;
+            for j in 0..n_src {
+                let pj = positions[j];
+                let dx = pj[0] - pi[0];
+                let dy = pj[1] - pi[1];
+                let dz = pj[2] - pi[2];
+                let r2 = dx * dx + dy * dy + dz * dz;
+                let r = (r2 + R2_TINY).sqrt();
+                let hj = softenings.map(|hs| hs[j]).unwrap_or(0.0);
+                let h = hj.max(0.0);
+                phi += masses_slice[j] * kernel_potential_per_unit_mass(kernel, r, h);
+            }
+            *pot_i = phi;
+        });
+    }
+
+    pot
+}
+
+pub fn direct_accelerations_kernel_at_points(
+    positions: &[[f64; 3]],
+    masses: Option<&[f64]>,
+    softenings: Option<&[f64]>,
+    targets: &[[f64; 3]],
+    kernel: KernelKind,
+) -> Vec<[f64; 3]> {
+    let n_src = positions.len();
+    let n_tgt = targets.len();
+    let mut acc = vec![[0.0f64; 3]; n_tgt];
+    if n_tgt == 0 || n_src == 0 {
+        return acc;
+    }
+
+    let masses_slice_owned;
+    let masses_slice: &[f64] = if let Some(m) = masses {
+        m
+    } else {
+        masses_slice_owned = vec![1.0; n_src];
+        &masses_slice_owned
+    };
+
+    if n_tgt < 512 {
+        for i in 0..n_tgt {
+            let pi = targets[i];
+            let mut ax = 0.0f64;
+            let mut ay = 0.0f64;
+            let mut az = 0.0f64;
+            for j in 0..n_src {
+                let pj = positions[j];
+                let dx = pj[0] - pi[0];
+                let dy = pj[1] - pi[1];
+                let dz = pj[2] - pi[2];
+                let r2 = dx * dx + dy * dy + dz * dz;
+                let r = (r2 + R2_TINY).sqrt();
+                let hj = softenings.map(|hs| hs[j]).unwrap_or(0.0);
+                let h = hj.max(0.0);
+                let g = kernel_accel_factor(kernel, r, h);
+                let mj = masses_slice[j];
+                ax += mj * dx * g;
+                ay += mj * dy * g;
+                az += mj * dz * g;
+            }
+            acc[i] = [ax, ay, az];
+        }
+    } else {
+        acc.par_iter_mut().enumerate().for_each(|(i, acc_i)| {
+            let pi = targets[i];
+            let mut ax = 0.0f64;
+            let mut ay = 0.0f64;
+            let mut az = 0.0f64;
+            for j in 0..n_src {
+                let pj = positions[j];
+                let dx = pj[0] - pi[0];
+                let dy = pj[1] - pi[1];
+                let dz = pj[2] - pi[2];
+                let r2 = dx * dx + dy * dy + dz * dz;
+                let r = (r2 + R2_TINY).sqrt();
+                let hj = softenings.map(|hs| hs[j]).unwrap_or(0.0);
+                let h = hj.max(0.0);
+                let g = kernel_accel_factor(kernel, r, h);
+                let mj = masses_slice[j];
+                ax += mj * dx * g;
+                ay += mj * dy * g;
+                az += mj * dz * g;
+            }
+            *acc_i = [ax, ay, az];
+        });
+    }
+
+    acc
 }
