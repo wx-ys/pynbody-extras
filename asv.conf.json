@@ -35,9 +35,16 @@
     // ],
     "build_command": [
         "python -m pip install -U pip",
-        "python -m pip install -U maturin",
-        "maturin develop --release",
-        "python -m pip install -U .[bench]"
+        "python -m pip wheel --no-deps -w {build_cache_dir} {build_dir}"
+    ],
+
+    "install_command": [
+        "python -m pip install {wheel_file} --force-reinstall",
+        "python -m pip install -U \"py-cpuinfo>=9.0.0\""
+    ],
+
+    "uninstall_command": [
+        "return-code=any python -m pip uninstall -y {project}"
     ],
 
 

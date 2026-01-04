@@ -51,6 +51,7 @@ package-dir = {"" = "."}
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["pynbodyext*"]
+#exclude = []
 
 [tool.setuptools.dynamic]
 version = {attr = "pynbodyext.__version__"}
