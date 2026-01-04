@@ -23,7 +23,7 @@
     // (for git) or "tip" (for mercurial).
     "branches": ["main"],
 
-    "environment_type": "existing",
+    "environment_type": "virtualenv",
 
     // Customizable commands for building, installing, and
     // uninstalling the project. See asv.conf.json documentation.
@@ -35,7 +35,9 @@
     // ],
     "build_command": [
         "python -m pip install -U pip",
-        "python -m pip install -e .[bench]"
+        "python -m pip install -U maturin",
+        "maturin develop --release",
+        "python -m pip install -U .[bench]"
     ],
 
 
@@ -57,7 +59,7 @@
 
     // The Pythons you'd like to test against.  If not provided, defaults
     // to the current version of Python used to run `asv`.
-    //"pythons": ["python"],
+    "pythons": ["3.11"],
 
     // The matrix of dependencies to test.  Each key is the name of a
     // package (in PyPI) and the values are version numbers.  An empty

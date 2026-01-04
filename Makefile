@@ -66,16 +66,17 @@ asv-setup:
 # ---- Generic benchmark entrypoints ----
 # Usage:
 #   make bench BENCH="bench_gravity.TimeGravityRealData"
-#   make bench ENVFILE=".env.bench.gravity" BENCH="bench_gravity.TimeGravityRealData"
-ENVFILE ?=
-BENCH ?= bench_gravity.TimeGravityRealData
+BENCH ?=
 ASV_ARGS ?=
 
+# Only pass --bench when BENCH is non-empty
+BENCH_FLAG := $(if $(strip $(BENCH)),--bench "$(BENCH)",)
+
 bench:
-	./scripts/asv_run.sh --bench "$(BENCH)" $(if $(ENVFILE),--env-file "$(ENVFILE)",) -- $(ASV_ARGS)
+	./scripts/asv_run.sh $(BENCH_FLAG) -- $(ASV_ARGS)
 
 bench-v:
-	./scripts/asv_run.sh -v --bench "$(BENCH)" $(if $(ENVFILE),--env-file "$(ENVFILE)",) -- $(ASV_ARGS)
+	./scripts/asv_run.sh -v $(BENCH_FLAG) -- $(ASV_ARGS)
 
 # Continuous regression gate
 BASE ?= origin/main
@@ -83,5 +84,4 @@ HEAD ?= HEAD
 FACTOR ?= 1.10
 
 bench-continuous:
-	./scripts/asv_run.sh --continuous --bench "$(BENCH)" --base "$(BASE)" --head "$(HEAD)" --factor "$(FACTOR)" \
-	$(if $(ENVFILE),--env-file "$(ENVFILE)",)
+	./scripts/asv_run.sh --continuous $(BENCH_FLAG) --base "$(BASE)" --head "$(HEAD)" --factor "$(FACTOR)" -- $(ASV_ARGS)

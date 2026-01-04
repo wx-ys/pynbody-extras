@@ -2,7 +2,8 @@
 resolver = "2"
 members = [
 	"gravity",
-	"sph",
 	"pynbodyext-rust",
 ]
 
+[profile.release]
+debug = true
