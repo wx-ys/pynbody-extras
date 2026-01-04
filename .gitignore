@@ -42,6 +42,8 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
+.asv/
+
 # testdata
 testdata*
 
