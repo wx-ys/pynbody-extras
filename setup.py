@@ -18,6 +18,7 @@ rust_extensions = [
         path=str(ROOT / "crates" / "pynbodyext-rust" / "Cargo.toml"),
         binding=Binding.PyO3,
         optional=True,
+        debug = False,  # build with cargo --release for pip/uv builds
     ),
 ]
 
