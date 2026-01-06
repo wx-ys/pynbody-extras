@@ -115,6 +115,61 @@ fn leaf_potential_sum(leaf: LeafArgs<'_>, targ: TargetArgs<'_>, out: &mut f64) {
     let target_h = target_h_opt.unwrap_or(MIN_SOFTENING).max(MIN_SOFTENING);
     let use_softening = softenings_opt.is_some() || target_h > 0.0;
 
+    // -------------------------
+    // Fast path: masses present + constant target softening (no per-particle softenings).
+    // This matches common Python usage: Gravity(pos, mass, softening=const).
+    // -------------------------
+    if use_softening {
+        if let (Some(masses), None) = (masses_opt, softenings_opt) {
+            let h = target_h;
+            if h <= 0.0 {
+                // fall through to no-softening logic below
+            } else if kernel == KernelKind::CubicSplineW2 {
+                let hh = h * h;
+                for &pi in indices {
+                    if pi == skip {
+                        continue;
+                    }
+                    debug_assert!(pi < positions.len());
+                    debug_assert!(pi < masses.len());
+                    let p = unsafe { positions.get_unchecked(pi) };
+                    let ddx = p[0] - tx;
+                    let ddy = p[1] - ty;
+                    let ddz = p[2] - tz;
+                    let r2 = ddx.mul_add(ddx, ddy.mul_add(ddy, ddz * ddz));
+                    let m = unsafe { *masses.get_unchecked(pi) };
+
+                    if r2 >= hh {
+                        let inv_r = inv_r_from_r2(r2);
+                        *out += -m * inv_r;
+                    } else {
+                        let r = (r2 + R2_TINY).sqrt();
+                        *out += m * kernel_potential_per_unit_mass(kernel, r, h);
+                    }
+                }
+                return;
+            } else {
+                // Non-spline kernels: with h>0 we always use kernel potential.
+                for &pi in indices {
+                    if pi == skip {
+                        continue;
+                    }
+                    debug_assert!(pi < positions.len());
+                    debug_assert!(pi < masses.len());
+                    let p = unsafe { positions.get_unchecked(pi) };
+                    let ddx = p[0] - tx;
+                    let ddy = p[1] - ty;
+                    let ddz = p[2] - tz;
+                    let r2 = ddx.mul_add(ddx, ddy.mul_add(ddy, ddz * ddz));
+                    let r = (r2 + R2_TINY).sqrt();
+                    let m = unsafe { *masses.get_unchecked(pi) };
+                    *out += m * kernel_potential_per_unit_mass(kernel, r, h);
+                }
+                return;
+            }
+        }
+    }
+
     if !use_softening {
         match masses_opt {
             Some(masses) => {

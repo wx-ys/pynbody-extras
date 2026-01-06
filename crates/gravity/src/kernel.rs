@@ -48,8 +48,9 @@ pub fn kernel_potential_per_unit_mass(kind: KernelKind, r: f64, h: f64) -> f64 {
             if h <= 0.0 {
                 return -1.0 / r;
             }
-            let u = r / h;
-            w2(u) / h
+            let h_inv = 1.0 / h;
+            let u = r * h_inv;
+            w2(u) * h_inv
         }
     }
 }
@@ -71,10 +72,11 @@ pub fn kernel_accel_factor(kind: KernelKind, r: f64, h: f64) -> f64 {
             if h <= 0.0 {
                 return 1.0 / (r * r * r);
             }
-            let u = r / h;
+            let h_inv = 1.0 / h;
+            let u = r * h_inv;
             // phi = W2(u)/h => K'(r) = W2'(u)/h^2
             // g = K'(r)/r
-            w2_prime(u) / (h * h * r)
+            w2_prime(u) * (h_inv * h_inv) / r
         }
     }
 }
@@ -84,11 +86,19 @@ fn w2(u: f64) -> f64 {
     // Springel et al. W2(u), eq.(71)
     if u < 0.5 {
         // 16/3 u^2 - 48/5 u^4 + 32/5 u^5 - 14/5
-        (16.0 / 3.0) * u * u - (48.0 / 5.0) * u.powi(4) + (32.0 / 5.0) * u.powi(5) - 14.0 / 5.0
+        let u2 = u * u;
+        let u4 = u2 * u2;
+        let u5 = u4 * u;
+        (16.0 / 3.0) * u2 - (48.0 / 5.0) * u4 + (32.0 / 5.0) * u5 - 14.0 / 5.0
     } else if u < 1.0 {
         // 1/(15u) + 32/3 u^2 - 16 u^3 + 48/5 u^4 - 32/15 u^5 - 16/5
-        (1.0 / (15.0 * u)) + (32.0 / 3.0) * u * u - 16.0 * u.powi(3) + (48.0 / 5.0) * u.powi(4)
-            - (32.0 / 15.0) * u.powi(5)
+        let inv_u = 1.0 / u;
+        let u2 = u * u;
+        let u3 = u2 * u;
+        let u4 = u2 * u2;
+        let u5 = u4 * u;
+        (1.0 / 15.0) * inv_u + (32.0 / 3.0) * u2 - 16.0 * u3 + (48.0 / 5.0) * u4
+            - (32.0 / 15.0) * u5
             - 16.0 / 5.0
     } else {
         -1.0 / u
@@ -99,14 +109,18 @@ fn w2(u: f64) -> f64 {
 fn w2_prime(u: f64) -> f64 {
     // d/du W2(u)
     if u < 0.5 {
-        // d/du[16/3 u^2 - 48/5 u^4 + 32/5 u^5 - 14/5]
         // = 32/3 u - 192/5 u^3 + 32 u^4
-        (32.0 / 3.0) * u - (192.0 / 5.0) * u.powi(3) + 32.0 * u.powi(4)
+        let u2 = u * u;
+        let u3 = u2 * u;
+        let u4 = u2 * u2;
+        (32.0 / 3.0) * u - (192.0 / 5.0) * u3 + 32.0 * u4
     } else if u < 1.0 {
-        // d/du[1/(15u) + 32/3 u^2 - 16 u^3 + 48/5 u^4 - 32/15 u^5 - 16/5]
         // = -1/(15 u^2) + 64/3 u - 48 u^2 + 192/5 u^3 - 32/3 u^4
-        -(1.0 / (15.0 * u * u)) + (64.0 / 3.0) * u - 48.0 * u * u + (192.0 / 5.0) * u.powi(3)
-            - (32.0 / 3.0) * u.powi(4)
+        let u2 = u * u;
+        let u3 = u2 * u;
+        let u4 = u2 * u2;
+        -(1.0 / 15.0) * (1.0 / u2) + (64.0 / 3.0) * u - 48.0 * u2 + (192.0 / 5.0) * u3
+            - (32.0 / 3.0) * u4
     } else {
         // d/du[-1/u] = 1/u^2
         1.0 / (u * u)

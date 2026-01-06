@@ -427,7 +427,7 @@ dependencies = [
 
 [[package]]
 name = "pynbodyext-rust"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "gravity",
  "ndarray",
@@ -654,10 +654,6 @@ dependencies = [
  "serde_core",
  "zmij",
 ]
-
-[[package]]
-name = "sph"
-version = "0.1.0"
 
 [[package]]
 name = "syn"
