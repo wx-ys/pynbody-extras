@@ -34,10 +34,11 @@ help:
 	@printf "  $(C_CYAN)format$(C_RESET)             Run ruff format$(C_RESET)\n"
 	@printf "  $(C_CYAN)typecheck$(C_RESET)          Run mypy$(C_RESET)\n"
 	@printf "\n"
-	@printf "  $(C_CYAN)asv-check$(C_RESET)          asv check (import/discover only)$(C_RESET)\n"
-	@printf "  $(C_CYAN)asv-setup$(C_RESET)          asv setup (create envs if not using existing)$(C_RESET)\n"
+	@printf "  $(C_CYAN)bench-check$(C_RESET)        asv check (import/discover only)$(C_RESET)\n"
+	@printf "  $(C_CYAN)bench-setup$(C_RESET)        asv setup (create envs if not using existing)$(C_RESET)\n"
 	@printf "  $(C_CYAN)bench$(C_RESET)              Run a benchmark (ASV)$(C_RESET)\n"
 	@printf "  $(C_CYAN)bench-v$(C_RESET)            Run benchmark with -v$(C_RESET)\n"
+	@printf "  $(C_CYAN)bench-head$(C_RESET)         Run ASV for latest commit only (HEAD)$(C_RESET)\n"
 	@printf "  $(C_CYAN)bench-continuous$(C_RESET)   Regression gate: BASE..HEAD (FACTOR)$(C_RESET)\n"
 
 
@@ -56,11 +57,11 @@ test:
 	pytest
 
 
-.PHONY: asv-check asv-setup bench bench-v bench-continuous
-asv-check:
+.PHONY: bench-check bench-setup bench bench-v bench-continuous
+bench-check:
 	asv check
 
-asv-setup:
+bench-setup:
 	asv -vv setup
 
 # ---- Generic benchmark entrypoints ----
@@ -77,6 +78,11 @@ bench:
 
 bench-v:
 	./scripts/asv_run.sh -v $(BENCH_FLAG) -- $(ASV_ARGS)
+
+# Run benchmarks at latest commit only (single revision)
+bench-head:
+	asv run $(BENCH_FLAG) HEAD^! -- $(ASV_ARGS)
+
 
 # Continuous regression gate
 BASE ?= origin/main
