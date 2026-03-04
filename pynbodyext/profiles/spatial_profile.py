@@ -65,8 +65,9 @@ def beta(pro: SpatialProfile) -> SimNpPrArray:
     as defined in Binney & Tremaine 2008, eq. (4.61).
 
     .. math::
-        \\beta = 1 - (\\sigma_{\\theta}^2 + \\sigma_{\\phi}^2) / (2 \\sigma_r^2) = 1 - (\\sigma_{\\theta}^2 + \\sigma_{\\phi}^2) / (2 \\sigma_r^2)
-
+        \\beta = 1 - (\\V_{\\theta}^2 + \\V_{\\phi}^2) / (2 \\V_r^2) = 1 - (\\sigma_{\\theta}^2 + \\sigma_{\\phi}^2) / (2 \\sigma_r^2)
+    If assuming the system is spherically symmetric, so that V_r^2 = sigma_r^2 + mean_r^2 = sigma_r^2, and similarly for vtheta and vphi.
+    Here we use the formula that includes both the mean and dispersion of the velocity, which is important for systems with significant rotation.
     """
     if pro.bins.bins_by not in ["r",]:
         logger.warning("Beta parameter is useful for spherical systems. Consider using RadialProfile with ndim=3")
