@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 from pynbody.snapshot import SimSnap
 
+from pynbodyext.log import logger
 from pynbodyext.util._type import BinsAlgorithmFunc, RegistBinAlgorithmString, SimNpPrArray, SimNpPrArrayFunc
 
 from .bins import BinsSet
@@ -67,6 +68,8 @@ def beta(pro: SpatialProfile) -> SimNpPrArray:
         \\beta = 1 - (\\sigma_{\\theta}^2 + \\sigma_{\\phi}^2) / (2 \\sigma_r^2) = 1 - (\\sigma_{\\theta}^2 + \\sigma_{\\phi}^2) / (2 \\sigma_r^2)
 
     """
+    if pro.bins.bins_by not in ["r",]:
+        logger.warning("Beta parameter is useful for spherical systems. Consider using RadialProfile with ndim=3")
     # we can also calculate using (refer to pynbody's calculation of velocity dispersion):
     # 1.5 - (pro['vx']["disp"] ** 2 + pro['vy']["disp"] ** 2 + pro['vz']["disp"] ** 2) / pro['vr']["disp"] ** 2 / 2
     return 1 - (pro["vphi"]["rms"]**2 + pro["vtheta"]["rms"]**2)/(2*pro["vr"]["rms"]**2)

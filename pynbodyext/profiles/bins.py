@@ -154,6 +154,27 @@ class BinsSet:
         self.npart_bins: np.ndarray | None = None
         self.binsize: SimNpArray | None = None  # area or volume
 
+    @property
+    def bins_by(self) -> RegistBinByString | BinByFunc:
+        """The source specification for the data being binned."""
+        return self._bins_by
+    @property
+    def bins_area(self) -> RegistBinAreaString | BinsAreaFunc:
+        """The specification for the area/volume calculation method."""
+        return self._bins_area
+    @property
+    def bins_type(self) -> RegistBinAlgorithmString | BinsAlgorithmFunc:
+        """The specification for the edge-building algorithm."""
+        return self._bins_type
+    @property
+    def bin_min(self) -> float | None:
+        """The minimum domain value for edge construction (if using an algorithm)."""
+        return self._bin_min
+    @property
+    def bin_max(self) -> float | None:
+        """The maximum domain value for edge construction (if using an algorithm)."""
+        return self._bin_max
+
     def is_defined(self) -> bool:
         """
         Check if the :class:`~pynbodyext.profiles.bins.BinsSet` is materialized.
