@@ -69,4 +69,4 @@ def beta(pro: SpatialProfile) -> SimNpPrArray:
     """
     # we can also calculate using (refer to pynbody's calculation of velocity dispersion):
     # 1.5 - (pro['vx']["disp"] ** 2 + pro['vy']["disp"] ** 2 + pro['vz']["disp"] ** 2) / pro['vr']["disp"] ** 2 / 2
-    return 1 - (pro["vcxy"]["rms"]**2 + pro["vtheta"]["rms"]**2)/(2*pro["vr"]["rms"]**2)
+    return 1 - (pro["vphi"]["rms"]**2 + pro["vtheta"]["rms"]**2)/(2*pro["vr"]["rms"]**2)
