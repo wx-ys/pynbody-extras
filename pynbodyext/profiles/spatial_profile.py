@@ -55,3 +55,18 @@ def density(pro: SpatialProfile) -> SimNpPrArray:
 @SpatialProfile.profile_property
 def mass_enc(pro: SpatialProfile) -> SimNpPrArray:
     return pro["mass"]["sum"].cumsum()
+
+@SpatialProfile.profile_property
+def beta(pro: SpatialProfile) -> SimNpPrArray:
+    """ This parameter quantifies the system's degree of radial anisotropy.
+    If all orbits are circular, beta = -infinity; if all orbits are radial, beta = 1.
+    beta > 0, are radially biased; beta < 0, are tangentially biased.
+    as defined in Binney & Tremaine 2008, eq. (4.61).
+
+    .. math::
+        \\beta = 1 - (\\sigma_{\\theta}^2 + \\sigma_{\\phi}^2) / (2 \\sigma_r^2) = 1 - (\\sigma_{\\theta}^2 + \\sigma_{\\phi}^2) / (2 \\sigma_r^2)
+
+    """
+    # we can also calculate using (refer to pynbody's calculation of velocity dispersion):
+    # 1.5 - (pro['vx']["disp"] ** 2 + pro['vy']["disp"] ** 2 + pro['vz']["disp"] ** 2) / pro['vr']["disp"] ** 2 / 2
+    return 1 - (pro["vcxy"]["rms"]**2 + pro["vtheta"]["rms"]**2)/(2*pro["vr"]["rms"]**2)
