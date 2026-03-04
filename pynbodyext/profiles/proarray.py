@@ -512,6 +512,8 @@ class ProfileArray(SimArray):
         str or None
             The units label or None if not applicable.
         """
+        if self.units.is_dimensionless() and self.units.ratio("") == 1:
+            return ""
         la = self.units.latex()
         if la is not None:
             return f" [${la}$]"
