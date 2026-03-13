@@ -483,7 +483,7 @@ class ParameterContain(PropertyBase[SimArray]):
 
     The calculation uses linear interpolation between points for improved accuracy.
     """
-    def __init__(self, cal_key: str = "r", frac: float | Sequence[float] = 0.5, parameter: str = "mass"):
+    def __init__(self, cal_key: str = "r", frac: float | Sequence[float] | np.ndarray = 0.5, parameter: str = "mass"):
         """
         Initializes the calculator.
 
@@ -494,7 +494,7 @@ class ParameterContain(PropertyBase[SimArray]):
         ----------
         cal_key : str, default 'r'
             Key to sort particles by ('r' for 3D radius, 'rxy' for projected radius)
-        frac : float or Sequence of floats, default 0.5
+        frac : float or Sequence of floats or array-like, default 0.5
             Fraction of the total parameter to include (must be between 0 and 1)
         parameter : str, default 'mass'
             Parameter to sum up (e.g., 'mass', 'sfr')
@@ -510,7 +510,7 @@ class ParameterContain(PropertyBase[SimArray]):
                 raise ValueError(f"Fraction must be between 0 and 1, got {frac}")
             self._frac_array: np.ndarray = np.array([fval], dtype=float)
             self._frac_is_scalar: bool = True
-        elif isinstance(frac, Sequence):
+        elif isinstance(frac, (Sequence, np.ndarray)):
             arr = np.asarray(frac, dtype=float)
             if arr.ndim != 1:
                 raise ValueError("frac must be a 1D sequence of floats")
@@ -519,8 +519,7 @@ class ParameterContain(PropertyBase[SimArray]):
             self._frac_array = arr
             self._frac_is_scalar = False
         else:
-            raise TypeError("frac must be a float or a sequence of floats")
-
+            raise TypeError("frac must be a float or a sequence of floats or an array-like")
     def instance_signature(self):
         return (self.__class__.__name__, self.cal_key, self.parameter, get_signature_safe(self.frac, fallback_to_id=True))
 
