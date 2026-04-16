@@ -124,7 +124,7 @@ Because :class:`PropertyBase` inherits from
 
 import operator
 from collections.abc import Callable, Sequence
-from typing import Any, Generic, TypeVar, Union
+from typing import Any, Generic, TypeVar, Union, cast, overload
 
 import numpy as np
 from pynbody.array import SimArray
@@ -141,7 +141,9 @@ from pynbodyext.filters.filt import Annulus, BandPass, ValueLike, ValueLikeFunc,
 
 TProp = TypeVar("TProp", bound=SimArray | float | np.ndarray | int | tuple | bool, covariant=True)
 
-Addable = Union[ SimArray, float, np.ndarray, int, "PropertyBase[TProp]"]
+Addable = Union[ SimArray, float, np.ndarray, int, "PropertyBase[Any]"]
+
+TResult = TypeVar("TResult", covariant=True)
 
 
 # ---------------- Utility helpers ----------------
@@ -184,7 +186,7 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
 
     # -------- composition helpers --------
     @classmethod
-    def _as_property(cls, other: Addable) -> "PropertyBase":
+    def _as_property(cls, other: Addable) -> "PropertyBase[Any]":
         """
         Convert `other` to a PropertyBase. If it's already a PropertyBase, return it;
         otherwise wrap it into ConstantProperty.
@@ -195,7 +197,7 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
 
 
     # ---- Operator construction (returns OpProperty with simplification) ----
-    def _make_op(self, op_name: str, other: Addable, reverse: bool = False) -> "PropertyBase":
+    def _make_op(self, op_name: str, other: Addable, reverse: bool = False) -> "PropertyBase[Any]":
         left = self
         right = self._as_property(other)
 
@@ -204,8 +206,8 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
 
         # Associative flattening for add/mul
         if op_name in ("add", "mul"):
-            operands: list[PropertyBase] = []
-            def _gather(node: PropertyBase) -> None:
+            operands: list[PropertyBase[Any]] = []
+            def _gather(node: PropertyBase[Any]) -> None:
                 if isinstance(node, OpProperty) and node.op_name == op_name:
                     for c in node.operands:
                         _gather(c)
@@ -230,39 +232,66 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
         # Non-associative binary or unary (we treat all unary via helper methods)
         return OpProperty(op_name, [left, right])
 
-    def clip(self, vmin: Addable | None = None, vmax: Addable | None = None) -> "OpProperty":
+    def clip(self, vmin: Addable | None = None, vmax: Addable | None = None) -> "PropertyBase[TProp]":
         """ Return a new PropertyBase that clips the values to [vmin, vmax]."""
 
         return OpProperty("clip", [self, self._as_property(vmin),self._as_property(vmax)])
 
     # -------- arithmetic operators --------
-    def __add__(self, other: Addable) -> "PropertyBase":
-        return self._make_op("add", other)
-    def __radd__(self, other: Addable) -> "PropertyBase":
-        return self._make_op("add", other, reverse=True)
-    def __sub__(self, other: Addable) -> "PropertyBase":
+    def __add__(self, other: Addable) -> "PropertyBase[TProp]":
+        return cast("PropertyBase[TProp]", self._make_op("add", other))
+    def __radd__(self, other: Addable) -> "PropertyBase[TProp]":
+        return cast("PropertyBase[TProp]", self._make_op("add", other, reverse=True))
+    def __sub__(self, other: Addable) -> "PropertyBase[TProp]":
         return OpProperty("sub", [self, self._as_property(other)])
-    def __rsub__(self, other: Addable) -> "PropertyBase":
+    def __rsub__(self, other: Addable) -> "PropertyBase[TProp]":
         return OpProperty("sub", [self._as_property(other), self])
-    def __mul__(self, other: Addable) -> "PropertyBase":
-        return self._make_op("mul", other)
-    def __rmul__(self, other: Addable) -> "PropertyBase":
-        return self._make_op("mul", other, reverse=True)
-    def __truediv__(self, other: Addable) -> "PropertyBase":
+    def __mul__(self, other: Addable) -> "PropertyBase[TProp]":
+        return cast("PropertyBase[TProp]", self._make_op("mul", other))
+    def __rmul__(self, other: Addable) -> "PropertyBase[TProp]":
+       return cast("PropertyBase[TProp]", self._make_op("mul", other, reverse=True))
+
+    @overload
+    def __truediv__(self: "PropertyBase[SimArray]", other: Addable) -> "PropertyBase[SimArray]":
+        ...
+    @overload
+    def __truediv__(self: "PropertyBase[np.ndarray]", other: Addable) -> "PropertyBase[np.ndarray]":
+        ...
+    @overload
+    def __truediv__(self: "PropertyBase[int]", other: Addable) -> "PropertyBase[float]":
+        ...
+    @overload
+    def __truediv__(self: "PropertyBase[float]", other: Addable) -> "PropertyBase[float]":
+        ...
+    def __truediv__(self, other: Addable) -> "PropertyBase[Any]":
         return OpProperty("truediv", [self, self._as_property(other)])
-    def __rtruediv__(self, other: Addable) -> "PropertyBase":
+
+    @overload
+    def __rtruediv__(self: "PropertyBase[SimArray]", other: Addable) -> "PropertyBase[SimArray]":
+        ...
+    @overload
+    def __rtruediv__(self: "PropertyBase[np.ndarray]", other: Addable) -> "PropertyBase[np.ndarray]":
+        ...
+    @overload
+    def __rtruediv__(self: "PropertyBase[int]", other: Addable) -> "PropertyBase[float]":
+        ...
+    @overload
+    def __rtruediv__(self: "PropertyBase[float]", other: Addable) -> "PropertyBase[float]":
+        ...
+    def __rtruediv__(self, other: Addable) -> "PropertyBase[Any]":
         return OpProperty("truediv", [self._as_property(other), self])
-    def __pow__(self, other: Addable) -> "PropertyBase":
+
+    def __pow__(self, other: Addable) -> "PropertyBase[Any]":
         return OpProperty("pow", [self, self._as_property(other)])
-    def __rpow__(self, other: Addable) -> "PropertyBase":
+    def __rpow__(self, other: Addable) -> "PropertyBase[Any]":
         return OpProperty("pow", [self._as_property(other), self])
 
     # -------- unary operators --------
-    def __neg__(self) -> "PropertyBase":
+    def __neg__(self) -> "PropertyBase[TProp]":
         return OpProperty("neg", [self])
-    def __pos__(self) -> "PropertyBase":
+    def __pos__(self) -> "PropertyBase[TProp]":
         return OpProperty("pos", [self])
-    def __abs__(self) -> "PropertyBase":
+    def __abs__(self) -> "PropertyBase[TProp]":
         return OpProperty("abs", [self])
 
     # Comparisons return PropertyBase (OpProperty) (structural CSE applies)
@@ -276,7 +305,7 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
     #    return OpProperty("ge", [self, self._as_property(other)])
     #def __eq__(self, other: Addable) -> "PropertyBase":  # type: ignore[override]
     #    return OpProperty("eq", [self, self._as_property(other)])
-    def __ne__(self, other: Addable) -> "PropertyBase":  # type: ignore[override]
+    def __ne__(self, other: Addable) -> "PropertyBase[Any]":  # type: ignore[override]
         return OpProperty("ne", [self, self._as_property(other)])
 
     # Make instances hashable by identity even though __eq__ is overridden symbolically
@@ -287,7 +316,7 @@ class PropertyBase(CalculatorBase[TProp], Generic[TProp]):
                         "Evaluate with (expr)(sim) or use explicit numpy/pynbody ops.")
 
 
-    def cached(self) -> "LambdaProperty":
+    def cached(self) -> "LambdaProperty[TProp]":
         """
         Return a cached wrapper: evaluate at most once per SimSnap (by id(sim)).
         Use only when SimSnap is effectively read-only during evaluation.
@@ -313,15 +342,15 @@ class ConstantProperty(PropertyBase[TProp]):
     def __repr__(self) -> str:
         return f"Const({repr(self._value)})"
 
-class LambdaProperty(PropertyBase[Any]):
+class LambdaProperty(PropertyBase[TProp], Generic[TProp]):
     """
     A composable property defined by a function:
     func: (sim: SimSnap) -> Any
     """
-    def __init__(self, func: Callable[[SimSnap], Any], cache: bool = False):
+    def __init__(self, func: Callable[[SimSnap], TProp], cache: bool = False):
         self._func = func
         self._cache_enabled = cache
-        self._cache: dict[int, Any] = {}
+        self._cache: dict[int, TProp] = {}
 
     def clear_cache(self):
         self._cache.clear()
@@ -329,7 +358,7 @@ class LambdaProperty(PropertyBase[Any]):
     def signature(self) -> tuple:
         return ("Lambda", get_signature_safe(self._func, fallback_to_id=True), self._cache_enabled)
 
-    def calculate(self, sim: SimSnap) -> Any:
+    def calculate(self, sim: SimSnap) -> TProp:
         if not self._cache_enabled:
             return self._func(sim)
         key = id(sim)
@@ -342,7 +371,7 @@ class LambdaProperty(PropertyBase[Any]):
         return f"LambdaProperty(func={self._func}, cache={self._cache_enabled})"
 # ---------------- OpProperty expression tree ----------------
 
-class OpProperty(PropertyBase[Any]):
+class OpProperty(PropertyBase[TProp], Generic[TProp]):
     """
     Structured operation node with operands list. Supports:
       add (n-ary), mul (n-ary), sub, truediv, pow,
@@ -353,7 +382,7 @@ class OpProperty(PropertyBase[Any]):
     """
     __slots__ = ("op_name", "operands")
 
-    def __init__(self, op_name: str, operands: list[PropertyBase]):
+    def __init__(self, op_name: str, operands: list[PropertyBase[Any]]):
         self.op_name = op_name
         self.operands = operands
 
@@ -370,7 +399,7 @@ class OpProperty(PropertyBase[Any]):
         # In semantic flow, under "3) calculate", show expression operands
         return list(self.operands)
 
-    def calculate(self, sim: SimSnap) -> Any:
+    def calculate(self, sim: SimSnap) -> TProp:
         # Evaluate operands; thanks to evaluation wrapper + signatures, identical subtrees
         # within this top-level call are computed once.
         func_map: dict[str, Callable[[Any, Any], Any]] = {
