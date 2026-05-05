@@ -3,87 +3,56 @@ from typing import Literal
 
 import numpy as np
 from pynbody.array import SimArray
-from pynbody.snapshot import SimSnap
-from pynbody.transformation import GenericTranslation, Transformation
+from pynbody.transformation import GenericTranslation
 
-from pynbodyext.log import logger
+from pynbodyext.calculate import TransformBase
 from pynbodyext.properties import CenPos, CenVel
-from pynbodyext.util._type import SimNpArray, SimNpArrayFunc, get_signature_safe
+from pynbodyext.util._type import SimNpArray, SimNpArrayFunc
 
-from .base import TransformBase
-
-__all__ = ["PosToCenter", "VelToCenter"]
+__all__ = ["ShiftPosTo", "ShiftVelTo"]
 
 
-class PosToCenter(TransformBase[GenericTranslation]):
-
+class ShiftPosTo(TransformBase[GenericTranslation]):
+    dynamic_param_specs = {"mode": "pos"}
     def __init__(self, mode: Literal["ssc", "com", "pot", "hyb"] | SimNpArray | SimNpArrayFunc= "ssc", move_all: bool = True):
+        super().__init__(move_all=move_all)
+        self.description = "given"
         if isinstance(mode, str):
             if mode not in ("ssc", "com", "pot","hyb"):
                 raise ValueError(f"Invalid mode: {mode}. Expected one of ['ssc', 'com', 'pot', 'hyb'].")
+            self.description = mode
+            mode = CenPos(mode=mode)        # type: ignore[arg-type]
         elif not (callable(mode) or isinstance(mode, (np.ndarray, SimArray))):
             raise ValueError(f"Invalid mode type: {type(mode)}. Expected str, callable, or array.")
-
         self.mode = mode
-        self.move_all = move_all
 
     def instance_signature(self):
-        mode_sig = get_signature_safe(self.mode, fallback_to_id=True)
-        move_all_sig = get_signature_safe(self.move_all, fallback_to_id=True)
-        return (self.__class__.__name__, mode_sig, move_all_sig)
-
-    def calculate(self, sim: SimSnap, apply_to:  SimSnap | Transformation | None = None) -> GenericTranslation:
-
-        description: str
-        if isinstance(self.mode, str):
-            cen = self.get_center(sim, mode=self.mode)  # type: ignore
-            description = self.mode
-        elif isinstance(self.mode, (np.ndarray, SimArray)):
-            cen = self.mode
-            description = "given"
-        elif callable(self.mode):
-            cen = self.mode(sim)
-            description = "call"
-        else:
-            raise ValueError(f"Invalid mode type: {type(self.mode)}. Expected str, callable, or array.")
-
-        target = apply_to if apply_to is not None else sim
-
-        logger.debug("Centering positions using mode: %s, center: %s for %s", description, cen, sim)
-        return GenericTranslation(target, "pos", -cen, description=f"PosToCenter_{description}")
-
-    @classmethod
-    def get_center(cls, sim: SimSnap, mode: Literal["ssc", "com", "pot", "hyb"]) -> SimNpArray:
-        return CenPos(mode=mode)(sim)
+        return (self.__class__.__name__, )
 
 
-class VelToCenter(TransformBase[GenericTranslation]):
+    def build_handle(self, sim, target, params = None):
+        cen = params["mode"]
+        return GenericTranslation(target, "pos", -cen, description=f"PosToCenter_{self.description}")
 
 
+class ShiftVelTo(TransformBase[GenericTranslation]):
 
+    dynamic_param_specs = {"mode": "vel"}
     def __init__(self,mode: Literal["com"] | SimNpArrayFunc | SimNpArray = "com", move_all: bool = True):
+        super().__init__(move_all=move_all)
+        self.description = "given"
+        if isinstance(mode, str):
+            if mode != "com":
+                raise ValueError(f"Invalid mode: {mode}. Expected 'com'.")
+            self.description = mode
+            mode = CenVel(mode=mode)        # type: ignore[arg-type]
+        elif not (callable(mode) or isinstance(mode, (np.ndarray, SimArray))):
+            raise ValueError(f"Invalid mode type: {type(mode)}. Expected str, callable, or array.")
         self.mode = mode
-        self.move_all = move_all
 
     def instance_signature(self):
-        mode_sig = get_signature_safe(self.mode, fallback_to_id=True)
-        move_all_sig = get_signature_safe(self.move_all, fallback_to_id=True)
-        return (self.__class__.__name__, mode_sig, move_all_sig)
+        return (self.__class__.__name__, )
 
-    def calculate(self, sim: SimSnap, apply_to:  SimSnap | Transformation | None = None) -> GenericTranslation:
-        if isinstance(self.mode, str):
-            vcen = self.get_center(sim, mode=self.mode)  # type: ignore
-        elif isinstance(self.mode, (np.ndarray, SimArray)):
-            vcen = self.mode
-        elif callable(self.mode):
-            vcen = self.mode(sim)
-        else:
-            raise ValueError(f"Invalid mode type: {type(self.mode)}. Expected str, callable, or array.")
-
-        target = apply_to if apply_to is not None else sim
-        logger.debug("Centering velocities using mode: %s, center: %s for %s", self.mode, vcen, sim)
-        return GenericTranslation(target, "vel", -vcen, description="VelToCenter")
-
-    @classmethod
-    def get_center(cls, sim: SimSnap, mode: Literal["com"]) -> SimNpArray:
-        return CenVel(mode=mode)(sim)
+    def build_handle(self, sim, target, params = None):
+        vcen = params["mode"]
+        return GenericTranslation(target, "vel", -vcen, description=f"VelToCenter_{self.description}")

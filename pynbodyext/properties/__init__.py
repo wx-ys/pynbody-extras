@@ -1,29 +1,28 @@
-"""
-module for property calculations.
+"""Property calculators backed by the new calculator framework."""
 
-"""
-
-
-from .base import ParameterContain, ParamSum, PropertyBase, RadiusAtSurfaceDensity, SurfaceDensity, VolumeDensity
+from .base import (
+    ParamContain,
+    ParamSum,
+    PropertyBase,
+    RadiusAtSurfaceDensity,
+    SurfaceDensity,
+    VolumeDensity,
+)
+from .generic import AngMomVec, CenPos, CenVel, KappaRot, KappaRotMean, SpinParam, VirialRadius
 
 __all__ = [
     "PropertyBase",
     "ParamSum",
+    "ParamContain",
     "ParameterContain",
+    "KappaRot",
+    "KappaRotMean",
     "VolumeDensity",
     "SurfaceDensity",
     "RadiusAtSurfaceDensity",
-]
-
-from .generic import AngMomVec, CenPos, CenVel, KappaRot, SpinParam, VirialRadius
-
-__all__ +=[
     "CenPos",
     "CenVel",
     "AngMomVec",
-    "KappaRot",
     "VirialRadius",
-    "SpinParam"
+    "SpinParam",
 ]
-
-

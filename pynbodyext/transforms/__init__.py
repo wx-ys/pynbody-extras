@@ -10,9 +10,8 @@ These classes typically return a `pynbody.transformation.Transformation` object,
 which can be used within a `with` statement for temporary transformations.
 
 """
-from .base import TransformBase
-from .rotate import AlignAngMomVec
-from .shift import PosToCenter, VelToCenter
+from .rotate import AlignVec
+from .shift import ShiftPosTo, ShiftVelTo
 from .wrap import WrapBox
 
-__all__ = ["WrapBox","AlignAngMomVec","TransformBase","PosToCenter","VelToCenter"]
+__all__ = ["WrapBox","AlignVec","ShiftPosTo","ShiftVelTo"]

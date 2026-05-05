@@ -1,16 +1,39 @@
+"""Generic property calculators backed by the new calculator framework.
+
+This module provides small reusable property nodes for common halo and galaxy
+measurements, such as centers, angular-momentum vectors, virial radii, spin
+parameters, and pattern speeds.
+
+All local classes inherit from the new :class:`pynbodyext.calculate.PropertyBase`.
+The :class:`KappaRot` property is re-exported from :mod:`pynbodyext.core.calculate`
+so this module stays aligned with the new calculator implementation.
+"""
 
 
+from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
 from pynbody.analysis.halo import hybrid_center, shrink_sphere_center, virial_radius
 from pynbody.array import SimArray
-from pynbody.snapshot import SimSnap
 
-from .base import PropertyBase
+from pynbodyext.calculate import PropertyBase
 
-__all__ = ["CenPos","CenVel","AngMomVec", "KappaRot", "KappaRotMean", "VirialRadius", "SpinParam", "PatternSpeed"]
+if TYPE_CHECKING:
+    from pynbody.snapshot import SimSnap
+
+
+__all__ = [
+    "CenPos",
+    "CenVel",
+    "AngMomVec",
+    "KappaRot",
+    "KappaRotMean",
+    "VirialRadius",
+    "SpinParam",
+    "PatternSpeed",
+]
 
 def ang_mom_vec(snap):
     """
@@ -50,10 +73,14 @@ def ang_mom_vec(snap):
     return angmom
 
 
+
 class CenPos(PropertyBase[SimArray | np.ndarray]):
     """Center position property"""
 
     def __init__(self, mode: Literal["ssc", "com", "pot", "hyb"] = "ssc" ):
+        super().__init__()
+        if mode not in ["ssc", "com", "pot", "hyb"]:
+            raise ValueError(f"Invalid mode: {mode}. Expected one of ['ssc', 'com', 'pot', 'hyb'].")
         self.mode = mode
 
     def instance_signature(self):
@@ -61,14 +88,14 @@ class CenPos(PropertyBase[SimArray | np.ndarray]):
 
     def calculate(self, sim: SimSnap) -> SimArray | np.ndarray:
         if self.mode == "com":
-            cen = sim.mean_by_mass("pos")
+            cen = cast("SimArray", sim.mean_by_mass("pos"))
         elif self.mode == "pot":
             i = sim["phi"].argmin()
-            cen = sim["pos"][i].copy()
+            cen = cast("SimArray", sim["pos"][i].copy())
         elif self.mode == "ssc":
-            cen = shrink_sphere_center(sim)
+            cen = cast("SimArray", shrink_sphere_center(sim))
         elif self.mode == "hyb":
-            cen = hybrid_center(sim, r = "5 kpc")
+            cen = cast("SimArray", hybrid_center(sim, r = "5 kpc"))
         else:
             raise ValueError(f"Invalid mode: {self.mode}. Expected one of ['ssc', 'com', 'pot', 'hyb'].")
         if isinstance(cen, SimArray):
@@ -79,6 +106,7 @@ class CenVel(PropertyBase[SimArray]):
     """Center velocity property"""
 
     def __init__(self, mode: Literal["com"] = "com" ):
+        super().__init__()
         self.mode = mode
 
     def instance_signature(self):
@@ -86,7 +114,7 @@ class CenVel(PropertyBase[SimArray]):
 
     def calculate(self, sim: SimSnap) -> SimArray:
         if self.mode == "com":
-            cen = sim.mean_by_mass("vel")
+            cen = cast("SimArray", sim.mean_by_mass("vel"))
         else:
             raise ValueError(f"Invalid mode: {self.mode}. Expected one of ['com'].")
         if isinstance(cen, SimArray):
@@ -96,6 +124,9 @@ class CenVel(PropertyBase[SimArray]):
 
 class AngMomVec(PropertyBase[SimArray]):
     """Angular momentum vector property"""
+    def instance_signature(self):
+        return (self.__class__.__name__,)
+
     def calculate(self, sim: SimSnap) -> SimArray:
         return ang_mom_vec(sim)
 
@@ -112,6 +143,9 @@ class KappaRot(PropertyBase[float]):
     ----------
     .. [1] Sales, L. V., et al. 2010, MNRAS, 409, 1541
     """
+    def instance_signature(self):
+        return (self.__class__.__name__,)
+
     def calculate(self, sim: SimSnap) -> float:
         Krot = np.sum(0.5 * sim["mass"] * (sim["vcxy"] ** 2))
         K = np.sum(sim["mass"] * sim["ke"])
@@ -126,6 +160,9 @@ class KappaRotMean(PropertyBase[float]):
     -----
     This is the mean of (0.5 * m * vcxy^2) / (m * ke) over given particles.
     """
+    def instance_signature(self):
+        return (self.__class__.__name__,)
+
     def calculate(self, sim: SimSnap) -> float:
         krot = 0.5 * sim["vcxy"] ** 2
         ke = sim["ke"]
@@ -135,7 +172,8 @@ class KappaRotMean(PropertyBase[float]):
 class VirialRadius(PropertyBase[float]):
     """Virial radius property"""
 
-    def __init__(self, overdensity: float = 178, rho_def: Literal["critical", "matter"] = "critical"):
+    def __init__(self, overdensity: float = 178., rho_def: Literal["critical", "matter"] = "critical"):
+        super().__init__()
         self.overdensity = overdensity
         self.rho_def = rho_def
 
@@ -157,6 +195,8 @@ class SpinParam(PropertyBase[float]):
     ----------
     .. [1] Bullock, J. S., et al. 2001, MNRAS, 321, 559
     """
+    def instance_signature(self):
+        return (self.__class__.__name__,)
 
     def calculate(self, sim: SimSnap) -> float:
         """Return the spin parameter lambda' of a centered halo.
@@ -183,6 +223,8 @@ class PatternSpeed(PropertyBase[SimArray]):
     ----------
     .. [1] Pfenniger, D., & Romero-Gómez, M. 2023, A&A, 673, A36
     """
+    def instance_signature(self):
+        return (self.__class__.__name__,)
 
     def calculate(self, sim: SimSnap) -> SimArray:
 

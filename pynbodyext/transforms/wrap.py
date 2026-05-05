@@ -1,6 +1,7 @@
 
 
 import warnings
+from collections.abc import Callable
 from typing import Any, Literal
 
 import numpy as np
@@ -9,10 +10,8 @@ from pynbody import transformation, units
 from pynbody.array import SimArray
 from pynbody.snapshot import SimSnap
 
+from pynbodyext.calculate import TransformBase
 from pynbodyext.log import logger
-from pynbodyext.util._type import get_signature_safe
-
-from .base import TransformBase
 
 __all__ = ["WrapBox"]
 
@@ -297,10 +296,10 @@ class WrapBox(TransformBase[WrapTransformation]):
 
     This transform can be applied temporarily using a `with` statement.
     """
-
+    dynamic_param_specs = {"boxsize": "pos"}
     def __init__(
         self,
-        boxsize: float | units.UnitBase | None = None,
+        boxsize: float | units.UnitBase | None | Callable = None,
         convention: Literal["center", "upper", "minirange"]="minirange",
         move_all: bool = True):
         """
@@ -323,33 +322,15 @@ class WrapBox(TransformBase[WrapTransformation]):
             raise ValueError(
                 "Unknown wrapping convention, must be 'center', 'upper' or 'minirange'"
             )
+        super().__init__(move_all=move_all)
         self.boxsize = boxsize
         self.convention = convention
-        self.move_all = move_all
 
     def instance_signature(self):
-        boxsize_sig = get_signature_safe(self.boxsize, fallback_to_id=True)
-        convention_sig = get_signature_safe(self.convention, fallback_to_id=True)
-        move_all_sig = get_signature_safe(self.move_all, fallback_to_id=True)
-        return (self.__class__.__name__, boxsize_sig, convention_sig, move_all_sig)
+        return (self.__class__.__name__, self.boxsize,self.convention)
 
-    def calculate(self, sim: SimSnap, apply_to:  SimSnap | transformation.Transformation | None = None) -> WrapTransformation:
-        """
-        Wraps particle positions to lie within a periodic box.
 
-        This creates a transformation that can be applied temporarily using a
-        `with` statement.
+    def build_handle(self, sim, target, params = None):
+        boxsize = params["boxsize"]
+        return WrapTransformation(target, boxsize=boxsize, convention=self.convention)
 
-        Parameters
-        ----------
-        sim : pynbody.snapshot.SimSnap
-            The simulation snapshot to wrap.
-
-        Returns
-        -------
-        WrapTransformation
-            A transformation object suitable for use in a `with` block.
-        """
-        boxsize = self._in_sim_units(self.boxsize, "pos", sim) if self.boxsize is not None else None
-        target_sim = apply_to if apply_to is not None else sim
-        return WrapTransformation(target_sim, boxsize=boxsize, convention=self.convention)
