@@ -141,6 +141,8 @@ ignore = [
     "E402",
     # allow use (X,Y) in isinstance call
     "UP038",
+    # allow use Unpack[...] on python >= 3.11
+    "UP044",
 ]
 
 [tool.ruff.lint.isort]
