@@ -32,7 +32,6 @@ from pynbodyext.util._type import (
     SimNpPrArray,
     SimNpPrArrayFunc,
     UnitLike,
-    get_signature_safe,
 )
 
 from .bins import BinsSet
@@ -41,10 +40,10 @@ from .spatial_profile import RadialProfile
 
 __all__ = ["ProfileBuilderBase", "RadialProfileBuilder"]
 
-TProf = TypeVar("TProf", bound=ProfileBase, covariant=True)
+TProf = TypeVar("TProf", bound=ProfileBase)
 
 
-class ProfileBuilderBase(CalculatorBase[TProf], Generic[TProf]):
+class ProfileBuilderBase(CalculatorBase[TProf, TProf], Generic[TProf]):
     """
     Abstract base: build a :class:`~pynbodyext.profiles.profile.ProfileBase` from a
     :class:`~pynbody.snapshot.SimSnap`.
@@ -56,21 +55,18 @@ class ProfileBuilderBase(CalculatorBase[TProf], Generic[TProf]):
     - Implementations should avoid mutating ``sim`` and return a fresh profile instance.
     """
 
-    def calculate(self, sim: SimSnap) -> TProf:
-        """
-        Create and return a concrete :class:`~pynbodyext.profiles.profile.ProfileBase`.
+    def execute(self, ctx, input):
+        sim = input.active_sim
+        with ctx.phase(self, "build profile"):
+            params = self.resolve_dynamic_params(ctx, input)
+            return self._build_runtime(sim, params, ctx, input)
 
-        Parameters
-        ----------
-        sim : :class:`~pynbody.snapshot.SimSnap`
-            Simulation snapshot used to construct the profile.
+    def _build_runtime(self, sim, params, ctx, input):
+        return self.build_profile(sim, params)
 
-        Returns
-        -------
-        :class:`~pynbodyext.profiles.profile.ProfileBase`
-            The constructed profile (concrete subclass).
-        """
-        raise NotImplementedError
+    def build_profile(self, sim: SimSnap, params: dict[str, Any]) -> TProf:
+        """Build the profile from the simulation snapshot and resolved parameters."""
+        raise NotImplementedError("Subclasses must implement build_profile()")
 
     def __repr__(self) -> str:
         return f"ProfBuilder {self.__class__.__name__}()"
@@ -78,6 +74,7 @@ class ProfileBuilderBase(CalculatorBase[TProf], Generic[TProf]):
 
 class RadialProfileBuilder(ProfileBuilderBase[RadialProfile]):
     """ Radial profile builder. """
+    dynamic_param_specs = {"bin_min": None, "bin_max": None}
     def __init__(
         self,
         ndim: Literal[2,3] = 3,
@@ -107,6 +104,7 @@ class RadialProfileBuilder(ProfileBuilderBase[RadialProfile]):
         bins_set : BinsSet or None
             Predefined set of bins.
         """
+        super().__init__()
         if ndim not in [2,3]:
             raise ValueError("ndim must be either 2 or 3")
         self.ndim = ndim
@@ -121,25 +119,13 @@ class RadialProfileBuilder(ProfileBuilderBase[RadialProfile]):
     def instance_signature(self):
         return (self.__class__.__name__,
             self.ndim,
-            get_signature_safe(self.weight),
-            get_signature_safe(self.bins_type),
+            self.weight,
+            self.bins_type,
             id(self.nbins),
-            get_signature_safe(self.bin_min),
-            get_signature_safe(self.bin_max),
-            get_signature_safe(self.bins_set),
+            self.bins_set,
         )
 
-    def calculate(self, sim: SimSnap) -> RadialProfile:
-        if self.bin_min is not None:
-            bin_min = self.bin_min(sim) if callable(self.bin_min) else self.bin_min
-            bin_min = self._in_sim_units(bin_min, "pos", sim)
-        else:
-            bin_min = None
-        if self.bin_max is not None:
-            bin_max = self.bin_max(sim) if callable(self.bin_max) else self.bin_max
-            bin_max = self._in_sim_units(bin_max, "pos", sim)
-        else:
-            bin_max = None
+    def build_profile(self, sim, params):
 
         return RadialProfile(
             sim,
@@ -147,8 +133,8 @@ class RadialProfileBuilder(ProfileBuilderBase[RadialProfile]):
             weight=self.weight,
             bins_type=self.bins_type,
             nbins=self.nbins,
-            bin_min=bin_min,
-            bin_max=bin_max,
+            bin_min=params["bin_min"],
+            bin_max=params["bin_max"],
             bins_set=self.bins_set,
             **self.kwargs
         )
