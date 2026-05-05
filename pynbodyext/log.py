@@ -4,7 +4,7 @@ import sys
 logger = logging.getLogger("pynext")
 
 # Expose names for import *
-__all__ = ["logger", "setlevel", "set_color"]
+__all__ = ["logger", "setlevel", "set_color", "set_format"]
 
 class DuplicateFilter(logging.Filter):
     """A filter that removes duplicated successive log entries."""
@@ -46,12 +46,17 @@ class Style:
     RESET_ALL = _Ansi.RESET
 
 # default format strings
-ufstring = "%(name)-3s: [%(levelname)-9s] %(asctime)s %(message)s"
-cfstring = "%(name)-3s: [%(levelname)-18s] %(asctime)s %(message)s"
+ufstring = "%(name)s: %(message)s"
+cfstring = "%(name)s: %(message)s"
+_formats = {
+    "compact": "%(name)s: %(message)s",
+    "level": "%(name)s [%(levelname)s]: %(message)s",
+    "time": "%(name)s [%(levelname)s] %(asctime)s: %(message)s",
+}
 
 # config holder to avoid rebinding module-level names (avoids `global` usage)
 _config = {
-    "colors_enabled": False,  # None -> auto (detect TTY), True/False -> explicit
+    "colors_enabled": True,  # None -> auto (detect TTY), True/False -> explicit
 }
 
 # color palette (mutable dict — we will mutate in-place to avoid `global`)
@@ -165,3 +170,22 @@ def set_color(enabled: bool = True, palette: dict | None = None) -> None:
         if isinstance(h, logging.StreamHandler):
             # replace with a ColoredFormatter respecting the current global flag
             h.setFormatter(ColoredFormatter(ufstring))
+
+
+def set_format(style: str = "compact", fmt: str | None = None) -> None:
+    """Set the stream formatter used by the pynbodyext logger.
+
+    Parameters
+    ----------
+    style:
+        One of ``"compact"``, ``"level"`` or ``"time"``.
+    fmt:
+        Optional explicit logging format string. When provided, it overrides
+        ``style``.
+    """
+    format_string = fmt if fmt is not None else _formats.get(style)
+    if format_string is None:
+        raise ValueError(f"Unknown log format style: {style!r}")
+    for h in logger.handlers:
+        if isinstance(h, logging.StreamHandler):
+            h.setFormatter(ColoredFormatter(format_string))
