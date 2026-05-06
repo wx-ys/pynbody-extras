@@ -10,6 +10,7 @@ from typing import (
     Literal,
     TypeAlias,
     TypeVar,
+    get_origin,
     overload,
 )
 
@@ -202,28 +203,52 @@ class ParamView:
 def _merge_metadata(spec: ParamSpec) -> dict[str, Any]:
     return {_PARAM_METADATA_KEY: spec}
 
+def _raw_annotations(cls: type[Any]) -> dict[str, Any]:
+    annotations: dict[str, Any] = {}
+    for base in reversed(cls.__mro__):
+        annotations.update(getattr(base, "__annotations__", {}))
+    return annotations
+
+def _is_param_annotation(annotation: Any) -> bool:
+    if annotation is Param:
+        return True
+    if get_origin(annotation) is Param:
+        return True
+    if isinstance(annotation, str):
+        text = annotation if " " not in annotation else annotation.replace(" ", "")
+        return text == "Param" or text.startswith("Param[")
+    return getattr(annotation, "__origin__", None) is Param
 
 def collect_param_specs(cls: type[Any]) -> tuple[ParamSpec, ...]:
     """Collect declarative calculator field metadata from a dataclass class."""
     if not is_dataclass(cls):
         return ()
 
+    hints = _raw_annotations(cls)
     specs: list[ParamSpec] = []
+
     for item in fields(cls):
         raw = item.metadata.get(_PARAM_METADATA_KEY)
-        if raw is None:
-            specs.append(ParamSpec(name=item.name, kind="static"))
-            continue
-        specs.append(
-            ParamSpec(
-                name=item.name,
-                kind=raw.kind,
-                field_name=raw.field_name,
-                target_units=raw.target_units,
-                optional_units=raw.optional_units,
-                signature=raw.signature,
+        hint = hints.get(item.name)
+
+        if raw is not None:
+            specs.append(
+                ParamSpec(
+                    name=item.name,
+                    kind=raw.kind,
+                    field_name=raw.field_name,
+                    target_units=raw.target_units,
+                    optional_units=raw.optional_units,
+                    signature=raw.signature,
+                )
             )
-        )
+            continue
+
+        if _is_param_annotation(hint):
+            specs.append(ParamSpec(name=item.name, kind="dynamic"))
+            continue
+
+        specs.append(ParamSpec(name=item.name, kind="static"))
 
     return tuple(specs)
 
