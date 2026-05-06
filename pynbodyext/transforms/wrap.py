@@ -289,7 +289,7 @@ class WrapTransformation(transformation.Transformation):
         else:
             raise ValueError("Unknown wrapping convention")
 
-
+@TransformBase.dataclass
 class WrapBox(TransformBase[WrapTransformation]):
     """Wraps particle positions to lie within a periodic box.
 
@@ -313,6 +313,6 @@ class WrapBox(TransformBase[WrapTransformation]):
     move_all: bool = True
 
     def build_handle(self, sim, target, params = None):
-        boxsize = params["boxsize"]
+        boxsize = params.boxsize
         return WrapTransformation(target, boxsize=boxsize, convention=self.convention)
 

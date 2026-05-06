@@ -14,7 +14,7 @@ __all__ = ["ShiftPosTo", "ShiftVelTo"]
 
 @TransformBase.dataclass
 class ShiftPosTo(TransformBase[GenericTranslation]):
-    mode: Param[SimNpArray] = Param(default="ssc", field_name="pos")
+    mode: Param[SimNpArray | str] = Param(default="ssc", field_name="pos")
     move_all: bool = True
 
     def __post_init__(self) -> None:
@@ -38,7 +38,7 @@ class ShiftPosTo(TransformBase[GenericTranslation]):
 
 @TransformBase.dataclass
 class ShiftVelTo(TransformBase[GenericTranslation]):
-    mode: Param[SimNpArray] = Param(default="com", field_name="vel")
+    mode: Param[SimNpArray | str] = Param(default="com", field_name="vel")
     move_all: bool = True
 
     def __post_init__(self) -> None:
