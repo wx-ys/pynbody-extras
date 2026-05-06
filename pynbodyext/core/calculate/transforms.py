@@ -173,6 +173,14 @@ class TransformBase(
     parallel_safe = False
     cache_policy = CachePolicy.NONE
 
+    def _init_dataclass_base(self) -> None:
+        TransformBase.__init__(
+            self,
+            move_all=getattr(self, "move_all", True),
+            name=getattr(self, "name", None),
+            revert_policy=getattr(self, "revert_policy", RevertPolicy.ALWAYS),
+            measure_filter=getattr(self, "measure_filter", None),
+        )
     def __init__(
         self,
         *,

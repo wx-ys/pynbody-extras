@@ -266,6 +266,14 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
             return wrap
         return wrap(target)
 
+    def _init_dataclass_base(self) -> None:
+        CalculatorBase.__init__(
+            self,
+            name=getattr(self, "name", None),
+            record_policy=getattr(self, "record_policy", None),
+            default_options=getattr(self, "default_options", None),
+        )
+
     def __init__(
         self,
         *,

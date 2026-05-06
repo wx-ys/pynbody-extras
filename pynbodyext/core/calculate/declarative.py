@@ -61,7 +61,7 @@ def dataclass_calc(
         original_post_init = raw_cls.__dict__.get("__post_init__")
 
         def __post_init__(self: Any) -> None:
-            CalculatorBase.__init__(self)
+            self._init_dataclass_base()
             if callable(original_post_init):
                 original_post_init(self)
 
