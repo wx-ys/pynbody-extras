@@ -12,7 +12,7 @@ so this module stays aligned with the new calculator implementation.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 from pynbody.analysis.halo import hybrid_center, shrink_sphere_center, virial_radius
@@ -35,102 +35,68 @@ __all__ = [
     "PatternSpeed",
 ]
 
-def ang_mom_vec(snap):
-    """
-    Calculates the angular momentum vector of the specified snapshot.
-
-    Parameters
-    ----------
-    snap : SimSnap
-        The snapshot to analyze
-
-    Returns
-    -------
-    array.SimArray
-        The angular momentum vector of the snapshot
-    """
-    mass = snap["mass"].reshape((len(snap["mass"]), 1))
-    pos = snap["pos"]
-    vel = snap["vel"]
-
-    # Try to import dask only if needed
-    use_dask = False
-    try:
-        import dask.array as da
-        if isinstance(pos, da.Array) and isinstance(vel, da.Array):
-            use_dask = True
-    except ImportError:
-        use_dask = False
-
-    if use_dask:
-        cross = da.map_blocks(np.cross, pos, vel, dtype=pos.dtype)
-        angmom = (mass * cross).sum(axis=0)
-    else:
-        cross = np.cross(pos, vel)
-        angmom = (mass * cross).sum(axis=0)
-
-    angmom.units = snap["mass"].units * snap["pos"].units * snap["vel"].units
-    return angmom
-
-
-
+@PropertyBase.dataclass
 class CenPos(PropertyBase[SimArray | np.ndarray]):
     """Center position property"""
 
-    def __init__(self, mode: Literal["ssc", "com", "pot", "hyb"] = "ssc" ):
-        super().__init__()
-        if mode not in ["ssc", "com", "pot", "hyb"]:
-            raise ValueError(f"Invalid mode: {mode}. Expected one of ['ssc', 'com', 'pot', 'hyb'].")
-        self.mode = mode
+    mode : Literal["ssc", "com", "pot", "hyb"] = "ssc"
 
-    def instance_signature(self):
-        return (self.__class__.__name__, self.mode)
+    def __post_init__(self) -> None:
+        if self.mode not in ("ssc", "com", "pot", "hyb"):
+            raise ValueError(f"Invalid mode: {self.mode}. Expected one of ['ssc', 'com', 'pot', 'hyb'].")
 
-    def calculate(self, sim: SimSnap) -> SimArray | np.ndarray:
-        if self.mode == "com":
+    def calculate(self, sim: SimSnap, params: Any = None) -> SimArray | np.ndarray:
+        if params.mode == "com":
             cen = cast("SimArray", sim.mean_by_mass("pos"))
-        elif self.mode == "pot":
+        elif params.mode == "pot":
             i = sim["phi"].argmin()
             cen = cast("SimArray", sim["pos"][i].copy())
-        elif self.mode == "ssc":
+        elif params.mode == "ssc":
             cen = cast("SimArray", shrink_sphere_center(sim))
-        elif self.mode == "hyb":
+        elif params.mode == "hyb":
             cen = cast("SimArray", hybrid_center(sim, r = "5 kpc"))
         else:
-            raise ValueError(f"Invalid mode: {self.mode}. Expected one of ['ssc', 'com', 'pot', 'hyb'].")
+            raise ValueError(f"Invalid mode: {params.mode}. Expected one of ['ssc', 'com', 'pot', 'hyb'].")
         if isinstance(cen, SimArray):
             cen.sim = sim
         return cen
 
+@PropertyBase.dataclass
 class CenVel(PropertyBase[SimArray]):
     """Center velocity property"""
 
-    def __init__(self, mode: Literal["com"] = "com" ):
-        super().__init__()
-        self.mode = mode
+    mode : Literal["com"] = "com"
 
-    def instance_signature(self):
-        return (self.__class__.__name__, self.mode)
+    def __post_init__(self) -> None:
+        if self.mode != "com":
+            raise ValueError(f"Invalid mode: {self.mode}. Expected 'com'.")
 
-    def calculate(self, sim: SimSnap) -> SimArray:
-        if self.mode == "com":
+    def calculate(self, sim: SimSnap, params: Any = None) -> SimArray:
+        if params.mode == "com":
             cen = cast("SimArray", sim.mean_by_mass("vel"))
         else:
-            raise ValueError(f"Invalid mode: {self.mode}. Expected one of ['com'].")
+            raise ValueError(f"Invalid mode: {params.mode}. Expected one of ['com'].")
         if isinstance(cen, SimArray):
             cen.sim = sim
         return cen
 
 
+@PropertyBase.dataclass
 class AngMomVec(PropertyBase[SimArray]):
     """Angular momentum vector property"""
-    def instance_signature(self):
-        return (self.__class__.__name__,)
 
-    def calculate(self, sim: SimSnap) -> SimArray:
-        return ang_mom_vec(sim)
+    def calculate(self, sim: SimSnap, params: Any = None) -> SimArray:
+        mass = sim["mass"].reshape((len(sim["mass"]), 1))
+        pos = sim["pos"]
+        vel = sim["vel"]
 
+        cross = np.cross(pos, vel)
+        angmom = (mass * cross).sum(axis=0)
 
+        angmom.units = sim["mass"].units * sim["pos"].units * sim["vel"].units
+        return angmom
+
+@PropertyBase.dataclass
 class KappaRot(PropertyBase[float]):
     """
     Calculate the fraction of kinetic energy in ordered rotation.
@@ -143,15 +109,13 @@ class KappaRot(PropertyBase[float]):
     ----------
     .. [1] Sales, L. V., et al. 2010, MNRAS, 409, 1541
     """
-    def instance_signature(self):
-        return (self.__class__.__name__,)
 
-    def calculate(self, sim: SimSnap) -> float:
+    def calculate(self, sim: SimSnap, params: Any = None) -> float:
         Krot = np.sum(0.5 * sim["mass"] * (sim["vcxy"] ** 2))
         K = np.sum(sim["mass"] * sim["ke"])
         return float(Krot / K)
 
-
+@PropertyBase.dataclass
 class KappaRotMean(PropertyBase[float]):
     """
     Calculate the mean of the ratio of rotational kinetic energy to total kinetic energy per particle.
@@ -160,29 +124,26 @@ class KappaRotMean(PropertyBase[float]):
     -----
     This is the mean of (0.5 * m * vcxy^2) / (m * ke) over given particles.
     """
-    def instance_signature(self):
-        return (self.__class__.__name__,)
-
-    def calculate(self, sim: SimSnap) -> float:
+    def calculate(self, sim: SimSnap, params: Any = None) -> float:
         krot = 0.5 * sim["vcxy"] ** 2
         ke = sim["ke"]
         ratio = krot / ke
         return float(np.mean(ratio))
 
+@PropertyBase.dataclass
 class VirialRadius(PropertyBase[float]):
     """Virial radius property"""
+    overdensity: float = 178.
+    rho_def: Literal["critical", "matter"] = "critical"
 
-    def __init__(self, overdensity: float = 178., rho_def: Literal["critical", "matter"] = "critical"):
-        super().__init__()
-        self.overdensity = overdensity
-        self.rho_def = rho_def
+    def __post_init__(self) -> None:
+        if self.rho_def not in ("critical", "matter"):
+            raise ValueError(f"Invalid rho_def: {self.rho_def}. Expected one of ['critical', 'matter'].")
 
-    def instance_signature(self):
-        return (self.__class__.__name__, self.overdensity, self.rho_def)
+    def calculate(self, sim: SimSnap, params: Any = None) -> float:
+        return virial_radius(sim, overden=params.overdensity, rho_def=params.rho_def)
 
-    def calculate(self, sim: SimSnap) -> float:
-        return virial_radius(sim, overden=self.overdensity, rho_def=self.rho_def)
-
+@PropertyBase.dataclass
 class SpinParam(PropertyBase[float]):
     """The spin parameter is defined as in eq. (5) of Bullock et al. (2001) [1]_.
 
@@ -195,10 +156,8 @@ class SpinParam(PropertyBase[float]):
     ----------
     .. [1] Bullock, J. S., et al. 2001, MNRAS, 321, 559
     """
-    def instance_signature(self):
-        return (self.__class__.__name__,)
 
-    def calculate(self, sim: SimSnap) -> float:
+    def calculate(self, sim: SimSnap, params: Any = None) -> float:
         """Return the spin parameter lambda' of a centered halo.
 
         Returns
@@ -211,7 +170,7 @@ class SpinParam(PropertyBase[float]):
         spin = spin_parameter(sim)
         return spin
 
-
+@PropertyBase.dataclass
 class PatternSpeed(PropertyBase[SimArray]):
     """Calculate pattern speed in Z direction, assuming disk in x-y plane.
 
@@ -223,10 +182,8 @@ class PatternSpeed(PropertyBase[SimArray]):
     ----------
     .. [1] Pfenniger, D., & Romero-Gómez, M. 2023, A&A, 673, A36
     """
-    def instance_signature(self):
-        return (self.__class__.__name__,)
 
-    def calculate(self, sim: SimSnap) -> SimArray:
+    def calculate(self, sim: SimSnap, params: Any = None) -> SimArray:
 
         Ixx = (sim["mass"]*sim["x"]*sim["x"]).sum()
         Iyy = (sim["mass"]*sim["y"]*sim["y"]).sum()

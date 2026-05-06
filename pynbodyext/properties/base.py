@@ -37,8 +37,8 @@ from typing import Any
 import numpy as np
 from pynbody.array import SimArray
 
-from pynbodyext.calculate import PropertyBase
-from pynbodyext.filters.filt import Annulus, BandPass, ValueLike, ValueLikeFunc, VolumeFilter
+from pynbodyext.calculate import Param, PropertyBase
+from pynbodyext.filters.filt import Annulus, BandPass, ValueLike
 
 __all__ = [
     "PropertyBase",
@@ -57,6 +57,7 @@ def _normalize_frac(frac: Any) -> tuple[np.ndarray, bool]:
     if not np.all((frac_array > 0) & (frac_array < 1)):
         raise ValueError(f"frac values must be between 0 and 1, got {frac_array}.")
     return frac_array, frac_array.size == 1 and isinstance(frac, (int, float, np.floating))
+@PropertyBase.dataclass
 class ParamContain(PropertyBase[SimArray]):
     """Containment radius for one or more cumulative fractions.
 
@@ -75,37 +76,22 @@ class ParamContain(PropertyBase[SimArray]):
     pynbody.array.SimArray
         Radius or radii at the requested containment fractions.
     """
+    frac: Param[float] = Param(default=0.5)
+    cal_key: str = "r"
+    parameter: str = "mass"
 
-    dynamic_param_specs = {"frac": None}
-
-    def __init__(
-        self,
-        cal_key: str = "r",
-        frac: Any = 0.5,
-        parameter: str = "mass",
-    ) -> None:
-        super().__init__()
-        self.cal_key = cal_key
-        self.parameter = parameter
-        self.frac = frac
-
-    def instance_signature(self) -> tuple[Any, ...]:
-        return ("ParamContain", self.cal_key, self.parameter)
-
-
-    def calculate_with_params(self, sim, params = None):
-
-        frac = params["frac"]
+    def calculate(self, sim, params = None):
+        frac = params.frac
         frac_array, frac_is_scalar = _normalize_frac(frac)
-        key = sim[self.cal_key]
-        weight = sim[self.parameter]
+        key = sim[params.cal_key]
+        weight = sim[params.parameter]
         order = np.argsort(np.asarray(key))
         key_sorted = np.asarray(key)[order]
         weight_sorted = np.asarray(weight)[order]
         cumulative = np.cumsum(weight_sorted)
         denom = float(cumulative[-1] - cumulative[0])
         if denom <= 0.0:
-            raise ValueError(f"Non-positive total {self.parameter!r}; cannot compute containment radius.")
+            raise ValueError(f"Non-positive total {params.parameter!r}; cannot compute containment radius.")
         cumulative = (cumulative - cumulative[0]) / denom
         values = np.interp(frac_array, cumulative, key_sorted)
         result: float | np.ndarray = float(values[0]) if frac_is_scalar else values
@@ -117,6 +103,7 @@ class ParamContain(PropertyBase[SimArray]):
         return contained
 
 
+@PropertyBase.dataclass
 class ParamSum(PropertyBase[Any]):
     """Sum a simulation field.
 
@@ -126,73 +113,54 @@ class ParamSum(PropertyBase[Any]):
         Field name to sum.
     """
 
-    def __init__(self, parameter: str) -> None:
-        super().__init__()
-        self.parameter = parameter
+    parameter: str
 
-    def instance_signature(self) -> tuple[Any, ...]:
-        return ("ParamSum", self.parameter)
+    def calculate(self, sim: Any, params: Any = None) -> Any:
+        return sim[params.parameter].sum()
 
-    def calculate(self, sim: Any) -> Any:
-        return sim[self.parameter].sum()
-
+@PropertyBase.dataclass
 class VolumeDensity(PropertyBase[SimArray]):
     """Mean volume density inside a volume filter or radius range."""
-    dynamic_param_specs = {"rmax": "pos", "rmin": "pos"}
 
-    def __init__(
-        self,
-        rmax: VolumeFilter | ValueLike | ValueLikeFunc,
-        parameter: str = "mass",
-        rmin: ValueLike | ValueLikeFunc = 0.0,
-    ) -> None:
-        super().__init__()
-        self.rmax = rmax
-        self.rmin = rmin
-        self.parameter = parameter
 
-    def instance_signature(self) -> tuple[Any, ...]:
-        return (
-            self.__class__.__name__,
-            self.parameter,
-        )
+    rmax: Param[ValueLike] = Param(field_name="pos")
+    parameter: str = "mass"
+    rmin: Param[ValueLike] = Param(default=0.0, field_name="pos")
 
-    def calculate_with_params(self, sim, params = None):
-        selector = Annulus(params["rmin"], params["rmax"])
 
-        param_sum = sim[selector][self.parameter].sum()
+    def calculate(self, sim, params = None):
+        selector = Annulus(params.rmin, params.rmax)    # type: ignore
+
+        param_sum = sim[selector][params.parameter].sum()
         volume = selector.volume(sim)
 
         den = param_sum / volume
         if isinstance(volume, float):
-            den.units = sim[self.parameter].units / sim["pos"].units**3
+            den.units = sim[params.parameter].units / sim["pos"].units**3
         den.sim = sim.ancestor
-        den.in_units(sim[self.parameter].units / sim["pos"].units**3)
+        den.in_units(sim[params.parameter].units / sim["pos"].units**3)
         return den
 
+@PropertyBase.dataclass
 class SurfaceDensity(PropertyBase[SimArray]):
-    """Mean surface density inside an annulus."""
-    dynamic_param_specs = {"rmax": "pos", "rmin": "pos"}
+    """Mean surface density inside an annulus.
 
-    def __init__(
-        self,
-        rmax: ValueLike | ValueLikeFunc,
-        parameter: str = "mass",
-        rmin: ValueLike | ValueLikeFunc = 0.0,
-    ) -> None:
-        super().__init__()
-        self.rmax = rmax
-        self.rmin = rmin
-        self.parameter = parameter
+    Parameters
+    ----------
+    rmax: ValueLike or dynamic value
+        Outer radius of the annulus.  Calculator-valued radii are resolved at run time
+    rmin: ValueLike or dynamic value, default: 0.0
+        Inner radius of the annulus.  Calculator-valued radii are resolved at run time
+    parameter: str
+        Field name to use as the weight for the surface density calculation.
+    """
 
-    def instance_signature(self) -> tuple[Any, ...]:
-        return (
-            self.__class__.__name__,
-            self.parameter,
-        )
+    rmax: Param[ValueLike] = Param(field_name="pos")
+    rmin: Param[ValueLike] = Param(default=0.0, field_name="pos")
+    parameter: str = "mass"
 
     def calculate_with_params(self, sim, params = None):
-        selector = BandPass("rxy", params["rmin"], params["rmax"])
+        selector = BandPass("rxy", params["rmin"], params["rmax"])  # type: ignore
         param_sum = sim[selector][self.parameter].sum()
         area = np.pi * (params["rmax"]**2 - params["rmin"]**2)
         den = param_sum / area
@@ -201,6 +169,7 @@ class SurfaceDensity(PropertyBase[SimArray]):
         return den
 
 
+@PropertyBase.dataclass
 class RadiusAtSurfaceDensity(PropertyBase[SimArray]):
     """Radius where the surface density reaches a target value.
 
@@ -213,39 +182,16 @@ class RadiusAtSurfaceDensity(PropertyBase[SimArray]):
 
     A 1D bisection in radius is used to solve ``Sigma(r) = target``.
     """
-
-    dynamic_param_specs = {"target": None}
-
-    def __init__(
-        self,
-        target: ValueLike | ValueLikeFunc,
-        parameter: str = "mass",
-        mode: str = "shell",
-        r_key: str = "rxy",
-        eps: float = 0.01,
-    ) -> None:
-        super().__init__()
-        if mode not in ("shell", "total"):
-            raise ValueError("mode must be 'shell' or 'total'")
-        self.target = target
-        self.parameter = parameter
-        self.mode = mode
-        self.r_key = r_key
-        self.eps = eps
-
-    def instance_signature(self) -> tuple[Any, ...]:
-        return (
-            self.__class__.__name__,
-            self.parameter,
-            self.mode,
-            self.r_key,
-            self.eps,
-        )
+    target: Param[ValueLike]
+    parameter: str = "mass"
+    mode: str = "shell"
+    r_key: str = "rxy"
+    eps: float = 0.01
 
     def _target_value(self, sim, params = None):
-        surf_units = sim[self.parameter].units / sim["pos"].units**2
+        surf_units = sim[params.parameter].units / sim["pos"].units**2
         raw_target = params["target"]
-        return self._in_sim_units(raw_target, self.parameter, sim, target_units=surf_units)
+        return self._in_sim_units(raw_target, params.parameter, sim, target_units=surf_units)
 
     @staticmethod
     def _sigma_at_radius(
@@ -281,12 +227,12 @@ class RadiusAtSurfaceDensity(PropertyBase[SimArray]):
         area_shell = np.pi * (rout**2 - rin**2)
         return 0.0 if area_shell <= 0 else float(m_shell / area_shell)
 
-    def calculate_with_params(self, sim, params = None):
-        r_arr = sim[self.r_key]
-        m_arr = sim[self.parameter]
+    def calculate(self, sim, params = None):
+        r_arr = sim[params.r_key]
+        m_arr = sim[params.parameter]
 
         pos_units = sim["pos"].units
-        mass_units = sim[self.parameter].units
+        mass_units = sim[params.parameter].units
 
         r_vals = np.asarray(r_arr.in_units(pos_units))
         m_vals = np.asarray(m_arr.in_units(mass_units))
@@ -303,10 +249,10 @@ class RadiusAtSurfaceDensity(PropertyBase[SimArray]):
 
         target = self._target_value(sim, params)
 
-        sample_grid = np.linspace(max(r_min, self.eps), r_max, 256)
+        sample_grid = np.linspace(max(r_min, params.eps), r_max, 256)
         sigma_grid = np.array(
             [
-                self._sigma_at_radius(r, r_sorted, m_cum, self.eps, self.mode)
+                self._sigma_at_radius(r, r_sorted, m_cum, params.eps, params.mode)
                 for r in sample_grid
             ],
             dtype=float,
@@ -322,11 +268,11 @@ class RadiusAtSurfaceDensity(PropertyBase[SimArray]):
 
         for _ in range(80):
             mid = 0.5 * (left + right)
-            sigma_mid = self._sigma_at_radius(mid, r_sorted, m_cum, self.eps, self.mode)
+            sigma_mid = self._sigma_at_radius(mid, r_sorted, m_cum, params.eps, params.mode)
             if abs(sigma_mid - target) < 1e-10:
                 left = right = mid
                 break
-            sigma_left = self._sigma_at_radius(left, r_sorted, m_cum, self.eps, self.mode)
+            sigma_left = self._sigma_at_radius(left, r_sorted, m_cum, params.eps, params.mode)
             if (sigma_left - target) * (sigma_mid - target) <= 0:
                 right = mid
             else:
