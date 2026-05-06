@@ -106,8 +106,9 @@ from __future__ import annotations
 from abc import ABC
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 
-from .base import CalculatorBase
+from .declarative import dataclass_calc
 from .enums import BuiltinKinds
+from .template import RuntimeCalculatorBase
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -116,12 +117,13 @@ if TYPE_CHECKING:
     from pynbody.snapshot import SimSnap
 
     from .context import ExecutionContext, NodeInput
+    from .runtime import CalcRuntime
 
 
 TProp = TypeVar("TProp")
 
 
-class PropertyBase(CalculatorBase[TProp, TProp], Generic[TProp], ABC):
+class PropertyBase(RuntimeCalculatorBase[TProp, TProp], Generic[TProp], ABC):
     """Base class for calculators that read a property from a snapshot.
 
     Subclasses usually implement :meth:`calculate`; the framework wraps it in
@@ -129,39 +131,35 @@ class PropertyBase(CalculatorBase[TProp, TProp], Generic[TProp], ABC):
     """
 
     node_kind = BuiltinKinds.PROPERTY
+    dataclass = staticmethod(dataclass_calc)
 
-    def prepare_params(self, sim: SimSnap, values: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    def prepare_params(self, sim: SimSnap, values: Mapping[str, Any]) -> Any:
         """Convert resolved dynamic values into calculate params.
 
         Subclasses with dynamic parameters may override this to normalize the
         resolved mapping into a tuple, dataclass, or other compact object.
         """
-        return values if values else None
+        return super().prepare_params(sim, dict(values))
 
-    def calculate(self, sim: SimSnap) -> TProp:
+    def calculate(self, sim: SimSnap, params: Any = None) -> TProp:
         """Calculate a value from the active simulation view.
 
-        This is the simple subclass interface.  It is best for properties that
-        do not need dynamic parameters.
+        This is the preferred subclass interface.  ``params`` is the prepared
+        dynamic parameter object, or ``None`` when no dynamic parameters were
+        declared.
         """
         raise NotImplementedError(
             f"{type(self).__name__} must implement calculate(), "
-            "calculate_with_params(), or _calculate_runtime()."
+            "calculate_with_params(), _calculate_runtime(), or compute()."
         )
 
     def calculate_with_params(self, sim: SimSnap, params: Mapping[str, Any] | None = None) -> TProp:
         """Calculate a value from the active simulation view and prepared params.
 
         This is the medium-level subclass interface for properties with dynamic
-        parameters.  The default preserves compatibility with old subclasses
-        that only implement calculate(sim).
+        parameters.  New subclasses should implement ``calculate(sim, params=None)``.
         """
-        if params is None:
-            return self.calculate(sim)
-        raise NotImplementedError(
-            f"{type(self).__name__} declares dynamic parameters but does not "
-            "implement calculate_with_params() or _calculate_runtime()."
-        )
+        return self.calculate(sim, params)
 
     def _calculate_runtime(
         self,
@@ -173,16 +171,14 @@ class PropertyBase(CalculatorBase[TProp, TProp], Generic[TProp], ABC):
         """Runtime calculation hook with access to context and node input."""
         return self.calculate_with_params(sim, params)
 
+    def compute(self, runtime: CalcRuntime, params: Any) -> TProp:
+        """Compute the property value through the transition runtime hook."""
+        return self._calculate_runtime(runtime.sim, params, runtime.ctx, runtime.input)
+
     def _resolve_params_runtime(self, ctx: ExecutionContext, input: NodeInput) -> Mapping[str, Any] | None:
         sim = input.active_sim
         values = self.resolve_dynamic_params(ctx, input)
         return self.prepare_params(sim, values)
-
-    def execute(self, ctx: ExecutionContext, input: NodeInput) -> TProp:
-        sim = input.active_sim
-        with ctx.phase(self, "calculate"):
-            params = self._resolve_params_runtime(ctx, input)
-            return self._calculate_runtime(sim, params, ctx, input)
 
     @classmethod
     def as_property(cls, other: object | None) -> PropertyBase[Any]:

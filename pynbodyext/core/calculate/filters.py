@@ -107,18 +107,22 @@ import numpy as np
 import numpy.typing as npt
 from pynbody.filt import Filter as PynbodyFilter
 
-from .base import CalculatorBase
 from .context import ExecutionContext, FilterResult, NodeInput, resolve_value
+from .declarative import dataclass_calc
 from .enums import BuiltinKinds
+from .template import RuntimeCalculatorBase
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from pynbody.snapshot import SimSnap
 
+    from .base import CalculatorBase
+    from .runtime import CalcRuntime
+
 MaskArray: TypeAlias = npt.NDArray[np.bool_]
 
-class FilterBase(CalculatorBase[FilterResult, MaskArray],PynbodyFilter, ABC):
+class FilterBase(RuntimeCalculatorBase[FilterResult, MaskArray],PynbodyFilter, ABC):
     """Base class for calculators that produce a boolean selection mask.
 
     Subclasses usually override :meth:`build_mask`.
@@ -127,6 +131,7 @@ class FilterBase(CalculatorBase[FilterResult, MaskArray],PynbodyFilter, ABC):
     """
 
     node_kind = BuiltinKinds.FILTER
+    dataclass = staticmethod(dataclass_calc)
 
     __eq__ = object.__eq__
     __hash__ = object.__hash__
@@ -173,8 +178,12 @@ class FilterBase(CalculatorBase[FilterResult, MaskArray],PynbodyFilter, ABC):
         return cast("SimSnap", sim[mask])
 
     def prepare_params(self, sim: SimSnap, values: Mapping[str, Any]) -> Any:
-        """Convert resolved dynamic values into build_mask params."""
-        return values if values else None
+        """Convert resolved dynamic values into calculate params."""
+        return super().prepare_params(sim, dict(values))
+
+    def calculate(self, sim: SimSnap, params: Any = None) -> Any:
+        """Calculate and return a boolean mask for ``sim``."""
+        return self.build_mask(sim, params)
 
     def build_mask(self, sim: SimSnap, params: Any) -> Any:
         """Build a boolean mask for sim.
@@ -186,7 +195,7 @@ class FilterBase(CalculatorBase[FilterResult, MaskArray],PynbodyFilter, ABC):
         params : object
             Prepared dynamic parameters resolved at runtime.  This is the output of ``prepare_params``.
         """
-        raise NotImplementedError
+        raise NotImplementedError(f"{type(self).__name__} must implement calculate(), build_mask(), or compute().")
 
     def _build_mask_runtime(
         self,
@@ -195,20 +204,20 @@ class FilterBase(CalculatorBase[FilterResult, MaskArray],PynbodyFilter, ABC):
         ctx: ExecutionContext,
         input: NodeInput,
     ) -> Any:
-        return self.build_mask(sim, params)
+        return self.calculate(sim, params)
+
+    def compute(self, runtime: CalcRuntime, params: Any) -> Any:
+        """Compute the mask through the transition runtime hook."""
+        return self._build_mask_runtime(runtime.sim, params, runtime.ctx, runtime.input)
+
+    def wrap_raw(self, runtime: CalcRuntime, computed: Any) -> FilterResult:
+        mask = self.normalize_mask(runtime.sim, computed)
+        return FilterResult(mask=mask, source_sim=runtime.sim)
 
     def _resolve_params_runtime(self, ctx: ExecutionContext, input: NodeInput) -> Any:
         sim = input.active_sim
         values = self.resolve_dynamic_params(ctx, input)
         return self.prepare_params(sim, values)
-
-    def execute(self, ctx: ExecutionContext, input: NodeInput) -> FilterResult:
-        sim = input.active_sim
-        with ctx.phase(self, "calculate"):
-            params = self._resolve_params_runtime(ctx, input)
-            mask = self._build_mask_runtime(sim, params, ctx, input)
-            mask = self.normalize_mask(sim, mask)
-        return FilterResult(mask=mask, source_sim=sim)
 
     @staticmethod
     def resolve_value(sim: SimSnap, value: Any) -> Any:

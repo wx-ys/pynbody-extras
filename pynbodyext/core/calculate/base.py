@@ -820,6 +820,12 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
     def __and__(self, other: object) -> CombinedCalculator[Any, Any]:
         if not isinstance(other, CalculatorBase):
             raise TypeError(f"unsupported operand for &: {type(other)!r}")
+
+        if self.kind == BuiltinKinds.FILTER and other.kind == BuiltinKinds.FILTER:
+            from .filters import AndFilter
+            and_filter = cast("Any", AndFilter)
+            return and_filter(self, other)
+
         return CombinedCalculator(self, other)
 
 
@@ -1048,3 +1054,4 @@ class CombinedCalculator(
     def execute(self, ctx: ExecutionContext, input: NodeInput) -> tuple[Unpack[Ts]]:
         with ctx.phase(self, "calculate"):
             return tuple(ctx.public_value(item, input) for item in self.items)
+

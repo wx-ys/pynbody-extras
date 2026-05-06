@@ -185,6 +185,7 @@ from .context import (
     TransformResult,
     resolve_value,
 )
+from .declarative import dataclass_calc
 from .engine import EvalEngine
 from .enums import (
     BuiltinKinds,
@@ -201,6 +202,7 @@ from .enums import (
 )
 from .exceptions import CalculatorError, CycleError
 from .expr import ConstantProperty, LambdaProperty, OpProperty
+from .fields import DynamicParam, ParamSpec, ParamView, collect_param_specs, dynamic, static
 from .filters import AndFilter, FilterBase, NotFilter, OrFilter
 from .params import DynamicParamSpec, dynamic_value_dependencies, dynamic_value_signature, resolve_dynamic_value
 from .perf import PerfCollector
@@ -215,12 +217,15 @@ from .result import (
     ResultNode,
     ValueSummary,
 )
+from .runtime import CalcRuntime, TransformRuntime
 from .scopes import Scope, ScopeSpec, TransformScope
+from .template import RuntimeCalculatorBase
 from .trace import TraceCollector, TraceEvent
 from .transforms import TransformBase, TransformChain, TransformPlan, TransformStep, chain_transforms
 
 __all__ = [
     "CalculatorBase",
+    "RuntimeCalculatorBase",
     "BoundCalculator",
     "CombinedCalculator",
     "EvalEngine",
@@ -244,11 +249,20 @@ __all__ = [
     "TransformPlan",
     "TransformStep",
     "chain_transforms",
+    "CalcRuntime",
+    "TransformRuntime",
     "ScopeSpec",
     "Scope",
     "TransformScope",
     "Pipeline",
     "PropertyBase",
+    "dataclass_calc",
+    "DynamicParam",
+    "ParamSpec",
+    "ParamView",
+    "dynamic",
+    "static",
+    "collect_param_specs",
     "ConstantProperty",
     "LambdaProperty",
     "OpProperty",

@@ -132,14 +132,17 @@ from typing import TYPE_CHECKING, Any, Generic, TypeAlias, TypeVar, cast
 from pynbody.snapshot import SimSnap
 from pynbody.transformation import Transformation
 
-from .base import CalculatorBase
 from .context import ExecutionContext, FilterResult, NodeInput, TransformResult
+from .declarative import dataclass_calc
 from .display import display_value
 from .enums import BuiltinKinds, CachePolicy, EffectPolicy, RevertPolicy, normalize_revert_policy
+from .runtime import CalcRuntime, TransformRuntime
+from .template import RuntimeCalculatorBase
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from .base import CalculatorBase
     from .filters import FilterBase
 
 HandleT = TypeVar("HandleT")
@@ -155,7 +158,7 @@ class TransformStep:
 
 
 class TransformBase(
-    CalculatorBase[TransformResult[HandleT], HandleT],
+    RuntimeCalculatorBase[TransformResult[HandleT], HandleT],
     Generic[HandleT]
 ):
     """Base class for mutating calculators that return transform handles.
@@ -170,6 +173,7 @@ class TransformBase(
     cacheable = False
     parallel_safe = False
     cache_policy = CachePolicy.NONE
+    dataclass = staticmethod(dataclass_calc)
 
     def __init__(
         self,
@@ -198,6 +202,7 @@ class TransformBase(
                 self.revert_policy.value,
                 self.measure_filter.signature() if self.measure_filter is not None else None,
                 self.instance_signature(),
+                ("dynamic", self.dynamic_param_signature()),
             ),
             tuple(dep.signature() for dep in self.dependencies()),
         )
@@ -249,14 +254,39 @@ class TransformBase(
             return sim.ancestor
         return sim
 
-    def prepare_params(self, sim: SimSnap, values: Mapping[str, Any]) -> Mapping[str, Any] | None:
-        """Convert resolved dynamic values into build_handle params."""
-        return values if values else None
+    def make_runtime(self, ctx: ExecutionContext, input: NodeInput) -> TransformRuntime:
+        measure_input = input
+        if self.measure_filter is not None:
+            with ctx.phase(self, "measure_filter"):
+                filter_result = ctx.raw_value(self.measure_filter, input)
+                if not isinstance(filter_result, FilterResult):
+                    raise TypeError("measure filters must return FilterResult")
+                measure_input = input.with_selection(filter_result)
 
-    def _resolve_params_runtime(self, ctx: ExecutionContext, input: NodeInput) -> Mapping[str, Any] | None:
-        sim = input.active_sim
+        return TransformRuntime(
+            ctx=ctx,
+            input=input,
+            node=self,
+            measure_input=measure_input,
+            measure_sim=measure_input.active_sim,
+            target=self.resolve_target(input),
+        )
+
+    def prepare_params(self, sim: SimSnap, values: Mapping[str, Any]) -> Mapping[str, Any] | None:
+        """Convert resolved dynamic values into apply params."""
+        return super().prepare_params(sim, dict(values))
+
+    def resolve_params(self, runtime: CalcRuntime) -> dict[str, Any]:
+        transform_runtime = cast("TransformRuntime", runtime)
+        return self.resolve_dynamic_params(transform_runtime.ctx, transform_runtime.measure_input)
+
+    def prepare_resolved_params(self, runtime: CalcRuntime, values: dict[str, Any]) -> Any:
+        transform_runtime = cast("TransformRuntime", runtime)
+        return self.prepare_params(transform_runtime.measure_sim, values)
+
+    def _resolve_params_runtime(self, ctx: ExecutionContext, input: NodeInput) -> Any:
         values = self.resolve_dynamic_params(ctx, input)
-        return self.prepare_params(sim, values)
+        return self.prepare_params(input.active_sim, values)
 
 
     def build_handle(
@@ -267,8 +297,17 @@ class TransformBase(
     ) -> HandleT:
         """Apply the transform and return a handle."""
         raise NotImplementedError(
-            f"{type(self).__name__} must implement build_handle() or _build_handle_runtime()."
+            f"{type(self).__name__} must implement apply(), build_handle(), _build_handle_runtime(), or compute()."
         )
+
+    def apply(
+        self,
+        sim: SimSnap,
+        target: TransformTarget,
+        params: Mapping[str, Any] | None = None,
+    ) -> HandleT:
+        """Apply the transform and return a handle."""
+        return self.build_handle(sim, target, params)
 
     def _build_handle_runtime(
         self,
@@ -278,7 +317,17 @@ class TransformBase(
         ctx: ExecutionContext,
         input: NodeInput,
     ) -> HandleT:
-        return self.build_handle(sim, target, params)
+        return self.apply(sim, target, params)
+
+    def compute(self, runtime: CalcRuntime, params: Any) -> HandleT:
+        transform_runtime = cast("TransformRuntime", runtime)
+        return self._build_handle_runtime(
+            transform_runtime.measure_sim,
+            transform_runtime.target,
+            params,
+            transform_runtime.ctx,
+            transform_runtime.measure_input,
+        )
 
     def sim_after_transform(
         self,
@@ -299,28 +348,21 @@ class TransformBase(
     ) -> SimSnap:
         return self.sim_after_transform(sim, target, handle)
 
-    def execute(self, ctx: ExecutionContext, input: NodeInput) -> TransformResult[HandleT]:
-        base_sim = input.active_sim
-        measure_input = input
-        if self.measure_filter is not None:
-            with ctx.phase(self, "measure_filter"):
-                filter_result = ctx.raw_value(self.measure_filter, input)
-                if not isinstance(filter_result, FilterResult):
-                    raise TypeError("measure filters must return FilterResult")
-                measure_input = input.with_selection(filter_result)
-
-        measure_sim = measure_input.active_sim
-        with ctx.phase(self, "calculate"):
-            params = self._resolve_params_runtime(ctx, measure_input)
-            target = self.resolve_target(input)
-            handle = self._build_handle_runtime(measure_sim, target, params,ctx, measure_input)
-            sim_after = self._sim_after_transform_runtime(base_sim, target, handle,ctx, measure_input)
-            mutation_generation = ctx.advance_mutation_generation(f"apply {self.log_label}")
+    def wrap_raw(self, runtime: CalcRuntime, computed: HandleT) -> TransformResult[HandleT]:
+        transform_runtime = cast("TransformRuntime", runtime)
+        sim_after = self._sim_after_transform_runtime(
+            transform_runtime.input.active_sim,
+            transform_runtime.target,
+            computed,
+            transform_runtime.ctx,
+            transform_runtime.measure_input,
+        )
+        mutation_generation = transform_runtime.ctx.advance_mutation_generation(f"apply {self.log_label}")
         return TransformResult(
-            handle=handle,
-            target=target,
+            handle=computed,
+            target=transform_runtime.target,
             sim_after=sim_after,
-            revertible=self.is_revertible(handle),
+            revertible=self.is_revertible(computed),
             artifacts={"mutation_generation": mutation_generation},
         )
 

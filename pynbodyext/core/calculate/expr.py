@@ -129,7 +129,7 @@ class ConstantProperty(PropertyBase[TValue]):
             return ("const", value)
         return ("const_obj", id(value))
 
-    def calculate(self, sim: Any) -> TValue:
+    def calculate(self, sim: Any, params: Any = None) -> TValue:
         return self._value
 
     def _repr_fields(self) -> list[tuple[str | None, Any]]:
@@ -154,7 +154,7 @@ class LambdaProperty(PropertyBase[TValue]):
     def instance_signature(self) -> tuple[Any, ...]:
         return ("lambda", id(self._func))
 
-    def calculate(self, sim: Any) -> TValue:
+    def calculate(self, sim: Any, params: Any = None) -> TValue:
         return self._func(sim)
 
     def _repr_fields(self) -> list[tuple[str | None, Any]]:
@@ -188,7 +188,7 @@ class CalculatorValueProperty(PropertyBase[TValue], Generic[TValue]):
             fields.append(("name", self.name))
         return fields
 
-    def calculate(self, sim: Any) -> Any:
+    def calculate(self, sim: Any, params: Any = None) -> Any:
         raise RuntimeError("CalculatorValueProperty must execute through the engine.")
 
     def execute(self, ctx: ExecutionContext, input: NodeInput) -> Any:
@@ -226,7 +226,7 @@ class OpProperty(PropertyBase[Any]):
             fields.append(("name", self.name))
         return fields
 
-    def calculate(self, sim: Any) -> Any:
+    def calculate(self, sim: Any, params: Any = None) -> Any:
         raise RuntimeError("OpProperty must execute through the engine.")
 
     def execute(self, ctx: ExecutionContext, input: NodeInput) -> Any:
