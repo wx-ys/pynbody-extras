@@ -1,58 +1,59 @@
 
-from typing import Literal
+from typing import Any, cast
 
 import numpy as np
 from pynbody.array import SimArray
 from pynbody.transformation import GenericTranslation
 
-from pynbodyext.calculate import TransformBase
+from pynbodyext.calculate import Param, TransformBase
 from pynbodyext.properties import CenPos, CenVel
-from pynbodyext.util._type import SimNpArray, SimNpArrayFunc
+from pynbodyext.util._type import SimNpArray
 
 __all__ = ["ShiftPosTo", "ShiftVelTo"]
 
 
+@TransformBase.dataclass
 class ShiftPosTo(TransformBase[GenericTranslation]):
-    dynamic_param_specs = {"mode": "pos"}
-    def __init__(self, mode: Literal["ssc", "com", "pot", "hyb"] | SimNpArray | SimNpArrayFunc= "ssc", move_all: bool = True):
-        super().__init__(move_all=move_all)
+    mode: Param[SimNpArray] = Param(default="ssc", field_name="pos")
+    move_all: bool = True
+
+    def __post_init__(self) -> None:
+        TransformBase.__init__(self, move_all=self.move_all)
         self.description = "given"
+        mode = self.mode
         if isinstance(mode, str):
             if mode not in ("ssc", "com", "pot","hyb"):
                 raise ValueError(f"Invalid mode: {mode}. Expected one of ['ssc', 'com', 'pot', 'hyb'].")
             self.description = mode
-            mode = CenPos(mode=mode)        # type: ignore[arg-type]
+            mode = CenPos(mode) # type: ignore
         elif not (callable(mode) or isinstance(mode, (np.ndarray, SimArray))):
             raise ValueError(f"Invalid mode type: {type(mode)}. Expected str, callable, or array.")
         self.mode = mode
 
-    def instance_signature(self):
-        return (self.__class__.__name__, )
-
 
     def build_handle(self, sim, target, params = None):
-        cen = params["mode"]
+        cen = params.mode
         return GenericTranslation(target, "pos", -cen, description=f"PosToCenter_{self.description}")
 
 
+@TransformBase.dataclass
 class ShiftVelTo(TransformBase[GenericTranslation]):
+    mode: Param[SimNpArray] = Param(default="com", field_name="vel")
+    move_all: bool = True
 
-    dynamic_param_specs = {"mode": "vel"}
-    def __init__(self,mode: Literal["com"] | SimNpArrayFunc | SimNpArray = "com", move_all: bool = True):
-        super().__init__(move_all=move_all)
+    def __post_init__(self) -> None:
+        TransformBase.__init__(self, move_all=self.move_all)
         self.description = "given"
+        mode = self.mode
         if isinstance(mode, str):
             if mode != "com":
                 raise ValueError(f"Invalid mode: {mode}. Expected 'com'.")
             self.description = mode
-            mode = CenVel(mode=mode)        # type: ignore[arg-type]
+            mode = cast("Any", CenVel)(mode)
         elif not (callable(mode) or isinstance(mode, (np.ndarray, SimArray))):
             raise ValueError(f"Invalid mode type: {type(mode)}. Expected str, callable, or array.")
         self.mode = mode
 
-    def instance_signature(self):
-        return (self.__class__.__name__, )
-
     def build_handle(self, sim, target, params = None):
-        vcen = params["mode"]
+        vcen = params.mode
         return GenericTranslation(target, "vel", -vcen, description=f"VelToCenter_{self.description}")

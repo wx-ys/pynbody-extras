@@ -5,38 +5,19 @@ import numpy as np
 from pynbody.analysis.angmom import calc_faceon_matrix
 from pynbody.transformation import Rotation
 
-from pynbodyext.calculate import TransformBase
-from pynbodyext.properties.generic import AngMomVec
-from pynbodyext.util._type import SimCallable
+from pynbodyext.calculate import Param, TransformBase
 
-__all__ = ["AlignAngMomVec", "AlignVec"]
+__all__ = ["AlignVec"]
 
-
+@TransformBase.dataclass
 class AlignVec(TransformBase[Rotation]):
     """
     Generic transformation to align a vector (e.g., angular momentum, velocity) with the z-axis.
     Subclasses must implement `get_vec(self, sim: SimSnap) -> np.ndarray`.
     """
-    dynamic_param_specs = {"vector": None}
-    def __init__(self, vector: np.ndarray | SimCallable, up: np.ndarray | None = None, move_all: bool = True):
-        """
-        Parameters
-        ----------
-        vector : array_like or callable
-            The vector to align with the z-axis. If callable, it will be called with the simulation snapshot to get the vector.
-        up : array_like or None, optional
-            Desired 'up' vector (direction for positive y-axis after rotation). If `None`,
-            a safe `up` will be computed inside `calculate` based on the snapshot's angular
-            momentum vector.
-        move_all : bool, optional
-            Whether to apply the transformation to all particles in the ancestor snapshot.
-        """
-        super().__init__(move_all=move_all)
-        self.vector = vector
-        self.up = up
-
-    def instance_signature(self):
-        return (self.__class__.__name__, self.up)
+    vector: Param[np.ndarray]
+    up: np.ndarray | None = None
+    move_all: bool = True
 
     def build_handle(
         self,
@@ -96,7 +77,3 @@ class AlignVec(TransformBase[Rotation]):
             upn = axes[np.argmin(dots)]
 
         return upn
-
-
-AlignAngMomVec = AlignVec(AngMomVec())
-""" Aligns the angular momentum vector with the z-axis."""

@@ -1,7 +1,6 @@
 
 
 import warnings
-from collections.abc import Callable
 from typing import Any, Literal
 
 import numpy as np
@@ -10,7 +9,7 @@ from pynbody import transformation, units
 from pynbody.array import SimArray
 from pynbody.snapshot import SimSnap
 
-from pynbodyext.calculate import TransformBase
+from pynbodyext.calculate import Param, TransformBase
 from pynbodyext.log import logger
 
 __all__ = ["WrapBox"]
@@ -295,40 +294,23 @@ class WrapBox(TransformBase[WrapTransformation]):
     """Wraps particle positions to lie within a periodic box.
 
     This transform can be applied temporarily using a `with` statement.
+    Parameters
+    ----------
+    boxsize : float or pynbody.units.UnitBase, optional
+        The size of the periodic box. If not specified, the box size is taken
+        from the snapshot's properties.
+    convention : str, optional
+        The wrapping convention.
+        - 'center': wraps particles to the range [-boxsize/2, boxsize/2). (Default)
+        - 'upper': wraps particles to the range [0, boxsize).
+        - 'minirange': per axis, chooses between 'center' and 'upper'
+            to minimise the coordinate range after wrapping.
+    move_all: bool, default True
+        Whether to perform the wrapping on ancestors (all particles).
     """
-    dynamic_param_specs = {"boxsize": "pos"}
-    def __init__(
-        self,
-        boxsize: float | units.UnitBase | None | Callable = None,
-        convention: Literal["center", "upper", "minirange"]="minirange",
-        move_all: bool = True):
-        """
-
-        Parameters
-        ----------
-        boxsize : float or pynbody.units.UnitBase, optional
-            The size of the periodic box. If not specified, the box size is taken
-            from the snapshot's properties.
-        convention : str, optional
-            The wrapping convention.
-            - 'center': wraps particles to the range [-boxsize/2, boxsize/2). (Default)
-            - 'upper': wraps particles to the range [0, boxsize).
-            - 'minirange': per axis, chooses between 'center' and 'upper'
-              to minimise the coordinate range after wrapping.
-        move_all: bool, default True
-            Whether to perform the wrapping on ancestors (all particles).
-        """
-        if convention not in ("center", "upper", "minirange"):
-            raise ValueError(
-                "Unknown wrapping convention, must be 'center', 'upper' or 'minirange'"
-            )
-        super().__init__(move_all=move_all)
-        self.boxsize = boxsize
-        self.convention = convention
-
-    def instance_signature(self):
-        return (self.__class__.__name__, self.boxsize,self.convention)
-
+    boxsize: Param[float | units.UnitBase | None] = Param(default=None, field_name="pos")
+    convention: Literal["center", "upper", "minirange"] = "minirange"
+    move_all: bool = True
 
     def build_handle(self, sim, target, params = None):
         boxsize = params["boxsize"]
