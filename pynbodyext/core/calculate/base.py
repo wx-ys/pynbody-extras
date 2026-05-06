@@ -1007,6 +1007,17 @@ class BoundCalculator(CalculatorBase[TRaw, TPublic], Generic[TBase, TRaw, TPubli
                         raise TypeError("transform nodes must provide cleanup()")
                     cleanup(ctx, transform_result.handle)
 
+    def filter(self, filt: FilterBase) -> BoundCalculator[TBase, TRaw, TPublic]:
+        return self.with_filter(filt)
+
+    def transform(
+        self,
+        transform: TransformBase[Any],
+        *,
+        revert: bool = True,
+    ) -> BoundCalculator[TBase, TRaw, TPublic]:
+        return self.with_transformation(transform, revert=revert)
+
     def with_filter(self, filt: FilterBase) -> BoundCalculator[TBase, TRaw, TPublic]:
         """Compose another filter into this bound calculator."""
         return BoundCalculator(
