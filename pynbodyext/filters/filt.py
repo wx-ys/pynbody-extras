@@ -1,5 +1,5 @@
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from typing import Any, TypeAlias
 
 import numpy as np
@@ -8,7 +8,7 @@ from pynbody.family import Family, get_family
 from pynbody.snapshot import SimSnap
 from pynbody.units import UnitBase
 
-from pynbodyext.core.calculate import FilterBase
+from pynbodyext.core.calculate import FilterBase, Param
 
 from .pynfilt import (
     _Annulus,
@@ -42,6 +42,7 @@ class VolumeFilter(FilterBase):
         raise NotImplementedError
 
 
+@VolumeFilter.dataclass
 class Sphere(VolumeFilter,_Sphere):
     """Spherical selection filter.
 
@@ -53,23 +54,11 @@ class Sphere(VolumeFilter,_Sphere):
     cen : array-like, callable, or CalculatorBase, default: (0, 0, 0)
         Sphere center in position units.
     """
-    dynamic_param_specs = {"radius": "pos", "cen": "pos"}
-    def __init__(self,
-                radius: ValueLike | ValueLikeFunc,
-                cen: ArrayLike | ArrayLikeFunc = (0, 0, 0)):
-        super().__init__()
-        self.radius = radius
-        self.cen = cen
+    radius: Param[ValueLike] = Param(field_name="pos")
+    cen: Param[ArrayLike] = Param(default=(0, 0, 0), field_name="pos")
 
-    def instance_signature(self) -> tuple[Any, ...]:
-        return ("Sphere", )
-
-    def prepare_params(self, sim: SimSnap, values: Mapping[str, Any]) -> tuple[float, Any]:
-        return values["radius"], values["cen"]
-
-    def build_mask(self, sim: SimSnap, params: tuple[float, Any]) -> Any:
-        radius, cen = params
-        return _Sphere(radius, cen)(sim)
+    def calculate(self, sim, params = None):
+        return _Sphere(params.radius, params.cen)(sim)
 
     def volume(self, sim: SimSnap | None = None, *, options: Any | None = None) -> float | UnitBase:
         radius = self.resolve_param_for_sim(
@@ -81,25 +70,25 @@ class Sphere(VolumeFilter,_Sphere):
         return 4.0 / 3.0 * np.pi * radius**3
 
 
+@FilterBase.dataclass
 class FamilyFilter(FilterBase, _FamilyFilter):
+    """Family selection filter."""
 
-    dynamic_param_specs = {"family": None}
-    def __init__(self, family : Family | str | FamilyLikeFunc):
-        super().__init__()
-        if callable(family):
-            self.family = family
-        else:
-            self.family = get_family(family, False)
+    family: Param[FamilyLike]
 
-    def instance_signature(self):
-        return (self.__class__.__name__, )
+    def __post_init__(self) -> None:
+        if isinstance(self.family, str):
+            self.family = get_family(self.family, False)
+        if isinstance(self.family, Family):
+            return
+        if callable(self.family):
+            return
+        raise ValueError(f"Invalid family parameter: {self.family}. Expected a Family instance, string, or callable returning a Family.")
 
-    def prepare_params(self, sim: SimSnap, values: Mapping[str, Any]) -> Family:
-        return get_family(values["family"], False)
-
-    def build_mask(self, sim: SimSnap, params: Family) -> Any:
-        return _FamilyFilter(params)(sim)
-
+    def calculate(self, sim: SimSnap, params: Any = None) -> Any:
+        family = get_family(params.family, False)
+        return _FamilyFilter(family)(sim)
+@VolumeFilter.dataclass
 class Cuboid(VolumeFilter, _Cuboid):
     """Cuboid selection filter.
 
@@ -109,38 +98,15 @@ class Cuboid(VolumeFilter, _Cuboid):
         Coordinates of the cuboid corners.  Calculator-valued coordinates are
         evaluated in the current scope before the mask is built.
     """
-    dynamic_param_specs = {"x1": "pos", "y1": "pos", "z1": "pos", "x2": "pos", "y2": "pos", "z2": "pos"}
+    x1: Param[ValueLike] = Param(field_name="pos")
+    y1: Param[ValueLike] = Param(default=None, field_name="pos")
+    z1: Param[ValueLike] = Param(default=None, field_name="pos")
+    x2: Param[ValueLike] = Param(default=None, field_name="pos")
+    y2: Param[ValueLike] = Param(default=None, field_name="pos")
+    z2: Param[ValueLike] = Param(default=None, field_name="pos")
 
-    def __init__(self, x1: ValueLike | ValueLikeFunc, y1: ValueLike | ValueLikeFunc | None = None,
-                 z1: ValueLike | ValueLikeFunc | None = None, x2: ValueLike | ValueLikeFunc | None = None,
-                 y2: ValueLike | ValueLikeFunc | None = None, z2: ValueLike | ValueLikeFunc | None = None):
-        """Create a cuboid filter.
-
-        If any of the cube coordinates ``x1``, ``y1``, ``z1``, ``x2``, ``y2``, ``z2`` are not specified they are
-        determined as ``y1=x1``; ``z1=x1``; ``x2=-x1``; ``y2=-y1``; ``z2=-z1``.
-        """
-        super().__init__()
-        if y1 is None:
-            y1 = x1
-        if z1 is None:
-            z1 = x1
-        self.x1, self.y1, self.z1, self.x2, self.y2, self.z2 = x1, y1, z1, x2, y2, z2
-
-    def instance_signature(self):
-        return (self.__class__.__name__, )
-
-    def prepare_params(self, sim: SimSnap, values: Mapping[str, Any]) -> tuple[Any, Any, Any, Any, Any, Any]:
-        return (
-            values["x1"],
-            values["y1"],
-            values["z1"],
-            values["x2"],
-            values["y2"],
-            values["z2"],
-        )
-
-    def build_mask(self, sim: SimSnap, params: tuple[Any, Any, Any, Any, Any, Any]) -> Any:
-        return _Cuboid(*params)(sim)
+    def calculate(self, sim, params = None):
+        return _Cuboid(params.x1, params.y1, params.z1, params.x2, params.y2, params.z2)(sim)
 
     def volume(self, sim: SimSnap | None = None, *, options: Any | None = None) -> float | UnitBase:
         x1 = self.resolve_param_for_sim(sim, "x1", options=options, coerce_unit_string=True)
@@ -155,26 +121,16 @@ class Cuboid(VolumeFilter, _Cuboid):
         l2 = (y2 - y1) if y2 is not None else 2 * y1
         l3 = (z2 - z1) if z2 is not None else 2 * z1
         return l1 * l2 * l3
-
+@VolumeFilter.dataclass
 class Disc(VolumeFilter, _Disc):
+    """ Disc selection filter."""
+    radius: Param[ValueLike] = Param(field_name="pos")
+    height: Param[ValueLike] = Param(field_name="pos")
+    cen: Param[ArrayLike] = Param(default=(0, 0, 0), field_name="pos")
 
-    dynamic_param_specs = {"radius": "pos", "height": "pos", "cen": "pos"}
-    def __init__(self, radius: ValueLike | ValueLikeFunc, height: ValueLike | ValueLikeFunc,
-                 cen: ArrayLike | ArrayLikeFunc = (0, 0, 0)):
-        super().__init__()
-        self.radius = radius
-        self.height = height
-        self.cen = cen
 
-    def instance_signature(self):
-        return (self.__class__.__name__,)
-
-    def prepare_params(self, sim: SimSnap, values: Mapping[str, Any]) -> tuple[Any, Any, Any]:
-        return values["radius"], values["height"], values["cen"]
-
-    def build_mask(self, sim: SimSnap, params: tuple[Any, Any, Any]) -> Any:
-        radius, height, cen = params
-        return _Disc(radius, height, cen)(sim)
+    def calculate(self, sim, params = None):
+        return _Disc(params.radius, params.height, params.cen)(sim)
 
     def volume(self, sim: SimSnap | None = None, *, options: Any | None = None) -> float | UnitBase:
         radius = self.resolve_param_for_sim(
@@ -192,79 +148,43 @@ class Disc(VolumeFilter, _Disc):
         return 2 * np.pi * radius**2 * height
 
 
+@FilterBase.dataclass
 class BandPass(FilterBase, _BandPass):
-    dynamic_param_specs = {"min": None, "max": None}
+    prop: str
+    min: Param[ValueLike]
+    max: Param[ValueLike]
 
-    def __init__(self, prop: str, min: ValueLike | ValueLikeFunc, max: ValueLike | ValueLikeFunc):
-        super().__init__()
-        self.prop = prop
-        self.min = min
-        self.max = max
+    def calculate(self, sim: SimSnap, params: Any = None) -> Any:
+        return _BandPass(params.prop, params.min, params.max)(sim)
 
-    def instance_signature(self) -> tuple[Any, ...]:
-        return ("BandPass", self.prop, )
-
-    def prepare_params(self, sim: SimSnap, values: Mapping[str, Any]) -> tuple[Any, Any]:
-        return values["min"], values["max"]
-
-    def build_mask(self, sim: SimSnap, params: tuple[Any, Any]) -> Any:
-        lower, upper = params
-        return _BandPass(self.prop, lower, upper)(sim)
-
+@FilterBase.dataclass
 class HighPass(FilterBase, _HighPass):
-    dynamic_param_specs = {"min": None}
+    prop: str
+    min: Param[ValueLike]
 
-    def __init__(self, prop: str, min: ValueLike | ValueLikeFunc):
-        super().__init__()
-        self.prop = prop
-        self.min = min
+    def calculate(self, sim: SimSnap, params: Any = None) -> Any:
+        return _HighPass(params.prop, params.min)(sim)
 
-    def instance_signature(self):
-        return (self.__class__.__name__, self.prop)
-
-
-    def prepare_params(self, sim: SimSnap, values: Mapping[str, Any]) -> Any:
-        return values["min"]
-
-    def build_mask(self, sim: SimSnap, params: Any) -> Any:
-        return _HighPass(self.prop, params)(sim)
-
+@FilterBase.dataclass
 class LowPass(FilterBase, _LowPass):
-    dynamic_param_specs = {"max": None}
 
-    def __init__(self, prop: str, max: ValueLike | ValueLikeFunc):
-        super().__init__()
-        self.prop = prop
-        self.max = max
+    prop: str
+    max: Param[ValueLike]
 
-    def instance_signature(self):
-        return (self.__class__.__name__, self.prop)
+    def calculate(self, sim: SimSnap, params: Any = None) -> Any:
+        return _LowPass(params.prop, params.max)(sim)
 
-    def prepare_params(self, sim: SimSnap, values: Mapping[str, Any]) -> Any:
-        return values["max"]
-
-    def build_mask(self, sim: SimSnap, params: Any) -> Any:
-        return _LowPass(self.prop, params)(sim)
-
-
+@VolumeFilter.dataclass
 class Annulus(VolumeFilter, _Annulus):
+
+    r1: Param[ValueLike] = Param(field_name="pos")
+    r2: Param[ValueLike] = Param(field_name="pos")
+    cen: Param[ArrayLike] = Param(default=(0, 0, 0), field_name="pos")
+
     dynamic_param_specs = {"r1": "pos", "r2": "pos", "cen": "pos"}
 
-    def __init__(self, r1: ValueLike | ValueLikeFunc, r2: ValueLike | ValueLikeFunc, cen: ArrayLike | ArrayLikeFunc = (0, 0, 0)):
-        super().__init__()
-        self.r1 = r1
-        self.r2 = r2
-        self.cen = cen
-
-    def instance_signature(self):
-        return (self.__class__.__name__, )
-
-    def prepare_params(self, sim: SimSnap, values: Mapping[str, Any]) -> tuple[Any, Any, Any]:
-        return values["r1"], values["r2"], values["cen"]
-
-    def build_mask(self, sim: SimSnap, params: tuple[Any, Any, Any]) -> Any:
-        r1, r2, cen = params
-        return _Annulus(r1, r2, cen)(sim)
+    def calculate(self, sim, params = None):
+        return _Annulus(params.r1, params.r2, params.cen)(sim)
 
     def volume(self, sim: SimSnap | None = None, *, options: Any | None = None) -> float | UnitBase:
         r1 = self.resolve_param_for_sim(
@@ -281,29 +201,17 @@ class Annulus(VolumeFilter, _Annulus):
         )
         return 4.0 / 3.0 * np.pi * (r2**3 - r1**3)
 
-
+@VolumeFilter.dataclass
 class SolarNeighborhood(VolumeFilter, _SolarNeighborhood):
 
-    dynamic_param_specs = {"r1": "pos", "r2": "pos", "height": "pos", "cen": "pos"}
-    def __init__(self, r1: ValueLike | ValueLikeFunc = "5 kpc",
-                 r2: ValueLike | ValueLikeFunc = "10 kpc",
-                 height: ValueLike | ValueLikeFunc = "2 kpc",
-                 cen: ArrayLike | ArrayLikeFunc = (0, 0, 0)):
-        super().__init__()
-        self.r1 = r1
-        self.r2 = r2
-        self.height = height
-        self.cen = cen
+    r1: Param[ValueLike] = Param(default="5 kpc", field_name="pos")
+    r2: Param[ValueLike] = Param(default="10 kpc", field_name="pos")
+    height: Param[ValueLike] = Param(default="2 kpc", field_name="pos")
+    cen: Param[ArrayLike] = Param(default=(0, 0, 0), field_name="pos")
 
-    def instance_signature(self):
-        return (self.__class__.__name__, )
 
-    def prepare_params(self, sim: SimSnap, values: Mapping[str, Any]) -> tuple[Any, Any, Any, Any]:
-        return values["r1"], values["r2"], values["height"], values["cen"]
-
-    def build_mask(self, sim: SimSnap, params: tuple[Any, Any, Any, Any]) -> Any:
-        r1, r2, height, cen = params
-        return _SolarNeighborhood(r1, r2, height, cen)(sim)
+    def calculate(self, sim, params = None):
+        return _SolarNeighborhood(params.r1, params.r2, params.height, params.cen)(sim)
 
     def volume(self, sim: SimSnap | None = None, *, options: Any | None = None) -> float | UnitBase:
         r1 = self.resolve_param_for_sim(
