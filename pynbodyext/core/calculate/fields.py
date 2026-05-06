@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping as ABCMapping
+    from collections.abc import Callable
     DynamicParam: TypeAlias = T | Callable[[Any], T] | CalculatorBase[Any, T]
 else:
     class DynamicParam(Generic[T]):
@@ -45,9 +45,35 @@ class ParamSpec:
 
 @dataclass(frozen=True, slots=True)
 class ParamView:
-    """Attribute and item access wrapper for resolved dynamic parameters."""
+    """Attribute and item access wrapper for resolved calculator parameters."""
 
-    data: dict[str, Any]
+    dynamic: dict[str, Any]
+    static: dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(init=False)
+
+    def __post_init__(self) -> None:
+        dynamic = dict(self.dynamic)
+        static = dict(self.static)
+        object.__setattr__(self, "dynamic", dynamic)
+        object.__setattr__(self, "static", static)
+        object.__setattr__(self, "data", {**static, **dynamic})
+
+    @classmethod
+    def from_calculator(cls, instance: Any, dynamic_values: dict[str, Any]) -> ParamView:
+        """Build a parameter view from declarative fields and resolved values."""
+        dynamic: dict[str, Any] = {}
+        static: dict[str, Any] = {}
+        specs = collect_param_specs(type(instance))
+
+        if not specs:
+            return cls(dict(dynamic_values))
+
+        for spec in specs:
+            if spec.kind == "dynamic":
+                dynamic[spec.name] = dynamic_values[spec.name]
+            else:
+                static[spec.name] = getattr(instance, spec.name)
+        return cls(dynamic=dynamic, static=static)
 
     def __getattr__(self, name: str) -> Any:
         try:
@@ -68,7 +94,7 @@ class ParamView:
         return self.data.get(name, default)
 
 
-def _merge_metadata(spec: ParamSpec) -> ABCMapping[str, Any]:
+def _merge_metadata(spec: ParamSpec) -> dict[str, Any]:
     return {_PARAM_METADATA_KEY: spec}
 
 
@@ -111,6 +137,7 @@ def collect_param_specs(cls: type[Any]) -> tuple[ParamSpec, ...]:
     for item in fields(cls):
         raw = item.metadata.get(_PARAM_METADATA_KEY)
         if raw is None:
+            specs.append(ParamSpec(name=item.name, kind="static"))
             continue
         specs.append(
             ParamSpec(
@@ -122,6 +149,7 @@ def collect_param_specs(cls: type[Any]) -> tuple[ParamSpec, ...]:
                 signature=raw.signature,
             )
         )
+
     return tuple(specs)
 
 

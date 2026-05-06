@@ -108,7 +108,6 @@ import numpy.typing as npt
 from pynbody.filt import Filter as PynbodyFilter
 
 from .context import ExecutionContext, FilterResult, NodeInput, resolve_value
-from .declarative import dataclass_calc
 from .enums import BuiltinKinds
 from .template import RuntimeCalculatorBase
 
@@ -131,7 +130,6 @@ class FilterBase(RuntimeCalculatorBase[FilterResult, MaskArray],PynbodyFilter, A
     """
 
     node_kind = BuiltinKinds.FILTER
-    dataclass = staticmethod(dataclass_calc)
 
     __eq__ = object.__eq__
     __hash__ = object.__hash__

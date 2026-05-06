@@ -117,7 +117,18 @@ import hashlib
 import json
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar, TypeVarTuple, Unpack, cast, overload
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Generic,
+    TypeVar,
+    TypeVarTuple,
+    Unpack,
+    cast,
+    dataclass_transform,
+    overload,
+)
 
 import numpy as np
 from pynbody import units
@@ -149,6 +160,7 @@ from .enums import (
     RecordPolicy,
     normalize_kind,
 )
+from .fields import dynamic, static
 from .params import (
     DynamicParamSpec,
     RuntimeValueResolver,
@@ -161,7 +173,7 @@ from .params import (
 from .scopes import ScopeSpec
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from pynbodyext.util._type import SingleElementArray, UnitLike
 
@@ -173,6 +185,8 @@ T = TypeVar("T")
 U = TypeVar("U")
 Ts = TypeVarTuple("Ts")
 Us = TypeVarTuple("Us")
+TBase = TypeVar("TBase", bound="CalculatorBase[Any, Any]")
+TCalc = TypeVar("TCalc", bound="CalculatorBase[Any, Any]")
 
 TRaw = TypeVar("TRaw")
 TPublic = TypeVar("TPublic")
@@ -223,6 +237,34 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
     # Mapping of dynamic parameter names to unit metadata used for runtime resolution.
     # See :meth:`resolve_dynamic_param` and :mod:`.params` for details.
     dynamic_param_specs: ClassVar[Mapping[str, DynamicParamSpec | str | None]] = {}
+
+    @overload
+    @classmethod
+    def dataclass(cls, target: type[TCalc], **dataclass_kwargs: Any) -> type[TCalc]: ...
+
+    @overload
+    @classmethod
+    def dataclass(cls, target: None = None, **dataclass_kwargs: Any) -> Callable[[type[TCalc]], type[TCalc]]: ...
+
+    @classmethod
+    @dataclass_transform(field_specifiers=(dynamic, static))
+    def dataclass(
+        cls,
+        target: type[TCalc] | None = None,
+        **dataclass_kwargs: Any,
+    ) -> type[TCalc] | Callable[[type[TCalc]], type[TCalc]]:
+        """Decorate an explicit subclass with dataclass-style calculator fields."""
+        from .declarative import dataclass_calc
+
+        def wrap(raw_cls: type[TCalc]) -> type[TCalc]:
+            if not issubclass(raw_cls, cls):
+                raise TypeError(f"{cls.__name__}.dataclass can only decorate {cls.__name__} subclasses.")
+            decorator: Any = dataclass_calc
+            return decorator(raw_cls, **dataclass_kwargs)
+
+        if target is None:
+            return wrap
+        return wrap(target)
 
     def __init__(
         self,
@@ -647,11 +689,11 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         """Return a copy with a different result recording policy."""
         return self._clone(record_policy=policy)
 
-    def with_filter(self, filt: FilterBase) -> BoundCalculator[TRaw, TPublic]:
+    def with_filter(self, filt: FilterBase) -> BoundCalculator[Any, TRaw, TPublic]:
         """Return a calculator evaluated on the subset selected by ``filt``."""
         return BoundCalculator(base=self, scope=self.scope.with_filter(filt))
 
-    def filter(self, filt: FilterBase) -> BoundCalculator[TRaw, TPublic]:
+    def filter(self, filt: FilterBase) -> BoundCalculator[Any, TRaw, TPublic]:
         """Alias for :meth:`with_filter`."""
         return self.with_filter(filt)
 
@@ -660,7 +702,7 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         transform: TransformBase[Any],
         *,
         revert: bool = True,
-    ) -> BoundCalculator[TRaw, TPublic]:
+    ) -> BoundCalculator[Any, TRaw, TPublic]:
         """Return a calculator evaluated after a pre-transform."""
         return BoundCalculator(base=self, scope=self.scope.with_transform(transform, revert=revert))
 
@@ -669,7 +711,7 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         transform: TransformBase[Any],
         *,
         revert: bool = True,
-    ) -> BoundCalculator[TRaw, TPublic]:
+    ) -> BoundCalculator[Any, TRaw, TPublic]:
         """Return a calculator evaluated after applying ``transform``."""
         return self.with_transformation(transform, revert=revert)
 
@@ -829,12 +871,14 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         return CombinedCalculator(self, other)
 
 
-class BoundCalculator(CalculatorBase[TRaw, TPublic]):
+class BoundCalculator(CalculatorBase[TRaw, TPublic], Generic[TBase, TRaw, TPublic]):
     """Calculator wrapper that applies a scope before running a base node.
 
     ``BoundCalculator`` is created by methods such as
     :meth:`CalculatorBase.filter`, :meth:`CalculatorBase.transform`, and
-    :meth:`Scope.apply`.  Users normally do not instantiate it directly.
+    :meth:`Scope.apply`.  The concrete wrapped calculator type is preserved on
+    :attr:`base`, so scoped calculators can still expose original dataclass
+    fields through ``scoped.base`` in static analysis.
     """
 
     node_kind = BuiltinKinds.CALCULATOR
@@ -842,7 +886,7 @@ class BoundCalculator(CalculatorBase[TRaw, TPublic]):
     def __init__(
         self,
         *,
-        base: CalculatorBase[TRaw, TPublic],
+        base: TBase,
         pre_filter: FilterBase | None = None,
         pre_transform: TransformBase[Any] | None = None,
         revert_transform: bool = True,
@@ -963,7 +1007,7 @@ class BoundCalculator(CalculatorBase[TRaw, TPublic]):
                         raise TypeError("transform nodes must provide cleanup()")
                     cleanup(ctx, transform_result.handle)
 
-    def with_filter(self, filt: FilterBase) -> BoundCalculator[TRaw, TPublic]:
+    def with_filter(self, filt: FilterBase) -> BoundCalculator[TBase, TRaw, TPublic]:
         """Compose another filter into this bound calculator."""
         return BoundCalculator(
             base=self.base,
@@ -978,7 +1022,7 @@ class BoundCalculator(CalculatorBase[TRaw, TPublic]):
         transform: TransformBase[Any],
         *,
         revert: bool = True,
-    ) -> BoundCalculator[TRaw, TPublic]:
+    ) -> BoundCalculator[TBase, TRaw, TPublic]:
         """Compose another transform into this bound calculator."""
         return BoundCalculator(
             base=self.base,
@@ -987,6 +1031,7 @@ class BoundCalculator(CalculatorBase[TRaw, TPublic]):
             record_policy=self.record_policy,
             default_options=self.default_options,
         )
+
     def cleanup(self, ctx: ExecutionContext, handle: Any) -> None:
         """Delegate transform cleanup to the wrapped base calculator when available."""
         cleanup = getattr(self.base, "cleanup", None)

@@ -106,7 +106,6 @@ from __future__ import annotations
 from abc import ABC
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 
-from .declarative import dataclass_calc
 from .enums import BuiltinKinds
 from .template import RuntimeCalculatorBase
 
@@ -131,15 +130,6 @@ class PropertyBase(RuntimeCalculatorBase[TProp, TProp], Generic[TProp], ABC):
     """
 
     node_kind = BuiltinKinds.PROPERTY
-    dataclass = staticmethod(dataclass_calc)
-
-    def prepare_params(self, sim: SimSnap, values: Mapping[str, Any]) -> Any:
-        """Convert resolved dynamic values into calculate params.
-
-        Subclasses with dynamic parameters may override this to normalize the
-        resolved mapping into a tuple, dataclass, or other compact object.
-        """
-        return super().prepare_params(sim, dict(values))
 
     def calculate(self, sim: SimSnap, params: Any = None) -> TProp:
         """Calculate a value from the active simulation view.

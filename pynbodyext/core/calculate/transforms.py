@@ -133,7 +133,6 @@ from pynbody.snapshot import SimSnap
 from pynbody.transformation import Transformation
 
 from .context import ExecutionContext, FilterResult, NodeInput, TransformResult
-from .declarative import dataclass_calc
 from .display import display_value
 from .enums import BuiltinKinds, CachePolicy, EffectPolicy, RevertPolicy, normalize_revert_policy
 from .runtime import CalcRuntime, TransformRuntime
@@ -173,7 +172,6 @@ class TransformBase(
     cacheable = False
     parallel_safe = False
     cache_policy = CachePolicy.NONE
-    dataclass = staticmethod(dataclass_calc)
 
     def __init__(
         self,
