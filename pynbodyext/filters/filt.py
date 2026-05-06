@@ -1,5 +1,4 @@
 
-from collections.abc import Callable
 from typing import Any, TypeAlias
 
 import numpy as np
@@ -25,13 +24,10 @@ from .pynfilt import (
 __all__ = ["Sphere","FamilyFilter","Cuboid","Disc","Annulus","BandPass","HighPass","LowPass","SolarNeighborhood"]
 
 ValueLike: TypeAlias = float | str | UnitBase
-ValueLikeFunc: TypeAlias = Callable[[SimSnap], ValueLike]
 
 ArrayLike: TypeAlias = tuple[float, float, float] | SimArray | np.ndarray
-ArrayLikeFunc: TypeAlias = Callable[[SimSnap], ArrayLike]
 
 FamilyLike: TypeAlias = Family | str
-FamilyLikeFunc: TypeAlias = Callable[[SimSnap], FamilyLike]
 
 
 class VolumeFilter(FilterBase):
