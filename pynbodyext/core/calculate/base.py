@@ -160,7 +160,7 @@ from .enums import (
     RecordPolicy,
     normalize_kind,
 )
-from .fields import dynamic, static
+from .fields import Param
 from .params import (
     DynamicParamSpec,
     RuntimeValueResolver,
@@ -247,7 +247,7 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
     def dataclass(cls, target: None = None, **dataclass_kwargs: Any) -> Callable[[type[TCalc]], type[TCalc]]: ...
 
     @classmethod
-    @dataclass_transform(field_specifiers=(dynamic, static))
+    @dataclass_transform(field_specifiers=(Param,))
     def dataclass(
         cls,
         target: type[TCalc] | None = None,

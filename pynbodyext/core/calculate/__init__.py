@@ -202,7 +202,7 @@ from .enums import (
 )
 from .exceptions import CalculatorError, CycleError
 from .expr import ConstantProperty, LambdaProperty, OpProperty
-from .fields import DynamicParam, ParamSpec, ParamView, collect_param_specs, dynamic, static
+from .fields import Param, ParamSpec, ParamView, collect_param_specs
 from .filters import AndFilter, FilterBase, NotFilter, OrFilter
 from .params import DynamicParamSpec, dynamic_value_dependencies, dynamic_value_signature, resolve_dynamic_value
 from .perf import PerfCollector
@@ -257,11 +257,9 @@ __all__ = [
     "Pipeline",
     "PropertyBase",
     "dataclass_calc",
-    "DynamicParam",
     "ParamSpec",
     "ParamView",
-    "dynamic",
-    "static",
+    "Param",
     "collect_param_specs",
     "ConstantProperty",
     "LambdaProperty",

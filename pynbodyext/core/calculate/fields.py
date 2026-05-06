@@ -3,21 +3,126 @@
 from __future__ import annotations
 
 from dataclasses import MISSING, dataclass, field, fields, is_dataclass
-from typing import TYPE_CHECKING, Any, Generic, Literal, TypeAlias, TypeVar
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Generic,
+    Literal,
+    TypeAlias,
+    TypeVar,
+    overload,
+)
 
 from .params import DynamicParamSpec, dynamic_value_dependencies, dynamic_value_signature
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .base import CalculatorBase
 
 T = TypeVar("T")
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     DynamicParam: TypeAlias = T | Callable[[Any], T] | CalculatorBase[Any, T]
-else:
-    class DynamicParam(Generic[T]):
-        """Runtime marker used only for subscriptable type annotations."""
+
+
+class Param(Generic[T]):
+    """Unified field specifier for declarative calculator parameters.
+
+    Parameters
+    ----------
+    default : Any, optional
+        Default value for the parameter. If not provided, the parameter is required.
+    dynamic : bool, default: True
+        Whether the parameter is dynamic (resolved at runtime) or static (fixed at construction).
+    field_name : str, optional
+        Optional name of the simulation field associated with this parameter, used for automatic unit handling.
+    target_units : Any, optional
+        Optional target units for the parameter value, used for automatic unit handling. If not provided, no conversion is applied.
+    optional_units : bool, default: True
+        Whether units are optional for this parameter. If False, a unit-aware value is required.
+    signature : bool, default: True
+        Whether this parameter should be included in the calculator's signature for caching and hashing purposes.
+    """
+
+    @overload
+    def __new__(
+        cls,
+        default: DynamicParam[T],
+        *,
+        dynamic: Literal[True] = True,
+        field_name: str | None = None,
+        target_units: Any | None = None,
+        optional_units: bool = True,
+        signature: bool = True,
+        init: bool = True,
+        kw_only: bool = False,
+    ) -> Any: ...
+
+    @overload
+    def __new__(
+        cls,
+        *,
+        dynamic: Literal[True] = True,
+        field_name: str | None = None,
+        target_units: Any | None = None,
+        optional_units: bool = True,
+        signature: bool = True,
+        init: bool = True,
+        kw_only: bool = False,
+    ) -> Any: ...
+
+    @overload
+    def __new__(
+        cls,
+        default: T,
+        *,
+        dynamic: Literal[False],
+        signature: bool = True,
+        init: bool = True,
+        kw_only: bool = False,
+    ) -> Any: ...
+
+    @overload
+    def __new__(
+        cls,
+        *,
+        dynamic: Literal[False],
+        signature: bool = True,
+        init: bool = True,
+        kw_only: bool = False,
+    ) -> Any: ...
+
+    def __new__(
+        cls,
+        default: Any = MISSING,
+        *,
+        dynamic: bool = True,
+        field_name: str | None = None,
+        target_units: Any | None = None,
+        optional_units: bool = True,
+        signature: bool = True,
+        init: bool = True,
+        kw_only: bool = False,
+    ) -> Any:
+        kind: Literal["static", "dynamic"] = "dynamic" if dynamic else "static"
+        spec = ParamSpec(
+            name="",
+            kind=kind,
+            field_name=field_name,
+            target_units=target_units,
+            optional_units=optional_units,
+            signature=signature,
+        )
+
+        kwargs: dict[str, Any] = {
+            "metadata": _merge_metadata(spec),
+            "init": init,
+            "kw_only": kw_only,
+        }
+        if default is not MISSING:
+            kwargs["default"] = default
+        return field(**kwargs)
 
 
 _PARAM_METADATA_KEY = "pynbodyext_calculate_param"
@@ -96,36 +201,6 @@ class ParamView:
 
 def _merge_metadata(spec: ParamSpec) -> dict[str, Any]:
     return {_PARAM_METADATA_KEY: spec}
-
-
-def dynamic(
-    default: Any = MISSING,
-    *,
-    field_name: str | None = None,
-    target_units: Any | None = None,
-    optional_units: bool = True,
-    signature: bool = True,
-) -> Any:
-    """Declare a dataclass calculator field as runtime-resolved."""
-    spec = ParamSpec(
-        name="",
-        kind="dynamic",
-        field_name=field_name,
-        target_units=target_units,
-        optional_units=optional_units,
-        signature=signature,
-    )
-    if default is MISSING:
-        return field(metadata=_merge_metadata(spec))
-    return field(default=default, metadata=_merge_metadata(spec))
-
-
-def static(default: Any = MISSING, *, signature: bool = True) -> Any:
-    """Declare a dataclass calculator field as a static constructor value."""
-    spec = ParamSpec(name="", kind="static", signature=signature)
-    if default is MISSING:
-        return field(metadata=_merge_metadata(spec))
-    return field(default=default, metadata=_merge_metadata(spec))
 
 
 def collect_param_specs(cls: type[Any]) -> tuple[ParamSpec, ...]:

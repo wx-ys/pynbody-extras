@@ -7,13 +7,12 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast, dataclass_transform, overl
 
 from .base import CalculatorBase
 from .fields import (
+    Param,
     collect_param_specs,
     declarative_dependencies,
     declarative_dynamic_param_signature,
     declarative_dynamic_param_specs,
     declarative_instance_signature,
-    dynamic,
-    static,
 )
 
 if TYPE_CHECKING:
@@ -43,7 +42,7 @@ def dataclass_calc(cls: type[TCalc], **dataclass_kwargs: Any) -> type[TCalc]: ..
 def dataclass_calc(cls: None = None, **dataclass_kwargs: Any) -> Callable[[type[TCalc]], type[TCalc]]: ...
 
 
-@dataclass_transform(field_specifiers=(dynamic, static))
+@dataclass_transform(field_specifiers=(Param,))
 def dataclass_calc(
     cls: type[TCalc] | None = None,
     **dataclass_kwargs: Any,
@@ -51,8 +50,8 @@ def dataclass_calc(
     """Decorate a calculator subclass with dataclass-style parameters.
 
     The decorator installs dynamic parameter metadata and default signature /
-    dependency hooks from fields declared with :func:`dynamic` or
-    :func:`static`.
+    dependency hooks from fields declared with :class:`Param`. The decorated class must still
+    implement the appropriate compute or role-specific hooks to be functional.
     """
 
     def wrap(raw_cls: type[TCalc]) -> type[TCalc]:
