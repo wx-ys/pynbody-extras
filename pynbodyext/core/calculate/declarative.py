@@ -72,13 +72,13 @@ def dataclass_calc(
         inherited_specs.update(dynamic_specs)
         dc_cls.dynamic_param_specs = inherited_specs
 
-        if "instance_signature" not in raw_cls.__dict__:
+        if raw_cls.instance_signature is CalculatorBase.instance_signature:
             type.__setattr__(dc_cls, "instance_signature", _instance_signature)
 
-        if "declared_dependencies" not in raw_cls.__dict__:
+        if raw_cls.declared_dependencies is CalculatorBase.declared_dependencies:
             type.__setattr__(dc_cls, "declared_dependencies", _declared_dependencies)
 
-        if "dynamic_param_signature" not in raw_cls.__dict__:
+        if raw_cls.dynamic_param_signature is CalculatorBase.dynamic_param_signature:
             type.__setattr__(dc_cls, "dynamic_param_signature", _dynamic_param_signature)
 
         type.__setattr__(dc_cls, "__calculate_param_specs__", collect_param_specs(dc_cls))
