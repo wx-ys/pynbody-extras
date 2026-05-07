@@ -837,7 +837,11 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
                 lines.extend(render(child, next_prefix, idx == len(kids) - 1))
             return lines
 
-        return "\n".join(render(self, "", True))
+        lines = [f"{self.tree_label}<{self.kind}>"]
+        kids = self.children()
+        for idx, child in enumerate(kids):
+            lines.extend(render(child, "", idx == len(kids) - 1))
+        return "\n"+"\n".join(lines)
 
     def format_flow(self) -> str:
         """Return a text flow representation of the calculator graph."""
