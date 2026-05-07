@@ -12,8 +12,17 @@ __all__ = ["AlignVec"]
 @TransformBase.dataclass
 class AlignVec(TransformBase[Rotation]):
     """
-    Generic transformation to align a vector (e.g., angular momentum, velocity) with the z-axis.
-    Subclasses must implement `get_vec(self, sim: SimSnap) -> np.ndarray`.
+    Generic transformation to align a vector (e.g., angular momentum) with the z-axis.
+
+    Parameters
+    ----------
+    vector : array-like or Callable
+        The vector to align with the z-axis. Can be a Param that depends on the simulation
+    up : array-like, optional
+        for y-axis alignment. If None, a safe default is chosen to avoid parallelism with the vector.
+    move_all : bool, default: True
+        Whether to move all particles or only a subset.
+
     """
     vector: Param[np.ndarray]
     up: np.ndarray | None = None
@@ -26,11 +35,9 @@ class AlignVec(TransformBase[Rotation]):
         params = None,
     ):
         """Apply the transform and return a handle."""
-        vec = params["vector"]
-        if self.up is None:
-            safe_up = self._safe_up(vec, up=None)
-        else:
-            safe_up = self.up
+        vec = params.vector
+        safe_up = params.up if params.up is not None else self._safe_up(vec)
+
         trans = calc_faceon_matrix(vec, up=safe_up)
         rota = target.rotate(trans, description=self.__class__.__name__)
         return rota

@@ -14,11 +14,27 @@ __all__ = ["ShiftPosTo", "ShiftVelTo"]
 
 @TransformBase.dataclass
 class ShiftPosTo(TransformBase[GenericTranslation]):
+    """
+    Shift the positions of particles to a specified center.
+
+    Parameters
+    ----------
+    mode : str, callable, or array-like, default: "ssc"
+        Method to determine the center. Options are:
+        - "ssc": Shrinking sphere center
+        - "com": Center of mass
+        - "pot": Potential minimum
+        - "hyb": Hybrid method (initially "pot" or "com", then "ssc")
+        - callable: A function that returns the center
+        - array-like: Directly specify the center coordinates
+    move_all : bool, default: True
+        Whether to move all particles or only a subset.
+    """
+
     mode: Param[SimNpArray | str] = Param(default="ssc", field_name="pos")
     move_all: bool = True
 
     def __post_init__(self) -> None:
-        TransformBase.__init__(self, move_all=self.move_all)
         self.description = "given"
         mode = self.mode
         if isinstance(mode, str):
@@ -38,11 +54,24 @@ class ShiftPosTo(TransformBase[GenericTranslation]):
 
 @TransformBase.dataclass
 class ShiftVelTo(TransformBase[GenericTranslation]):
+    """
+    Shift the velocities of particles to a specified center.
+
+    Parameters
+    ----------
+    mode : str, callable, or array-like, default: "com"
+        Method to determine the velocity center. Options are:
+        - "com": Center of mass velocity
+        - callable: A function that returns the velocity center
+        - array-like: Directly specify the velocity center coordinates
+     move_all : bool, default: True
+        Whether to move all particles or only a subset.
+
+    """
     mode: Param[SimNpArray | str] = Param(default="com", field_name="vel")
     move_all: bool = True
 
     def __post_init__(self) -> None:
-        TransformBase.__init__(self, move_all=self.move_all)
         self.description = "given"
         mode = self.mode
         if isinstance(mode, str):
