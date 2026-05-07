@@ -602,7 +602,7 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         errors: ErrorPolicy | str | None = None,
         cache_small_value_bytes: int | None = None,
     ) -> TPublic:
-        """Run the calculator and return a public value.
+        """Evaluate the calculator and return a public value.
 
         This is a convenience alias for :meth:`run` that also accepts common
         execution overrides as keyword-only arguments.
@@ -613,9 +613,26 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
             pynbody snapshot or compatible simulation object.
         options : RunOptions, optional
             Base execution options to merge with keyword overrides.
-        cache, progress, perf_time, perf_memory, observe,
-        backend, default_record_policy, errors, cache_small_value_bytes : optional
-            Per-run overrides for :class:`RunOptions`.
+        cache: bool, optional
+            Whether to cache results of this run.
+        progress: bool | ProgressVerbosity | ProgressSink | list[ProgressSink] | tuple[ProgressSink, ...] | None, optional
+            Whether and how to report progress for this run. e.g. ``True`` or ``"node"`` to log each node,
+            ``"run"``, ``"phase"``, or ``"debug"`` for coarser logs;
+            add "bar:" prefix for progress bars (e.g., ``"bar:node"``); or pass custom ProgressSink instances.
+        perf_time: bool, optional
+            Whether to measure and report execution time for this run.
+        perf_memory: bool, optional
+            Whether to measure and report memory usage for this run.
+        observe: bool, optional
+            Whether to observe read, dirty, and delete operations for this simulation.
+        backend: str, optional
+            Backend to use for this run.
+        default_record_policy: RecordPolicy, optional
+            Default record policy for this run.
+        errors: ErrorPolicy | str, optional
+            Error policy for this run.
+        cache_small_value_bytes: int, optional
+            Cache small value bytes for this run.
 
         Returns
         -------
@@ -691,9 +708,39 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         errors: ErrorPolicy | str | None = None,
         cache_small_value_bytes: int | None = None,
     ) -> Result[TPublic]:
-        """Evaluate this calculator on a simulation object.
+        """Run the calculator and return a Result.
 
-        See :meth:`__call__` for parameter details.
+        Parameters
+        ----------
+        sim : object
+            pynbody snapshot or compatible simulation object.
+        options : RunOptions, optional
+            Base execution options to merge with keyword overrides.
+        cache: bool, optional
+            Whether to cache results of this run.
+        progress: bool | ProgressVerbosity | ProgressSink | list[ProgressSink] | tuple[ProgressSink, ...] | None, optional
+            Whether and how to report progress for this run. e.g. ``True`` or ``"node"`` to log each node,
+            ``"run"``, ``"phase"``, or ``"debug"`` for coarser logs;
+            add "bar:" prefix for progress bars (e.g., ``"bar:node"``); or pass custom ProgressSink instances.
+        perf_time: bool, optional
+            Whether to measure and report execution time for this run.
+        perf_memory: bool, optional
+            Whether to measure and report memory usage for this run.
+        observe: bool, optional
+            Whether to observe read, dirty, and delete operations for this simulation.
+        backend: str, optional
+            Backend to use for this run.
+        default_record_policy: RecordPolicy, optional
+            Default record policy for this run.
+        errors: ErrorPolicy | str, optional
+            Error policy for this run.
+        cache_small_value_bytes: int, optional
+            Cache small value bytes for this run.
+
+        Returns
+        -------
+        Result[TPublic]
+            Result object containing the public value and diagnostics from this run.
         """
         engine = EvalEngine()
         merged = self._resolve_run_options(

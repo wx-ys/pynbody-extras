@@ -674,6 +674,25 @@ class NodeInput:
         selection_token = self.selection.cache_token if self.selection is not None else None
         return (id(self.sim_raw), id(self.sim_current), selection_token, transform_id, self.mutation_generation)
 
+    @property
+    def scope_cache_token(self) -> tuple[int, int, tuple[int, int] | None, int | None]:
+        """Input-scope token excluding mutation generations."""
+        transform_id = id(self.transform.handle) if self.transform is not None else None
+        selection_token = self.selection.cache_token if self.selection is not None else None
+        return (id(self.sim_raw), id(self.sim_current), selection_token, transform_id)
+
+    @property
+    def observed_scope_cache_token(self) -> tuple[int, int, tuple[int, int] | None]:
+        """Input-scope token for observer-validated cache entries.
+
+        Transform identity is intentionally excluded: observer-derived field
+        generations decide whether a transformed scope invalidates a cached
+        value. The active simulation object and selection remain part of the
+        scope because they change the population being measured.
+        """
+        selection_token = self.selection.cache_token if self.selection is not None else None
+        return (id(self.sim_raw), id(self.sim_current), selection_token)
+
 
     def with_transform(self, result: TransformResult[Any]) -> NodeInput:
         """Return a copy after applying a transform result."""
@@ -720,6 +739,8 @@ class ExecutionContext:
 
     _node_counter: int = 0
     mutation_generation: int = 0
+    unknown_mutation_generation: int = 0
+    field_generations: dict[str, int] = field(default_factory=dict)
     last_error_node_id: str | None = None
     _node_stack: list[ResultNode] = field(default_factory=list)
     _evaluation_stack: list[tuple[int, tuple[Any, ...]]] = field(default_factory=list)
@@ -780,11 +801,70 @@ class ExecutionContext:
             public_value=public_value,
         )
 
-    def advance_mutation_generation(self, reason: str) -> int:
+    def advance_mutation_generation(self, reason: str, *, observed_phase: str | None | object = Ellipsis) -> int:
         """Advance the mutation generation after a transform changes state."""
         self.mutation_generation += 1
-        self.log("debug", f"mutation generation {self.mutation_generation}: {reason}")
+        fields = self._current_observed_mutation_fields(observed_phase) if self.options.observe else set()
+        if fields:
+            for field_name in fields:
+                self.field_generations[field_name] = self.mutation_generation
+            rendered_fields = ", ".join(sorted(fields))
+            self.log(
+                "debug",
+                f"mutation generation {self.mutation_generation}: {reason}; fields={rendered_fields}",
+            )
+        else:
+            self.unknown_mutation_generation = self.mutation_generation
+            self.log("debug", f"mutation generation {self.mutation_generation}: {reason}; fields=*unknown*")
         return self.mutation_generation
+
+    def _current_observed_mutation_fields(self, phase: str | None | object = Ellipsis) -> set[str]:
+        try:
+            from .observer import current_observation, current_observation_phase
+        except Exception:
+            return set()
+
+        observation = current_observation()
+        if observation is None:
+            return set()
+        if phase is Ellipsis:
+            phase = current_observation_phase()
+        return set(observation.fields_for("dirty", phase=phase)) | set(observation.fields_for("delete", phase=phase))
+
+    def observed_cache_fields(self, node_result: ResultNode) -> frozenset[str]:
+        """Return direct and child observed fields that affect this node value."""
+        fields: set[str] = set()
+        if node_result.observation is not None:
+            fields.update(node_result.observation.reads)
+        for child_id in node_result.children:
+            child = self.node_registry.get(child_id)
+            if child is None:
+                continue
+            fields.update(child.artifacts.get("observed_cache_fields", ()))
+        return frozenset(fields)
+
+    def observed_cache_token(self, fields: frozenset[str]) -> tuple[int, tuple[tuple[str, int], ...]]:
+        """Return the current generation token for observed cache fields."""
+        return (
+            self.unknown_mutation_generation,
+            tuple((field_name, self.field_generations.get(field_name, 0)) for field_name in sorted(fields)),
+        )
+
+    def observed_cache_token_is_current(self, token: Any) -> bool:
+        """Whether an observed cache token is still valid for current generations."""
+        try:
+            unknown_generation, field_items = token
+        except Exception:
+            return False
+        if unknown_generation != self.unknown_mutation_generation:
+            return False
+        try:
+            return all(
+                self.field_generations.get(field_name, 0) == generation
+                for field_name, generation in field_items
+            )
+        except Exception:
+            return False
 
     def log(self, level: str, message: str, *, node_id: str | None = None, phase: str | None = None) -> None:
         """Record and emit a runtime log message."""

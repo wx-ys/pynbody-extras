@@ -109,6 +109,7 @@ class _EvaluationPlan:
     work: NodeInput
     stack_key: tuple[Any, ...]
     cache_key: tuple[Any, ...]
+    observed_cache_prefix: tuple[Any, ...] | None
     cacheable: bool
     cache_policy: CachePolicy
 
@@ -260,11 +261,23 @@ class EvalEngine:
 
         cache_policy = getattr(node, "cache_policy", CachePolicy.AUTO)
         cacheable = bool(getattr(node, "cacheable", True)) and cache_policy != CachePolicy.NONE
+        node_signature = node.signature()
+        observed_cache_prefix = None
+        if ctx.options.observe:
+            observed_scope = work.observed_scope_cache_token
+            stack_scope = observed_scope
+            observed_cache_prefix = (ctx.sim_signature, observed_scope, node_signature)
+            cache_key = observed_cache_prefix
+        else:
+            cache_token = work.cache_token
+            stack_scope = cache_token   # type: ignore[assignment]
+            cache_key = (ctx.sim_signature, cache_token, node_signature) # type: ignore[assignment]
 
         return _EvaluationPlan(
             work=work,
-            stack_key=(id(node), work.cache_token),
-            cache_key=(ctx.sim_signature, work.cache_token, node.signature()),
+            stack_key=(id(node), stack_scope),
+            cache_key=cache_key,
+            observed_cache_prefix=observed_cache_prefix,
             cacheable=cacheable,
             cache_policy=cache_policy,
         )
@@ -295,13 +308,23 @@ class EvalEngine:
         ctx: ExecutionContext,
         plan: _EvaluationPlan,
     ) -> ResultNode | None:
-        cached_runtime = ctx.cache.get(plan.cache_key) if plan.cacheable else None
+        cached_runtime = None
+        cache_key_for_trace = plan.cache_key
+        if plan.cacheable:
+            if plan.observed_cache_prefix is not None:
+                cached_runtime = ctx.cache.get_compatible(
+                    plan.observed_cache_prefix,
+                    ctx.observed_cache_token_is_current,
+                )
+                cache_key_for_trace = plan.observed_cache_prefix
+            else:
+                cached_runtime = ctx.cache.get(plan.cache_key)
         if cached_runtime is None:
             ctx.trace.cache(
                 node_id="pending",
                 node_name=node.log_label,
                 event="miss" if plan.cacheable else "skip",
-                key=repr(plan.cache_key),
+                key=repr(cache_key_for_trace),
             )
             return None
 
@@ -315,7 +338,7 @@ class EvalEngine:
             node_id=cached_node.node_id,
             node_name=node_name,
             event="hit",
-            key=repr(plan.cache_key),
+            key=repr(cache_key_for_trace),
         )
         ctx.log("debug", f"cache hit: {node_name}", node_id=cached_node.node_id)
 
@@ -421,7 +444,18 @@ class EvalEngine:
             plan.cache_policy,
             ctx.options,
         ):
-            ctx.cache.set(plan.cache_key, ctx.runtime_store[node_result.node_id])
+            cache_key = plan.cache_key
+            if plan.observed_cache_prefix is not None:
+                observed_fields = ctx.observed_cache_fields(node_result)
+                observed_token = ctx.observed_cache_token(observed_fields)
+                node_result.artifacts["observed_cache_fields"] = tuple(sorted(observed_fields))
+                node_result.artifacts["observed_cache_token"] = observed_token
+                cache_key = (*plan.observed_cache_prefix, observed_token)
+            ctx.cache.set(
+                cache_key,
+                ctx.runtime_store[node_result.node_id],
+                index_compatible=plan.observed_cache_prefix is not None,
+            )
 
         node_result.value_summary = self.summarize_value(state.public_value)
         node_result.status = NodeStatus.OK

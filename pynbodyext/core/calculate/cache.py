@@ -112,8 +112,11 @@ class RuntimeCache:
 
     enabled: bool = True
     store: dict[tuple[Any, ...], ExecutionValue] = field(default_factory=dict)
+    compatible_index: dict[tuple[Any, ...], list[tuple[Any, ...]]] = field(default_factory=dict)
     events: list[CacheEvent] = field(default_factory=list)
     hit_count: int = 0
+    miss_count: int = 0
+    store_count: int = 0
 
     def get(self, key: tuple[Any, ...]) -> ExecutionValue | None:
         """Return a cached value and record a hit or miss event."""
@@ -130,13 +133,45 @@ class RuntimeCache:
         )
         if hit is not None:
             self.hit_count += 1
+        else:
+            self.miss_count += 1
         return hit
 
-    def set(self, key: tuple[Any, ...], value: ExecutionValue) -> None:
+    def get_compatible(self, prefix: tuple[Any, ...], validator: Any) -> ExecutionValue | None:
+        """Return the first cached value under ``prefix`` accepted by ``validator``."""
+        if not self.enabled:
+            return None
+
+        hit_key: tuple[Any, ...] | None = None
+        hit: ExecutionValue | None = None
+        for key in self.compatible_index.get(prefix, ()):
+            if validator(key[-1]):
+                hit_key = key
+                hit = self.store[key]
+                break
+
+        self.events.append(
+            CacheEvent(
+                timestamp=time.perf_counter(),
+                event="hit" if hit is not None else "miss",
+                key=hit_key if hit_key is not None else prefix,
+                node_id=hit.node_id if hit is not None else None,
+            )
+        )
+        if hit is not None:
+            self.hit_count += 1
+        else:
+            self.miss_count += 1
+        return hit
+
+    def set(self, key: tuple[Any, ...], value: ExecutionValue, *, index_compatible: bool = False) -> None:
         """Store a value and record a store event."""
         if not self.enabled:
             return
+        if index_compatible and key not in self.store and key:
+            self.compatible_index.setdefault(key[:-1], []).append(key)
         self.store[key] = value
+        self.store_count += 1
         self.events.append(
             CacheEvent(
                 timestamp=time.perf_counter(),
@@ -149,19 +184,20 @@ class RuntimeCache:
     def clear(self) -> None:
         """Remove all cached values and diagnostics."""
         self.store.clear()
+        self.compatible_index.clear()
         self.events.clear()
         self.hit_count = 0
+        self.miss_count = 0
+        self.store_count = 0
 
     def summary(self) -> dict[str, Any]:
         """Return cache counters and entry count."""
-        miss_count = sum(1 for event in self.events if event.event == "miss")
-        store_count = sum(1 for event in self.events if event.event == "store")
         return {
             "enabled": self.enabled,
             "entries": len(self.store),
             "hits": self.hit_count,
-            "misses": miss_count,
-            "stores": store_count,
+            "misses": self.miss_count,
+            "stores": self.store_count,
         }
 
     def report_text(self) -> str:

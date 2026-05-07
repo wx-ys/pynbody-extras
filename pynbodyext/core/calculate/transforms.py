@@ -343,7 +343,10 @@ class TransformBase(
             transform_runtime.ctx,
             transform_runtime.measure_input,
         )
-        mutation_generation = transform_runtime.ctx.advance_mutation_generation(f"apply {self.log_label}")
+        mutation_generation = transform_runtime.ctx.advance_mutation_generation(
+            f"apply {self.log_label}",
+            observed_phase="calculate",
+        )
         return TransformResult(
             handle=computed,
             target=transform_runtime.target,
