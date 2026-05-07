@@ -44,6 +44,23 @@ class Param(Generic[T]):
         Whether units are optional for this parameter. If False, a unit-aware value is required.
     signature : bool, default: True
         Whether this parameter should be included in the calculator's signature for caching and hashing purposes.
+
+    Examples
+    --------
+        .. code-block:: python
+
+        @CalculatorBase.dataclass
+        class MyCalculator(CalculatorBase[MyParams, MyResult]):
+            # Required dynamic parameter with no default
+            radius: Param[float]
+            # Optional dynamic parameter with default
+            mass: Param[float] = 1.0
+            # Dynamic parameter with default and associated field for unit handling
+            pos: Param[SimArray] = Param(default=(0, 0, 0), field_name="pos")
+            # Not a Param, treated as a static parameter
+            description: str = 'A simple calculator'
+            #
+
     """
 
     @overload
