@@ -590,10 +590,15 @@ class FilterResult:
     source_sim: Any
     mask_summary: ValueSummary | None = None
     artifacts: dict[str, Any] = field(default_factory=dict)
+    _filtered_sim: Any = field(default=None, init=False, repr=False)
+    _filtered_sim_ready: bool = field(default=False, init=False, repr=False)
 
     @property
     def filtered_sim(self) -> Any:
-        """Build the filtered simulation view on demand."""
+        """Build and reuse the filtered simulation view on demand."""
+        if self._filtered_sim_ready:
+            return self._filtered_sim
+
         mask = self.mask
         shape = getattr(mask, "shape", None)
         dtype = getattr(mask, "dtype", None)
@@ -610,7 +615,9 @@ class FilterResult:
             except TypeError:
                 mask = mask.astype(np.bool_)
 
-        return self.source_sim[mask]
+        self._filtered_sim = self.source_sim[mask]
+        self._filtered_sim_ready = True
+        return self._filtered_sim
 
     @property
     def cache_token(self) -> tuple[int, int]:
