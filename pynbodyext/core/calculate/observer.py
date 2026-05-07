@@ -356,42 +356,37 @@ def observe_sim_access(node_id: str, node_label: str) -> Any:
         _SnapshotPatchManager.release()
 
 
-def _format_fields(values: set[str], *, max_items: int = 8) -> str:
-    if not values:
-        return "-"
-    items = sorted(values)
-    if len(items) > max_items:
-        shown = items[:max_items]
-        return ", ".join(shown) + f" ..(+{len(items) - max_items})"
-    return ", ".join(items)
+def _truncate_text(text: str, max_length: int | None) -> str:
+    if max_length is None or len(text) <= max_length:
+        return text
+    if max_length <= 0:
+        return ""
+    if max_length <= 3:
+        return "." * max_length
+    return text[: max_length - 3] + "..."
 
 
-def _join_fields(values: set[str] | list[str] | tuple[str, ...], *, max_items: int | None = None) -> str:
+def _join_fields(
+    values: set[str] | list[str] | tuple[str, ...],
+    *,
+    max_items: int | None = None,
+    max_length: int | None = None,
+) -> str:
     if not values:
         return "-"
     items = sorted(values)
     if max_items is not None and len(items) > max_items:
-        return ", ".join(items[:max_items]) + f" ..(+{len(items) - max_items})"
-    return ", ".join(items)
-
-
-def _wrap_cell(text: str, width: int) -> list[str]:
-    if len(text) <= width:
-        return [text]
-    parts = text.split(", ")
-    lines: list[str] = []
-    current = ""
-    for part in parts:
-        candidate = part if not current else f"{current}, {part}"
-        if len(candidate) <= width:
-            current = candidate
-            continue
-        if current:
-            lines.append(current)
-        current = part
-    if current:
-        lines.append(current)
-    return lines or [text]
+        hidden = len(items) - max_items
+        shown = ", ".join(items[:max_items])
+        text = f"{shown} ..(+{hidden})"
+        if max_length is not None and len(text) > max_length:
+            suffix = f"..(+{hidden})"
+            keep = max_length - len(suffix)
+            if keep <= 0:
+                return suffix[:max_length]
+            return shown[:keep].rstrip(", ") + suffix
+        return text
+    return _truncate_text(", ".join(items), max_length)
 
 
 def _phase_label(phase: str | None) -> str:
@@ -466,23 +461,18 @@ def render_observer_report(
             label = observation.node_label
             if show_ids:
                 label = f"[{observation.node_id.rsplit(':', 1)[-1]}] {label}"
-            if len(label) > widths["node"]:
-                label = label[: widths["node"] - 2] + ".."
+            label = _truncate_text(label, widths["node"])
+            phase_text = _truncate_text(_phase_label(phase), widths["phase"])
+            reads_text = _join_fields(reads, max_items=4, max_length=widths["reads"])
+            dirty_text = _join_fields(dirty_fields, max_length=widths["dirty"])
+            delete_text = _join_fields(deletes, max_length=widths["deletes"])
 
-            read_lines = _wrap_cell(_join_fields(reads, max_items=5), widths["reads"])
-            dirty_lines = _wrap_cell(_join_fields(dirty_fields), widths["dirty"])
-            delete_lines = _wrap_cell(_join_fields(deletes), widths["deletes"])
-            line_count = max(len(read_lines), len(dirty_lines), len(delete_lines))
-
-            for index in range(line_count):
-                node_text = label if index == 0 else ""
-                phase_text = _phase_label(phase) if index == 0 else ""
-                lines.append(
-                    f"{node_text:<{widths['node']}} | "
-                    f"{phase_text:<{widths['phase']}} | "
-                    f"{(read_lines[index] if index < len(read_lines) else ''):<{widths['reads']}} | "
-                    f"{(dirty_lines[index] if index < len(dirty_lines) else ''):<{widths['dirty']}} | "
-                    f"{(delete_lines[index] if index < len(delete_lines) else ''):<{widths['deletes']}}"
-                )
+            lines.append(
+                f"{label:<{widths['node']}} | "
+                f"{phase_text:<{widths['phase']}} | "
+                f"{reads_text:<{widths['reads']}} | "
+                f"{dirty_text:<{widths['dirty']}} | "
+                f"{delete_text:<{widths['deletes']}}"
+            )
     lines.append("-" * len(header))
     return "\n".join(lines)
