@@ -1,118 +1,57 @@
-"""Dynamic parameter support for calculator-valued arguments.
+"""Dynamic parameter resolution for calculator-valued arguments.
 
-Dynamic parameters let calculators, callables, constants, arrays, and nested
-containers be accepted by the same constructor.  Values are resolved at run
-time with access to the active :class:`ExecutionContext` and
-:class:`NodeInput`.
+This module implements runtime resolution for dynamic constructor arguments.
+It allows one parameter field to accept literals, callables, calculators, and
+nested containers with consistent dependency and signature behavior.
 
-This mechanism is what allows a calculator constructor to accept values such as:
+Why This Exists
+---------------
+Without dynamic parameter support, each calculator would need custom logic to
+differentiate static inputs from runtime-dependent inputs.
 
-- a plain number like ``10.0``
-- a callable like ``lambda sim: sim["r"].max() / 2``
-- another calculator whose value is computed first
+With this module, calculator authors can declare dynamic fields and rely on a
+shared resolver pipeline.
+
+What Can Be Dynamic
+-------------------
+A dynamic value may be:
+
+- a plain literal (for example ``10.0``)
+- a callable resolved against the active simulation
+- another calculator whose public value is needed first
 - a nested mapping or sequence containing any of the above
 
-Why Dynamic Parameters Exist
-----------------------------
-Without dynamic parameters, every calculator constructor would need to decide
-up front whether an argument is a literal value or a runtime-dependent value.
-
-With this module, calculator authors can write a single class that supports
-both static and runtime-resolved arguments in a uniform way.
-
-Basic Example
--------------
-A property can declare that one constructor argument should be resolved in the
-units of a simulation field::
-
-    from pynbodyext.core.calculate import PropertyBase
-
-    class MassInsideRadius(PropertyBase[float]):
-        dynamic_param_specs = {"radius": "r"}
-
-        def __init__(self, radius):
-            super().__init__()
-            self.radius = radius
-
-        def instance_signature(self):
-            return ("mass_inside_radius", self.radius)
-
-        def calculate_with_params(self, sim, params=None):
-            radius = params["radius"]
-            mask = sim["r"] < radius
-            return float(sim["mass"][mask].sum())
-
-This class can then be used with either a constant radius or a runtime value.
-
-Constant, Callable, And Calculator Inputs
------------------------------------------
-Dynamic parameters can come from several sources::
-
-    fixed = MassInsideRadius(10.0)
-    from_callable = MassInsideRadius(lambda sim: sim["r"].max() / 2)
-
-A calculator-valued argument works too, as long as the argument is itself a
-calculator whose public value can be resolved before use.
-
-Declaring Dynamic Parameters
-----------------------------
-Calculator authors opt in by defining ``dynamic_param_specs`` on the class::
-
-    class RadiusBetween(FilterBase):
-        dynamic_param_specs = {"rmin": "r", "rmax": "r"}
-
-        def __init__(self, rmin, rmax):
-            super().__init__()
-            self.rmin = rmin
-            self.rmax = rmax
-
-        def instance_signature(self):
-            return ("radius_between", self.rmin, self.rmax)
-
-        def build_mask(self, sim, params):
-            return (sim["r"] >= params["rmin"]) & (sim["r"] < params["rmax"])
-
-The values of ``rmin`` and ``rmax`` may now be constants, callables, or
-calculators, and they will be normalized before ``build_mask`` runs.
-
-Nested Structures
+Authoring Surface
 -----------------
-Dynamic values can also appear inside mappings and sequences.  This is useful
-when a calculator accepts structured parameter bundles::
+Most users do not import this module directly. Instead, they use:
 
-    {
-        "inner": 5.0,
-        "outer": lambda sim: sim["r"].max() / 2,
-    }
+- :class:`Param` fields in dataclass-style calculators
+- ``dynamic_param_specs`` on manually authored classes
 
-The helper functions in this module preserve signatures and dependencies across
-such nested structures.
+Runtime resolution then happens through role-base or template lifecycle hooks.
 
 Key Helpers
 -----------
-The most commonly important helpers for framework authors are:
+The most important helpers for framework-level code are:
 
-- :func:`dynamic_value_signature` to make runtime-valued arguments contribute a
-  stable signature fragment
-- :func:`dynamic_value_dependencies` to extract nested calculator dependencies
-- :func:`resolve_dynamic_value` to resolve one dynamic value in a runtime or
-  standalone context
+- :func:`dynamic_value_signature` for stable signature fragments
+- :func:`dynamic_value_dependencies` for nested calculator dependency discovery
+- :func:`resolve_dynamic_value` for one-value resolution in runtime/standalone
+  contexts
 
-When You Usually Do Not Need This Module
-----------------------------------------
-Most end users do not need to import anything from this module directly.
-Instead, they benefit from it indirectly when using calculators that accept
-runtime-valued arguments.
+Debugging Orientation
+---------------------
+This module is the first place to inspect when:
 
-This module is most relevant when writing new calculator classes or debugging
-why a parameter is not being resolved as expected.
+- calculator-valued constructor arguments do not resolve as expected
+- dynamic values are not contributing to signatures correctly
+- nested container inputs lose dependency tracking
 
 Notes
 -----
-If a calculator accepts constructor arguments that may be runtime-dependent,
-its :meth:`instance_signature` should usually include the unresolved value
-object, while dynamic resolution itself should happen through
-``dynamic_param_specs`` and the base-class hooks.
+Dynamic parameter identity and dependency propagation must remain stable for
+cache correctness. If dynamic signatures are unstable, repeated runs may
+recompute unexpectedly.
 """
 
 from __future__ import annotations

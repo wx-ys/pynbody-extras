@@ -1,94 +1,64 @@
-"""Result objects and display helpers for calculator execution.
+"""Result objects and reporting surface for calculator execution.
 
-Every calculator run returns a :class:`Result`.  Results contain the public root
-value, execution records for all visited nodes, named outputs, provenance,
-reports, warnings, errors, and raw diagnostics.
+Every calculator run returns a :class:`Result`. A result stores the public root
+value together with node-level execution records, named outputs, summaries,
+reports, and raw diagnostics.
 
-This module is the main place to look after a run has finished.  It is designed
-to support both programmatic inspection and interactive notebook use.
+Most users interact with this module after execution has finished.
 
 What A Result Contains
 ----------------------
-A :class:`Result` gives access to several layers of information:
+A :class:`Result` exposes several layers of output:
 
-- ``value``: the public root value
-- ``root``: the root :class:`ResultNode`
-- ``nodes``: all evaluated nodes keyed by node id
-- ``named``: nodes registered by ``keep()``, ``named()``, or pipeline outputs
+- ``value``: public root value
+- ``root``: root :class:`ResultNode`
+- ``nodes``: all recorded nodes keyed by node id
+- ``named``: nodes registered by ``named()``, ``keep()``, or pipeline outputs
 - ``perf_summary``: aggregate runtime counters
-- ``reports``: formatted text reports
-- ``diagnostics``: raw trace/cache/log payloads
+- ``reports``: formatted trace/cache/performance reports
+- ``diagnostics``: raw event payloads
 
-Basic Example
--------------
-Inspect a result after running a simple calculator::
-
-    result = calc.run(sim)
-
-    print(result.value)
-    print(result.root)
-    print(result.perf_summary)
-
-Named Output Example
---------------------
-Named nodes and pipeline outputs can be retrieved after the run::
-
-    result = pipe.run(sim)
-    print(result.get("mass"))
-    print(result.get("temp_mean"))
-
-This is often the cleanest way to expose reusable intermediate products from a
-larger graph.
-
-Reports And Diagnostics
------------------------
-Results also provide human-readable reports for debugging and profiling::
+Common Usage
+------------
+Typical post-run inspection::
 
     result = calc.run(sim, progress="phase")
-
+    print(result.value)
+    print(result.get("mass"))
+    print(result.perf_summary)
     print(result.reports["trace_tree"])
-    print(result.reports["trace_timeline"])
-    print(result.reports["cache"])
-    print(result.reports["perf"])
 
-For deeper debugging, the raw event streams are available through
-``result.diagnostics``.
+ResultNode
+----------
+Each :class:`ResultNode` stores one node's execution outcome, including status,
+value summaries, phase records, children, and optional error information.
 
-Working With ResultNode
------------------------
-Each :class:`ResultNode` records what happened for one calculator node during
-the run.  It includes status, summaries, phase timing, stored values, children,
-and any error information.
+This is useful when debugging graph-level behavior or partial failures under
+collect-style error policies.
 
-This is useful when you want to inspect the graph in more detail::
+Reports Versus Diagnostics
+--------------------------
+Use ``result.reports`` for human-readable summaries.
 
-    node = result.root
-    print(node.label)
-    print(node.status)
-    print(node.value_summary)
+Use ``result.diagnostics`` for raw machine-friendly event streams, such as:
 
-Notebook-Friendly Display
--------------------------
-The classes in this module provide compact text ``repr`` output as well as rich
-HTML representations.  In notebooks, simply evaluating ``result`` or
-``result.root`` is often enough to get a readable summary.
+- trace events
+- cache events
+- emitted logs
 
 When To Read This Module Directly
 ---------------------------------
-Most users interact with :class:`Result` but do not need to construct these
-classes directly.  They become especially useful when:
+This module matters most when you are:
 
-- debugging a new calculator subclass
-- understanding why a graph recomputed or reused cache
-- checking which nodes failed under ``errors="collect"``
-- building custom reports or notebook helpers on top of run outputs
+- debugging a new calculator class
+- inspecting why a node recomputed or reused cache
+- analyzing partial failures in pipelines
+- building custom notebook or reporting helpers on top of run outputs
 
 Notes
 -----
-A :class:`Result` is intentionally richer than just the root value.  If you are
-writing examples or tutorials for this framework, prefer showing
-``result = calc.run(sim)`` rather than only ``calc(sim)`` whenever diagnostics
-or provenance matter.
+If you care about execution provenance, trace order, or cache behavior, prefer
+``result = calc.run(sim)`` over extracting only the scalar value.
 """
 
 from __future__ import annotations

@@ -1,91 +1,119 @@
-"""Composable calculator framework for pynbody snapshots.
+"""Core calculator framework for composable pynbody analyses.
 
-The :mod:`pynbodyext.core.calculate` package provides a small but expressive
-execution framework for building reusable analysis graphs on top of
-pynbody-like simulation snapshots.
+The :mod:`pynbodyext.core.calculate` package implements the execution model
+behind calculator graphs. A calculator graph is a directed acyclic graph of
+nodes that read values, build masks, apply temporary mutations, or evaluate
+several outputs in one shared run.
 
-A calculator graph is a directed acyclic graph of nodes.  Each node belongs to
-one of four common roles:
+The framework is organized around four common node roles:
 
-- property nodes read values from the active snapshot view
-- filter nodes build boolean masks and select subsets
-- transform nodes mutate the active frame temporarily
-- pipeline nodes evaluate several outputs in one shared run
-
-The engine evaluates shared dependencies once, records provenance, trace, cache,
-and performance diagnostics, and returns a :class:`Result` object whose content
-is convenient for scripts, notebooks, and debugging.
-
-What This Package Exports
--------------------------
-The package root exposes the main public abstractions used to define and run
-calculator graphs:
-
-- :class:`CalculatorBase` for custom execution nodes
 - :class:`PropertyBase` for read-only derived values
-- :class:`FilterBase` for boolean selection masks
-- :class:`TransformBase` for temporary state mutations
-- :class:`Pipeline` for named multi-output evaluation
-- :class:`RunOptions`, :class:`Result`, and supporting runtime/result types
+- :class:`FilterBase` for boolean masks and scoped selection
+- :class:`TransformBase` for temporary mutations
+- :class:`Pipeline` for grouped multi-output evaluation
 
-Most end users compose existing calculators.  Most library authors subclass one
-of the four base classes above.
+A single run evaluates shared dependencies once, records provenance, trace,
+cache, and performance diagnostics, and returns a :class:`Result`.
+
+Where Most Users Should Start
+-----------------------------
+Most users only need:
+
+- :class:`PropertyBase`
+- :class:`FilterBase`
+- :class:`TransformBase`
+- :class:`Pipeline`
+- :class:`RunOptions`
+- :class:`Result`
+
+If you only want the short public import path for the common role classes, use
+:mod:`pynbodyext.calculate`.
+
+Choosing A Base Class
+---------------------
+Choose the narrowest base class that matches the node.
+
+1. Use :class:`PropertyBase` for a read-only derived value.
+2. Use :class:`FilterBase` for a boolean mask.
+3. Use :class:`TransformBase` for a temporary mutation.
+4. If none of those fit, but the node still follows the standard runtime
+   lifecycle, subclass :class:`RuntimeCalculatorBase`.
+5. Only subclass :class:`CalculatorBase` directly when you need to implement
+   :meth:`CalculatorBase.execute` yourself.
+
+This matches the framework structure itself:
+:class:`PropertyBase`, :class:`FilterBase`, and :class:`TransformBase` all
+build on top of :class:`RuntimeCalculatorBase`, while
+:class:`CalculatorBase` is the lowest-level escape hatch.
+
+Package Layout
+--------------
+User-facing authoring modules:
+
+- :mod:`.base` for :class:`CalculatorBase`
+- :mod:`.template` for :class:`RuntimeCalculatorBase`
+- :mod:`.properties` for property nodes
+- :mod:`.filters` for filter nodes
+- :mod:`.transforms` for transform nodes
+- :mod:`.pipeline` for grouped outputs
+- :mod:`.fields` and :mod:`.declarative` for dataclass-style definitions
+
+Runtime and debugging modules:
+
+- :mod:`.context` for run options and per-run execution state
+- :mod:`.result` for finished run outputs and reports
+- :mod:`.params` for dynamic parameter resolution
+- :mod:`.scopes` for filter and transform composition
+- :mod:`.engine` for graph evaluation
+- :mod:`.cache`, :mod:`.trace`, and :mod:`.perf` for diagnostics
 
 Quick Start
 -----------
-Define and run a simple property calculator::
+Define a simple property calculator in the same dataclass style used by the
+user-facing property modules::
 
     from pynbodyext.core.calculate import PropertyBase
 
+    @PropertyBase.dataclass
     class StellarMass(PropertyBase[float]):
-        def instance_signature(self):
-            return ("stellar_mass",)
 
-        def calculate(self, sim):
+        def calculate(self, sim, params=None):
             return float(sim["mass"].sum())
 
     result = StellarMass().run(sim)
     print(result.value)
 
-Combine a property with a custom filter::
+Scope one calculator with a filter in the same style used by
+:mod:`pynbodyext.filters`::
 
     import numpy as np
 
     from pynbodyext.core.calculate import FilterBase, PropertyBase
 
+    @FilterBase.dataclass
     class TemperatureAbove(FilterBase):
-        def __init__(self, threshold):
-            super().__init__()
-            self.threshold = threshold
+        threshold: float
 
-        def instance_signature(self):
-            return ("temperature_above", self.threshold)
-
-        def build_mask(self, sim, params):
+        def calculate(self, sim, params=None):
             return sim["temp"] > self.threshold
 
+    @PropertyBase.dataclass
     class MeanTemperature(PropertyBase[float]):
-        def instance_signature(self):
-            return ("mean_temperature",)
 
-        def calculate(self, sim):
+        def calculate(self, sim, params=None):
             return float(np.asarray(sim["temp"]).mean())
 
-    calc = MeanTemperature().filter(TemperatureAbove(1.0e5))
-    result = calc.run(sim, progress="phase")
+    result = MeanTemperature().filter(TemperatureAbove(1.0e5)).run(sim)
     print(result.value)
 
-Apply a temporary transform before another calculator::
+Apply a temporary transform in the same style used by
+:mod:`pynbodyext.transforms`::
 
-    from pynbodyext.core.calculate import TransformBase, PropertyBase
+    from pynbodyext.core.calculate import PropertyBase, TransformBase
 
+    @TransformBase.dataclass
     class XShift(TransformBase[dict[str, object]]):
-        def __init__(self, dx):
-            super().__init__()
-            self.dx = dx
-
-        def instance_signature(self):
-            return ("x_shift", self.dx)
+        dx: float
 
         def build_handle(self, sim, target, params=None):
             original = target["x"].copy()
@@ -98,11 +126,10 @@ Apply a temporary transform before another calculator::
         def is_revertible(self, handle):
             return True
 
+    @PropertyBase.dataclass
     class XMean(PropertyBase[float]):
-        def instance_signature(self):
-            return ("x_mean",)
 
-        def calculate(self, sim):
+        def calculate(self, sim, params=None):
             return float(sim["x"].mean())
 
     result = XMean().transform(XShift(1.0)).run(sim)
@@ -119,57 +146,32 @@ Evaluate several outputs in one run::
         },
         name="basic_summary",
     )
-    result = pipe.run(sim)
-    print(result.value["mass"])
-    print(result.value["hot_temp"])
-
-Inspect reports and diagnostics after a run::
 
     result = pipe.run(sim, progress="phase")
-    print(result.perf_summary)
+    print(result.value["mass"])
+    print(result.get("hot_temp"))
     print(result.reports["trace_tree"])
-    print(result.reports["cache"])
 
-How To Choose A Base Class
---------------------------
-Choose the narrowest base class that matches your use case:
+Result Surface
+--------------
+Every run returns a :class:`Result`. The most commonly used parts are:
 
-- subclass :class:`PropertyBase` when the node only reads from the active
-  snapshot and returns a value
-- subclass :class:`FilterBase` when the node computes a boolean mask
-- subclass :class:`TransformBase` when the node mutates the active frame and
-  returns a handle that may later be cleaned up
-- subclass :class:`CalculatorBase` directly only when you need custom execution
-  semantics that do not fit the three specialized bases
+- ``result.value`` for the public root value
+- ``result.get(name)`` for named outputs
+- ``result.perf_summary`` for aggregate performance counters
+- ``result.reports`` for trace, cache, and performance reports
+- ``result.diagnostics`` for raw debugging payloads
 
-In most custom nodes you should implement:
+Notes
+-----
+This package root is an index and import surface. Detailed authoring examples
+live in the role-specific submodules, while execution and debugging details
+live in the runtime-oriented submodules.
 
-- :meth:`instance_signature` so structurally equivalent calculators share a
-  stable signature
-- :meth:`declared_dependencies` when the node depends on other calculators
-- the execution hook required by the chosen base class:
-  :meth:`PropertyBase.calculate`,
-  :meth:`PropertyBase.calculate_with_params`,
-  :meth:`FilterBase.build_mask`,
-  :meth:`FilterBase._build_mask_runtime`,
-  :meth:`TransformBase.build_handle`,
-  :meth:`TransformBase._build_handle_runtime`,
-  or :meth:`CalculatorBase.execute`
-
-Results And Diagnostics
------------------------
-Every run returns a :class:`Result`.  It contains:
-
-- ``value``: the public root value
-- ``root`` and ``nodes``: execution records for evaluated nodes
-- ``named``: nodes registered with ``named()`` or pipeline outputs
-- ``perf_summary``: aggregate timing and cache counters
-- ``reports``: human-readable trace, cache, and performance reports
-- ``diagnostics``: raw trace/cache/log events and other debug-oriented data
-
-For a deeper overview of the execution model, see :mod:`.base`,
-:mod:`.properties`, :mod:`.filters`, :mod:`.transforms`, :mod:`.pipeline`,
-:mod:`.params`, :mod:`.context`, and :mod:`.result`.
+When writing new calculators, prefer the style already used in
+:mod:`pynbodyext.properties`, :mod:`pynbodyext.filters`, and
+:mod:`pynbodyext.transforms`: dataclass-based definitions, :class:`Param`
+fields where needed, and the narrowest role-specific hook.
 """
 
 from .base import BoundCalculator, CalculatorBase, CombinedCalculator

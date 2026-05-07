@@ -1,4 +1,90 @@
-"""Unified runtime template for calculator role base classes."""
+"""Unified runtime template for custom calculator roles.
+
+This module defines :class:`RuntimeCalculatorBase`, the middle layer between
+the specialized role bases and the lowest-level :class:`CalculatorBase`.
+
+Inheritance Position
+--------------------
+Most custom nodes should start with one of the specialized role bases:
+
+- :class:`PropertyBase` for read-only derived values
+- :class:`FilterBase` for boolean masks
+- :class:`TransformBase` for temporary mutations
+
+All three inherit from :class:`RuntimeCalculatorBase`.
+
+Use :class:`RuntimeCalculatorBase` directly when:
+
+- the node does not naturally fit property, filter, or transform semantics
+- the node still follows the standard runtime lifecycle
+- you want dynamic parameter resolution and :class:`ParamView`
+- you do not want to reimplement :meth:`CalculatorBase.execute`
+
+Use :class:`CalculatorBase` instead only when you need full control over
+:meth:`CalculatorBase.execute`.
+
+Lifecycle
+---------
+:class:`RuntimeCalculatorBase` standardizes subclass execution as::
+
+    make_runtime -> resolve_params -> prepare_resolved_params -> compute -> wrap_raw
+
+This is the same lifecycle used by the built-in role bases. It keeps dynamic
+parameter handling, prepared parameter views, and raw-value wrapping consistent
+across custom calculator types.
+
+Minimal Example
+---------------
+A :class:`RuntimeCalculatorBase` subclass usually uses the dataclass helper and
+implements :meth:`compute`::
+
+    @RuntimeCalculatorBase.dataclass
+    class Ratio(RuntimeCalculatorBase[dict[str, float], float]):
+        numerator: Param[float]
+        denominator: Param[float]
+
+        def compute(self, runtime, params):
+            if params.denominator == 0:
+                raise ValueError("denominator is zero")
+            return {
+                "numerator": float(params.numerator),
+                "denominator": float(params.denominator),
+                "ratio": float(params.numerator / params.denominator),
+            }
+
+        def public_value(self, value):
+            return value["ratio"]
+
+    result = Ratio(ParamSum("mass"), ParamContain()).run(sim)
+    print(result.value)
+
+Why Use This Instead Of CalculatorBase
+--------------------------------------
+:class:`RuntimeCalculatorBase` is appropriate when the node still looks like a
+single computation after parameter resolution.
+
+:class:`CalculatorBase` is more appropriate when the node must:
+
+- evaluate child calculators manually through the execution context
+- customize execution order directly
+- manage custom orchestration or branching behavior
+- define behavior that does not fit the standard lifecycle
+
+Main Extension Points
+---------------------
+The main hooks are:
+
+- :meth:`compute` for the main calculation
+- :meth:`prepare_resolved_params` when :class:`ParamView` is not enough
+- :meth:`wrap_raw` when the raw runtime payload needs an extra wrapper
+- :meth:`make_runtime` when a specialized runtime facade is needed
+
+Notes
+-----
+If a node can be described as a property, filter, or transform, prefer the
+more specific role base. :class:`RuntimeCalculatorBase` is the generic template
+layer, not the default first choice.
+"""
 
 from __future__ import annotations
 

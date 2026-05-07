@@ -1,101 +1,107 @@
-"""Base class for calculators that produce boolean selection masks.
+"""Role base class for boolean selection masks.
 
-A filter returns a :class:`FilterResult` as its raw runtime value.  That object
-stores both the boolean mask and the filtered snapshot view used by scoped
-calculators.  The public value of a filter is the mask itself.
+:class:`FilterBase` is the standard base class for calculators that compute
+boolean selection masks and narrow the active simulation view for downstream
+work.
 
-When To Use FilterBase
-----------------------
-Subclass :class:`FilterBase` when your node:
+In this project, most concrete filters under :mod:`pynbodyext.filters` are
+written in dataclass style with :class:`Param` fields and a
+:meth:`calculate` method. Examples include :class:`Sphere`,
+:class:`FamilyFilter`, :class:`BandPass`, :class:`Annulus`, and
+:class:`SolarNeighborhood`.
 
-- computes a boolean selection mask
-- narrows the active simulation view for another calculator
-- may depend on runtime-resolved parameters
-- should compose with ``&``, ``|``, and ``~``
+A filter keeps a richer raw runtime value internally, but its public value is
+the boolean mask itself.
 
-Simple Subclass
----------------
-The simplest filter implements :meth:`instance_signature` and
-:meth:`build_mask`::
+Use :class:`FilterBase` when the node:
 
-    class TemperatureAbove(FilterBase):
-        def __init__(self, threshold):
-            super().__init__()
-            self.threshold = threshold
+- computes a boolean mask
+- scopes another calculator onto a subset of particles
+- accepts runtime-resolved bounds, radii, or centers
+- composes with boolean filter operators
 
-        def instance_signature(self):
-            return ("temperature_above", self.threshold)
+Recommended Authoring Style
+---------------------------
+For most new filters in this codebase, prefer:
 
-        def build_mask(self, sim, params):
-            return sim["temp"] > self.threshold
+- :meth:`FilterBase.dataclass`
+- :class:`Param` for resolved bounds and coordinates
+- :meth:`calculate` as the main user hook
+- letting :class:`FilterBase` normalize the mask and build the filtered view
 
-This is the preferred interface for filters that only depend on constructor
-arguments and the active snapshot view.
+Simple Example
+--------------
+A band-pass style filter in the same shape as the concrete filter module::
 
-Filter With Dynamic Parameters
-------------------------------
-Use ``dynamic_param_specs`` when threshold values, apertures, or other limits
-can be calculators or callables resolved at run time::
+    @FilterBase.dataclass
+    class BandPass(FilterBase):
+        prop: str
+        min: Param[float]
+        max: Param[float]
 
-    class RadiusBetween(FilterBase):
-        dynamic_param_specs = {"rmin": "r", "rmax": "r"}
+        def calculate(self, sim, params=None):
+            values = sim[params.prop]
+            return (values >= params.min) & (values < params.max)
 
-        def __init__(self, rmin, rmax):
-            super().__init__()
-            self.rmin = rmin
-            self.rmax = rmax
+    mask = BandPass("temp", 1.0e5, 1.0e6).run(sim).value
+    print(mask.sum())
 
-        def instance_signature(self):
-            return ("radius_between", self.rmin, self.rmax)
+Scoping Another Calculator
+--------------------------
+The most common use of a filter is to scope another calculator::
 
-        def build_mask(self, sim, params):
-            return (sim["r"] >= params["rmin"]) & (sim["r"] < params["rmax"])
+    hot_stellar_mass = ParamSum("mass").filter(
+        FamilyFilter("star") & BandPass("temp", 1.0e5, 1.0e6)
+    )
+    print(hot_stellar_mass.run(sim).value)
 
-Full Runtime Hook
------------------
-Override :meth:`_build_mask_runtime` only when the filter needs direct access to
-:class:`ExecutionContext`, :class:`NodeInput`, or child calculator evaluation::
+Sphere-Style Example
+--------------------
+Many real filters in this project accept unit-aware positions or radii
+through :class:`Param` field metadata. A simplified sphere-style example
+looks like this::
 
-    class SphereAroundCentre(FilterBase):
-        dynamic_param_specs = {"radius": "r"}
+    @FilterBase.dataclass
+    class Sphere(FilterBase):
+        radius: Param[float] = Param(field_name="pos")
+        cen: Param[tuple[float, float, float]] = Param(
+            default=(0, 0, 0),
+            field_name="pos",
+        )
 
-        def __init__(self, radius, centre_calc):
-            super().__init__()
-            self.radius = radius
-            self.centre_calc = centre_calc
+        def calculate(self, sim, params=None):
+            dx = sim["x"] - params.cen[0]
+            dy = sim["y"] - params.cen[1]
+            dz = sim["z"] - params.cen[2]
+            return dx * dx + dy * dy + dz * dz < params.radius ** 2
 
-        def instance_signature(self):
-            return ("sphere_around_centre", self.radius, self.centre_calc.signature())
-
-        def declared_dependencies(self):
-            return [self.centre_calc]
-
-        def _build_mask_runtime(self, sim, params, ctx, input):
-            centre = ctx.public_value(self.centre_calc, input)
-            dx = sim["x"] - centre[0]
-            dy = sim["y"] - centre[1]
-            dz = sim["z"] - centre[2]
-            return dx * dx + dy * dy + dz * dz < params["radius"] ** 2
-
-Composition Example
+Boolean Composition
 -------------------
-Filters are usually scoped onto another calculator::
+Filters compose naturally::
 
-    hot = TemperatureAbove(1.0e5)
-    calc = GasMass().filter(hot)
-    result = calc.run(sim)
+    aperture = Sphere("30 kpc") & FamilyFilter("star")
+    result = KappaRot().filter(aperture).run(sim)
     print(result.value)
 
-Filters can also be combined into reusable boolean expressions::
+Which Hook To Implement
+-----------------------
+In this repository, :meth:`calculate` is the common authoring hook for
+concrete filters.
 
-    inner_hot = RadiusBetween(0.0, 10.0) & TemperatureAbove(1.0e5)
-    result = MeanTemperature().filter(inner_hot).run(sim)
+:meth:`build_mask` is still available as the semantic low-level hook, but
+most project filters are simpler and more consistent when they implement
+:meth:`calculate` directly.
+
+Use the runtime-level hooks only when the filter needs direct access to the
+execution context or dependency evaluation.
 
 Notes
 -----
-Most filters should not override :meth:`execute`; let :class:`FilterBase`
-manage mask normalization, filtered-view construction, and public-value
-handling.
+If a downstream calculator appears not to respect a filter, inspect the
+scope composition and the trace tree.
+
+If a mask shape is wrong, verify that the filter returns a full-length
+one-dimensional mask for the active view.
 """
 
 from __future__ import annotations

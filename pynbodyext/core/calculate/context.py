@@ -1,99 +1,71 @@
-"""Runtime context, run options, and scoped input objects.
+"""Runtime context, run options, and scoped node input objects.
 
-This module defines the objects that flow through the calculator engine while a
-graph is evaluated.  Most users interact directly with :class:`RunOptions`.
-Framework authors and advanced users may also encounter
-:class:`ExecutionContext`, :class:`NodeInput`, :class:`FilterResult`, and
-:class:`TransformResult`.
+This module defines the per-run execution state used by the calculator engine.
+Most users primarily touch :class:`RunOptions`; framework authors and advanced
+users may also interact with :class:`ExecutionContext` and :class:`NodeInput`.
 
-What This Module Provides
--------------------------
-The main concepts exported here are:
+Core Types
+----------
+The main exported runtime types are:
 
-- :class:`RunOptions`: per-run configuration such as progress, caching, error
-  handling, and performance collection
-- :class:`ExecutionContext`: the runtime object that owns cache, trace, perf,
-  logs, and node registries during one run
-- :class:`NodeInput`: the active simulation view and scope passed into one node
-- :class:`FilterResult`: raw output of a filter node
-- :class:`TransformResult`: raw output of a transform node
+- :class:`RunOptions` for run-time configuration
+- :class:`ExecutionContext` for per-run orchestration state
+- :class:`NodeInput` for active simulation view and scope at one node
+- :class:`FilterResult` as raw filter output
+- :class:`TransformResult` as raw transform output
 
-Basic RunOptions Example
-------------------------
-Most users only need :class:`RunOptions`::
+RunOptions
+----------
+Use :class:`RunOptions` (or equivalent keyword arguments on ``run``) to control
+execution behavior such as:
 
-    from pynbodyext.core.calculate import RunOptions
+- progress verbosity
+- error handling policy
+- value recording policy
+- timing and memory collection
+- runtime cache behavior
 
-    options = RunOptions(
-        progress="phase",
-        perf_time=True,
-        perf_memory=True,
-    )
+Example::
 
-    result = calc.run(sim, options=options)
-    print(result.perf_summary)
+    result = calc.run(sim, progress="phase", perf_time=True, perf_memory=True)
 
-Using Keyword Overrides
------------------------
-The same options can usually be passed directly to :meth:`run` or
-:meth:`__call__`::
+ExecutionContext
+----------------
+:class:`ExecutionContext` is engine-owned runtime state for one run. It
+coordinates:
 
-    result = calc.run(sim, progress="phase", perf_memory=True)
+- node evaluation
+- phase recording
+- cache access
+- trace and perf collectors
+- named node registration
+- diagnostic logs
 
-This is convenient for one-off runs, while :class:`RunOptions` is better for
-reusable presets.
+Custom subclasses usually interact with it only inside runtime-level hooks.
 
-What ExecutionContext Does
---------------------------
-:class:`ExecutionContext` is the engine-owned runtime object passed to custom
-calculator subclasses.  It provides methods for evaluating dependencies,
-recording phases, accessing public or raw child values, and emitting logs.
+NodeInput And Scope
+-------------------
+:class:`NodeInput` carries the currently active simulation object for one node
+evaluation, including filtered/transformed scope state.
 
-Custom subclasses usually touch it only inside runtime hooks such as
-:meth:`CalculatorBase.execute`,
-:meth:`PropertyBase._calculate_runtime`,
-:meth:`FilterBase._build_mask_runtime`, or
-:meth:`TransformBase._build_handle_runtime`.
+This is the key object that makes scoped execution deterministic across the
+graph.
 
 FilterResult And TransformResult
 --------------------------------
-Filter and transform nodes return richer raw values than their public value.
+Filters and transforms keep richer raw values than their public values:
 
-A :class:`FilterResult` stores both:
+- :class:`FilterResult` holds mask + filtered simulation view
+- :class:`TransformResult` holds handle + post-transform view + revert metadata
 
-- the computed mask
-- the filtered simulation view used by downstream scoped calculators
-
-A :class:`TransformResult` stores both:
-
-- the transform handle
-- the active simulation view after mutation
-- revertibility metadata and artifacts
-
-This is why filters and transforms should usually use their own specialized
-base classes rather than plain :class:`CalculatorBase`.
-
-NodeInput
----------
-:class:`NodeInput` represents the currently active simulation state for one node
-evaluation.  It tracks the raw simulation object, the current filtered or
-transformed view, and any active transform/filter scope.  Most users do not
-construct it directly.
-
-When This Module Matters
-------------------------
-This module is most important when you are:
-
-- configuring runs with :class:`RunOptions`
-- writing new calculator subclasses
-- debugging how filter and transform scope is propagated
-- inspecting advanced runtime behavior
+This is why filters/transforms should usually use their specialized base
+classes rather than plain :class:`CalculatorBase`.
 
 Notes
 -----
-For everyday analysis code, :class:`RunOptions` is usually the only public type
-from this module that needs direct use.  The other classes are part of the
-public execution model, but are primarily intended for extension and debugging.
+For most end-user analysis code, :class:`RunOptions` is the only type from this
+module that needs direct use. The rest form the public runtime model for
+extension and debugging.
 """
 
 from __future__ import annotations

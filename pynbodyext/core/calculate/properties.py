@@ -1,104 +1,99 @@
-"""Base class for calculators that read a derived property from a snapshot.
+"""Role base class for read-only derived values.
 
-Subclasses typically implement :meth:`calculate` for simple read-only
-calculations.  The framework wraps that logic in the standard execution model,
-records a ``calculate`` phase, and makes the resulting value composable with
-filters, transforms, symbolic expressions, and pipelines.
+:class:`PropertyBase` is the standard base class for calculators that read
+from the active snapshot view and return a derived value.
 
-When To Use PropertyBase
-------------------------
-Subclass :class:`PropertyBase` when your node:
+In this project, most concrete properties are written in dataclass style with
+:class:`Param` fields and a :meth:`calculate` method. See the user-facing
+property modules for examples such as :class:`ParamSum`,
+:class:`ParamContain`, :class:`CenPos`, :class:`KappaRot`, and
+:class:`VirialRadius`.
 
-- reads fields from the active simulation view
+Use :class:`PropertyBase` when the node:
+
+- reads one or more fields from the active simulation view
 - returns a scalar, array, or small structured value
-- does not represent a boolean mask
-- does not mutate the simulation state
+- does not define a boolean mask
+- does not mutate snapshot state
 
-Simple Subclass
----------------
-The simplest custom property implements :meth:`instance_signature` and
-:meth:`calculate`::
+Recommended Authoring Style
+---------------------------
+For most new properties in this codebase, prefer:
 
-    class StellarMass(PropertyBase[float]):
-        def instance_signature(self):
-            return ("stellar_mass",)
+- :meth:`PropertyBase.dataclass`
+- class fields for constructor arguments
+- :class:`Param` for runtime-resolved values
+- :meth:`calculate` as the primary user hook
 
-        def calculate(self, sim):
-            return float(sim["mass"].sum())
+Simple Example
+--------------
+A small field-summing property in the same style as
+:class:`pynbodyext.properties.ParamSum`::
 
-This is the preferred style when the property only depends on the active
-snapshot view and constructor arguments.
+    @PropertyBase.dataclass
+    class ParamSum(PropertyBase[Any]):
+        parameter: str
 
-Property With Dynamic Parameters
---------------------------------
-Use ``dynamic_param_specs`` together with :meth:`prepare_params` and
-:meth:`calculate_with_params` when constructor arguments may be calculator
-outputs, callables, constants, or unit-like values resolved at run time::
+        def calculate(self, sim, params=None):
+            return sim[params.parameter].sum()
 
-    class MassInsideRadius(PropertyBase[float]):
-        dynamic_param_specs = {"radius": "r"}
-
-        def __init__(self, radius):
-            super().__init__()
-            self.radius = radius
-
-        def instance_signature(self):
-            return ("mass_inside_radius", self.radius)
-
-        def prepare_params(self, sim, values):
-            return {"radius": values["radius"]}
-
-        def calculate_with_params(self, sim, params=None):
-            radius = params["radius"]
-            mask = sim["r"] < radius
-            return float(sim["mass"][mask].sum())
-
-This allows expressions such as ``MassInsideRadius(2 * re_calc)``.
-
-Full Runtime Hook
------------------
-Override :meth:`_calculate_runtime` only when the property needs direct access
-to :class:`ExecutionContext` or :class:`NodeInput`::
-
-    class MeanRelativeToCentre(PropertyBase[float]):
-        def __init__(self, field, centre_calc):
-            super().__init__()
-            self.field = field
-            self.centre_calc = centre_calc
-
-        def instance_signature(self):
-            return ("mean_relative_to_centre", self.field, self.centre_calc.signature())
-
-        def declared_dependencies(self):
-            return [self.centre_calc]
-
-        def _calculate_runtime(self, sim, params, ctx, input):
-            centre = ctx.public_value(self.centre_calc, input)
-            values = sim[self.field] - centre
-            return float(values.mean())
-
-Composition Example
--------------------
-Property nodes compose naturally with filters, transforms, and symbolic
-operators::
-
-    mass = StellarMass()
-    hot_mass = mass.filter(TemperatureAbove(1.0e5))
-    shifted_mass = mass.transform(XShift(1.0))
-
-    result = hot_mass.run(sim)
+    result = ParamSum("mass").run(sim)
     print(result.value)
 
-They also participate in symbolic expressions::
+Dynamic Parameter Example
+-------------------------
+A property can accept runtime-resolved parameters through :class:`Param` fields, in the same style as :class:`pynbodyext.properties.ParamContain`::
 
-    ratio = StellarMass() / MassInsideRadius(10.0)
-    print(ratio.run(sim).value)
+    @PropertyBase.dataclass
+    class ParamContain(PropertyBase[Any]):
+        frac: Param[float] = 0.5
+        cal_key: str = "r"
+        parameter: str = "mass"
+
+        def calculate(self, sim, params=None):
+            key = sim[params.cal_key]
+            weight = sim[params.parameter]
+            order = np.argsort(np.asarray(key))
+            key_sorted = np.asarray(key)[order]
+            weight_sorted = np.asarray(weight)[order]
+            cumulative = np.cumsum(weight_sorted)
+            cumulative = (
+                cumulative - cumulative[0]
+            ) / float(cumulative[-1] - cumulative[0])
+            return np.interp(params.frac, cumulative, key_sorted)
+
+This style matches the concrete property modules more closely than older
+examples based on hand-written :meth:`instance_signature`.
+
+Scope Composition
+-----------------
+Properties compose naturally with filters and transforms::
+
+    hot_mass = ParamSum("mass").filter(TemperatureAbove(1.0e5))
+    centred_kappa = KappaRot().transform(ShiftPosTo("ssc"))
+
+    print(hot_mass.run(sim).value)
+    print(centred_kappa.run(sim).value)
+
+Which Hook To Implement
+-----------------------
+Most :class:`PropertyBase` subclasses should implement :meth:`calculate`.
+
+Use :meth:`calculate_with_params` when you want the explicit prepared
+parameter shape.
+
+Only drop to the runtime-level hooks when the property truly needs direct
+access to the execution context or node input.
 
 Notes
 -----
-Most custom properties should override :meth:`calculate` or
-:meth:`calculate_with_params`, not :meth:`execute`.  If the node is primarily a
-mask or a mutation, use :class:`FilterBase` or :class:`TransformBase` instead.
+If a constructor argument is not resolving as expected, inspect the
+:class:`Param` declarations and the dynamic parameter helpers in
+:mod:`.params`.
+
+If the node stops looking like a read-only derived value, reconsider whether
+it should instead be a :class:`FilterBase`, :class:`TransformBase`,
+:class:`RuntimeCalculatorBase`, or :class:`CalculatorBase` subclass.
 """
 
 from __future__ import annotations

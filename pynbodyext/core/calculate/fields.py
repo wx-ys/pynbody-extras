@@ -1,4 +1,90 @@
-"""Declarative field helpers for calculator parameters."""
+"""Declarative parameter helpers for dataclass-style calculators.
+
+This module defines :class:`Param`, :class:`ParamSpec`, and :class:`ParamView`,
+which support declarative calculator definitions built with
+:meth:`CalculatorBase.dataclass` or :func:`dataclass_calc`.
+
+Use this module when you want constructor fields to declare whether they are:
+
+- dynamic runtime-resolved inputs
+- static configuration values
+- part of the calculator signature
+- associated with a simulation field for unit-aware resolution
+
+Most users encounter :class:`Param` first.
+
+Basic Example
+-------------
+A calculator class can be declared with dataclass-style fields::
+
+    from pynbodyext.core.calculate import Param, PropertyBase
+
+    @PropertyBase.dataclass
+    class MassInsideRadius(PropertyBase[float]):
+        radius: Param[float] = Param(field_name="r")
+        family: Param[str] = Param(default="star", dynamic=False)
+
+        def calculate_with_params(self, sim, params=None):
+            radius = params.radius
+            mask = sim["r"] < radius
+            return float(sim["mass"][mask].sum())
+
+    result = MassInsideRadius(10.0, family="star").run(sim)
+    print(result.value)
+
+In this example, ``radius`` is resolved dynamically in the units of ``r``,
+while ``family`` is treated as ordinary static configuration.
+
+Dynamic Versus Static Fields
+----------------------------
+A :class:`Param` field is dynamic by default. This means it may accept:
+
+- a literal value
+- a callable resolved at run time
+- another calculator whose public value is needed first
+
+Mark a field with ``dynamic=False`` when it should stay as ordinary static
+metadata rather than becoming part of runtime parameter resolution.
+
+For example::
+
+    label: Param[str] = Param(default="mass", dynamic=False)
+
+Signature Control
+-----------------
+Use ``signature=False`` for fields that should not affect calculator identity,
+such as display-only labels or cosmetic options::
+
+    label: Param[str] = Param(default="mass", dynamic=False, signature=False)
+
+ParamView
+---------
+Resolved parameters are usually presented to the calculator as a
+:class:`ParamView`. It supports both attribute and item access::
+
+    def calculate_with_params(self, sim, params=None):
+        radius = params.radius
+        same_radius = params["radius"]
+        return float(sim["mass"][sim["r"] < radius].sum())
+
+When To Use This Module
+-----------------------
+Reach for declarative fields when a calculator has several constructor
+arguments and you want the class definition itself to show which ones are
+runtime-resolved, unit-aware, or static.
+
+For very small calculators, a manual ``__init__`` plus
+``dynamic_param_specs`` may still be simpler.
+
+Notes
+-----
+If a dataclass-style calculator is not resolving parameters as expected,
+inspect the collected parameter specs and the dynamic resolution helpers in
+:mod:`.params`.
+
+If a field seems to affect caching unexpectedly, check whether its
+``signature`` setting matches the intended identity semantics.
+"""
 
 from __future__ import annotations
 

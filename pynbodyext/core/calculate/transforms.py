@@ -1,127 +1,107 @@
-"""Base class for mutating calculators that return transform handles.
+"""Role base class for temporary simulation mutations.
 
-Subclasses implement :meth:`build_handle` or :meth:`_build_handle_runtime`.
-The returned handle describes the applied mutation and may later be cleaned up
-when the transform is used in a scoped calculator.
+:class:`TransformBase` is the standard base class for calculators that mutate
+the active frame before downstream calculation and return a handle describing
+the applied change.
 
-When To Use TransformBase
--------------------------
-Subclass :class:`TransformBase` when your node:
+In this project, most concrete transforms under :mod:`pynbodyext.transforms`
+are written in dataclass style and implement :meth:`build_handle`. Real
+examples include :class:`ShiftPosTo`, :class:`ShiftVelTo`,
+:class:`AlignVec`, and :class:`WrapBox`.
+
+Use :class:`TransformBase` when the node:
 
 - changes coordinates, velocities, or another mutable field
 - should run before another calculator
-- may expose a revertible handle
-- should be tracked as a mutating execution step
+- returns a handle that can later be reverted or cleaned up
+- represents a tracked mutating step in the execution graph
 
-Simple Subclass
----------------
-The simplest transform implements :meth:`instance_signature`,
-:meth:`build_handle`, and usually :meth:`cleanup`::
+Recommended Authoring Style
+---------------------------
+For most new transforms in this codebase, prefer:
 
-    class XShift(TransformBase[dict[str, object]]):
-        def __init__(self, dx):
-            super().__init__()
-            self.dx = dx
+- :meth:`TransformBase.dataclass`
+- :class:`Param` for runtime-resolved values
+- :meth:`build_handle` as the main user hook
+- returning a pynbody transformation handle when possible
 
-        def instance_signature(self):
-            return ("x_shift", self.dx)
+If the returned handle already knows how to revert itself, custom cleanup is
+often unnecessary.
 
-        def build_handle(self, sim, target, params=None):
-            original = target["x"].copy()
-            target["x"] = target["x"] + self.dx
-            return {"target": target, "original_x": original}
-
-        def cleanup(self, ctx, handle):
-            handle["target"]["x"] = handle["original_x"]
-
-        def is_revertible(self, handle):
-            return True
-
-This is the preferred style when the transform can be fully described by the
-active snapshot view, the chosen target, and constructor arguments.
-
-Transform With Dynamic Parameters
----------------------------------
-Use ``dynamic_param_specs`` when offsets or angles may be calculator-valued or
-resolved at run time::
-
-    class ShiftByRadius(TransformBase[dict[str, object]]):
-        dynamic_param_specs = {"dx": "x"}
-
-        def __init__(self, dx):
-            super().__init__()
-            self.dx = dx
-
-        def instance_signature(self):
-            return ("shift_by_radius", self.dx)
-
-        def build_handle(self, sim, target, params=None):
-            original = target["x"].copy()
-            target["x"] = target["x"] + params["dx"]
-            return {"target": target, "original_x": original}
-
-        def cleanup(self, ctx, handle):
-            handle["target"]["x"] = handle["original_x"]
-
-        def is_revertible(self, handle):
-            return True
-
-Full Runtime Hook
------------------
-Override :meth:`_build_handle_runtime` when the transform needs access to
-:class:`ExecutionContext`, :class:`NodeInput`, or child calculator evaluation::
-
-    class ShiftToCentre(TransformBase[dict[str, object]]):
-        def __init__(self, centre_calc):
-            super().__init__()
-            self.centre_calc = centre_calc
-
-        def instance_signature(self):
-            return ("shift_to_centre", self.centre_calc.signature())
-
-        def declared_dependencies(self):
-            return [self.centre_calc]
-
-        def _build_handle_runtime(self, sim, target, params, ctx, input):
-            centre = ctx.public_value(self.centre_calc, input)
-            original = target["pos"].copy()
-            target["pos"] = target["pos"] - centre
-            return {"target": target, "original_pos": original}
-
-        def cleanup(self, ctx, handle):
-            handle["target"]["pos"] = handle["original_pos"]
-
-        def is_revertible(self, handle):
-            return True
-
-Measure-On-Subset Example
--------------------------
-Transforms can measure parameters on one subset while mutating the full target
-through :meth:`measure_with`::
-
-    centred = ShiftToCentre(centre_calc).measure_with(TemperatureAbove(1.0e5))
-    result = StellarMass().transform(centred).run(sim)
-
-Composition Example
+Translation Example
 -------------------
-Transforms chain naturally and can be scoped onto any calculator::
+A simplified example in the same style as
+:class:`pynbodyext.transforms.ShiftPosTo`::
+    @TransformBase.dataclass
+    class ShiftPosTo(TransformBase[Any]):
+        mode: Param[Any] = Param(default="ssc", field_name="pos")
+        move_all: bool = True
 
-    shift = XShift(1.0)
-    calc = MeanTemperature().transform(shift)
-    result = calc.run(sim)
+        def __post_init__(self):
+            if isinstance(self.mode, str):
+                self.mode = CenPos(self.mode)
+
+        def build_handle(self, sim, target, params=None):
+            cen = params.mode
+            return GenericTranslation(
+                target,
+                "pos",
+                -cen,
+                description="PosToCenter",
+            )
+
+    result = KappaRot().transform(ShiftPosTo("ssc")).run(sim)
     print(result.value)
 
-Multiple transforms can be composed into one plan::
+Rotation Example
+----------------
+A vector-alignment transform in the style of
+:class:`pynbodyext.transforms.AlignVec`::
 
-    plan = XShift(1.0).then(ShiftByRadius(2.0))
-    result = StellarMass().transform(plan).run(sim)
+    @TransformBase.dataclass
+    class AlignVec(TransformBase[Any]):
+        vector: Param[np.ndarray]
+        up: np.ndarray | None = None
+        move_all: bool = True
+
+        def build_handle(self, sim, target, params=None):
+            vec = params.vector
+            rotation = calc_faceon_matrix(vec, up=self.up)
+            return target.rotate(rotation, description="AlignVec")
+
+Measurement Versus Target
+-------------------------
+A transform may measure a parameter on one subset while mutating a wider
+target. This is what :meth:`measure_with` is for::
+
+    centred = ShiftPosTo("ssc").measure_with(FamilyFilter("star"))
+    result = KappaRot().transform(centred).run(sim)
+    print(result.value)
+
+Revert Behavior
+---------------
+Transform cleanup is controlled by the selected revert policy.
+
+Most transforms in this codebase return handles that already support
+reversion, so the default cleanup path is often sufficient. Override
+:meth:`cleanup` only when the handle is a plain custom object or needs
+special reversal logic.
+
+Which Hook To Implement
+-----------------------
+Most :class:`TransformBase` subclasses should implement :meth:`build_handle`.
+
+Use the runtime-level hooks only when the transform needs direct access to
+the execution context, a custom measurement workflow, or explicit dependency
+evaluation.
 
 Notes
 -----
-The default :meth:`cleanup` implementation only calls ``handle.revert()`` when
-such a method exists.  If your transform returns a plain dict, tuple, or other
-custom handle, override :meth:`cleanup` and usually :meth:`is_revertible` as
-shown above.
+If a transform appears to leak state, inspect the handle type and revert
+policy.
+
+If a transform seems to measure on the wrong subset, inspect its measure
+filter and the resulting scope composition.
 """
 
 from __future__ import annotations

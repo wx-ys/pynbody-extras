@@ -1,113 +1,101 @@
-"""Abstract base class for executable calculator nodes.
+"""Base abstractions for executable calculator nodes.
 
-Parameters
-----------
-name : str, optional
-    Human-readable node name.  Named nodes are easier to identify in progress
-    output, trace trees, and result graphs.
-record_policy : RecordPolicy, optional
-    Controls whether raw and public values are retained in the returned
-    :class:`Result`.
-default_options : RunOptions, optional
-    Default execution options used by :meth:`run`, :meth:`__call__`, and
-    :meth:`value`.
+This module defines :class:`CalculatorBase`, the lowest-level public base class
+in the calculator framework, together with helper types used for scoped
+calculators and grouped execution.
 
-When To Subclass This Directly
-------------------------------
-Use :class:`CalculatorBase` directly only when your node needs custom
-orchestration that does not fit the simpler property/filter/transform patterns.
+Most user-defined calculators should not inherit from :class:`CalculatorBase`
+directly.
 
-Typical reasons to subclass it directly are:
+Choosing A Base Class
+---------------------
+Choose the narrowest base class that matches the node.
 
-- the node evaluates several child calculators in a custom order
-- the node exposes a raw value and a different public value
-- the node needs explicit control over runtime phases
-- the node acts like a small workflow rather than a single calculation
+1. Use :class:`PropertyBase` for a read-only derived value.
+2. Use :class:`FilterBase` for a boolean mask.
+3. Use :class:`TransformBase` for a temporary mutation.
+4. If none of those fit, but the node still follows the standard runtime
+   lifecycle, subclass :class:`RuntimeCalculatorBase`.
+5. Only subclass :class:`CalculatorBase` directly when you need to implement
+   :meth:`execute` yourself.
 
-For simple read-only values, prefer :class:`PropertyBase`.
-For boolean masks, prefer :class:`FilterBase`.
-For temporary mutations, prefer :class:`TransformBase`.
+Why CalculatorBase Is The Last Resort
+-------------------------------------
+Direct subclasses of :class:`CalculatorBase` own their execution model. That
+usually means the node needs custom orchestration rather than the standard
+property, filter, transform, or runtime-template workflow.
 
-Minimal Direct Subclass
+Typical reasons to inherit from :class:`CalculatorBase` directly are:
+
+- evaluating child calculators in a custom order
+- exposing a richer raw payload and a different public value
+- handling failures or branching in a custom way
+- acting like a small workflow rather than a single calculation
+
+Direct Subclass Example
 -----------------------
-A minimal direct subclass normally implements :meth:`instance_signature`,
+A direct subclass usually implements :meth:`instance_signature`,
 :meth:`declared_dependencies`, and :meth:`execute`::
 
-    class Ratio(CalculatorBase[float, float]):
-        def __init__(self, numerator, denominator):
+    class HotMassFraction(CalculatorBase[dict[str, float], float]):
+        def __init__(self, hot_mass, total_mass):
             super().__init__()
-            self.numerator = numerator
-            self.denominator = denominator
+            self.hot_mass = hot_mass
+            self.total_mass = total_mass
 
         def instance_signature(self):
             return (
-                "ratio",
-                self.numerator.signature(),
-                self.denominator.signature(),
+                "hot_mass_fraction",
+                self.hot_mass.signature(),
+                self.total_mass.signature(),
             )
 
         def declared_dependencies(self):
-            return [self.numerator, self.denominator]
+            return [self.hot_mass, self.total_mass]
 
         def execute(self, ctx, input):
-            num = ctx.public_value(self.numerator, input)
-            den = ctx.public_value(self.denominator, input)
-            if den == 0:
-                raise ValueError("denominator is zero")
-            return float(num / den)
-
-Custom Raw/Public Value Pair
-----------------------------
-Override :meth:`public_value` when the raw runtime value should preserve more
-information than the public root value::
-
-    class MeanWithStats(CalculatorBase[dict[str, float], float]):
-        def __init__(self, field):
-            super().__init__()
-            self.field = field
-
-        def instance_signature(self):
-            return ("mean_with_stats", self.field)
-
-        def execute(self, ctx, input):
-            values = input.active_sim[self.field]
+            hot = ctx.public_value(self.hot_mass, input)
+            total = ctx.public_value(self.total_mass, input)
+            if total == 0:
+                raise ValueError("total mass is zero")
             return {
-                "mean": float(values.mean()),
-                "std": float(values.std()),
-                "count": float(len(values)),
+                "hot_mass": float(hot),
+                "total_mass": float(total),
+                "fraction": float(hot / total),
             }
 
         def public_value(self, value):
-            return value["mean"]
+            return value["fraction"]
 
-The returned :class:`Result` will expose ``result.value`` as the mean, while
-the raw node payload can still be retained according to the selected
-``record_policy``.
+    result = HotMassFraction(
+        ParamSum("mass").filter(TemperatureAbove(1.0e5)),
+        ParamSum("mass"),
+    ).run(sim)
 
-Composition Example
--------------------
-Direct subclasses still compose with filters, transforms, pipelines, and named
-outputs like any other calculator::
-
-    combo = (
-        Ratio(StellarMass(), MeanTemperature())
-        .filter(TemperatureAbove(1.0e5))
-        .named("mass_over_temp")
-    )
-
-    result = combo.run(sim, progress="node")
     print(result.value)
 
-Extension Notes
----------------
-Keep :meth:`instance_signature` stable across structurally equivalent
-instances.  If your node depends on other calculators, use
-:meth:`declared_dependencies` so cache keys, graph traversal, and result trees
-stay correct.
+Raw Value Versus Public Value
+-----------------------------
+A calculator node may keep a raw runtime payload that is richer than the public
+value exposed at the root of the result. Override :meth:`public_value` when the
+root output should be a projection of that raw payload.
 
-Most subclasses should not override :meth:`run` or :meth:`__call__`.  Put
-calculator-specific logic in :meth:`execute`, :meth:`materialize`,
-:meth:`public_value`, or :meth:`materialize_public`.
+This pattern is useful when the node needs to preserve extra diagnostics or
+intermediate statistics while still behaving like a scalar-valued calculator.
+
+Composition
+-----------
+A direct :class:`CalculatorBase` subclass still composes with filters,
+transforms, naming, and pipelines like any other calculator.
+
+Notes
+-----
+Keep :meth:`instance_signature` stable across structurally equivalent
+instances. If the node depends on child calculators, always expose them through
+:meth:`declared_dependencies` so traversal, caching, and result graphs stay
+correct.
+
+Most subclasses should not override :meth:`run` or :meth:`__call__`.
 """
 
 from __future__ import annotations

@@ -1,98 +1,56 @@
-"""Scope helpers for applying filters and transforms to calculators.
+"""Scope helpers for filter/transform composition.
 
-Scopes are immutable descriptions of preprocessing applied before a calculator
-runs.  They can be built explicitly with :class:`Scope` or created implicitly
-through fluent helpers such as ``calculator.filter(...)`` and
-``calculator.transform(...)``.
+This module defines immutable scope objects used to apply filters and
+transforms before a calculator runs.
 
-Why Scope Exists
-----------------
-A scope is the framework's way to describe "run this calculator, but first
-apply these filters and transforms".  Scopes make that behavior explicit,
-composable, and reusable.
+In day-to-day usage, scope is usually created implicitly via fluent APIs such
+as ``calc.filter(...)`` and ``calc.transform(...)``. This module provides the
+explicit model behind that behavior.
 
-This lets the same base calculator be reused across many filtered or transformed
-views without mutating the calculator itself.
+Scope Model
+-----------
+A scope describes preprocessing applied to a calculator:
 
-Basic Example
--------------
-Create a reusable scope and apply it to several calculators::
+- zero or more transforms in order
+- optional composed filter
+- selected revert policy
 
-    from pynbodyext.core.calculate import Scope
+This lets one base calculator be reused across many scoped views without
+mutating the calculator itself.
+
+Public Types
+------------
+- :class:`Scope` as a user-facing scope builder
+- :class:`ScopeSpec` as the immutable internal representation
+- :class:`TransformScope` for transform-focused scope composition
+
+Common Usage
+------------
+Fluent style (most common)::
+
+    hot_mass = ParamSum("mass").filter(TemperatureAbove(1.0e5))
+    centred_kappa = KappaRot().transform(ShiftPosTo("ssc"))
+
+Explicit reusable scope::
 
     aperture = Scope(filter=TemperatureAbove(1.0e5))
-
-    hot_mass = aperture.apply(StellarMass())
+    hot_mass = aperture.apply(ParamSum("mass"))
     hot_temp = aperture.apply(MeanTemperature())
 
-    print(hot_mass.run(sim).value)
-    print(hot_temp.run(sim).value)
+Why This Module Matters
+-----------------------
+This module is central when debugging scope composition, especially:
 
-Fluent Style
-------------
-In normal user code, scopes are usually created indirectly through calculator
-methods::
-
-    hot_mass = StellarMass().filter(TemperatureAbove(1.0e5))
-    shifted_temp = MeanTemperature().transform(XShift(1.0))
-
-This fluent style is the most common way to work with scope in day-to-day use.
-
-Explicit Scope Builder
-----------------------
-The explicit :class:`Scope` API is useful when the same preprocessing should be
-applied to many calculators or pipelines::
-
-    summary_scope = Scope(filter=TemperatureAbove(1.0e5))
-    pipe = summary_scope.pipeline(
-        {
-            "mass": StellarMass(),
-            "temp_mean": MeanTemperature(),
-        }
-    )
-
-    result = pipe.run(sim)
-    print(result.value["mass"])
-
-ScopeSpec
----------
-:class:`ScopeSpec` is the immutable internal representation used by bound
-calculators.  It stores:
-
-- the ordered transform chain
-- the composed filter
-- the selected revert policy
-
-Most end users do not need to construct :class:`ScopeSpec` directly, but it is
-helpful to understand when debugging composed scopes.
-
-Composition Example
--------------------
-Scopes compose naturally.  A filter can be merged with another filter, and a
-transform chain can be extended by appending more transforms::
-
-    scoped = (
-        StellarMass()
-        .filter(TemperatureAbove(1.0e5))
-        .transform(XShift(1.0))
-    )
-
-    result = scoped.run(sim)
-
-When This Module Matters
-------------------------
-This module is most relevant when you are:
-
-- building reusable analysis presets
-- applying one scope to many calculators
-- debugging how filter/transform composition works
-- writing custom tooling on top of calculator graphs
+- filter/transform ordering
+- nested scope merges
+- revert behavior through composed transforms
+- repeated scoped execution across pipelines
 
 Notes
 -----
-Prefer the fluent calculator API for one-off usage.  Reach for :class:`Scope`
-when you want to share the same preprocessing across many calculators or build
-higher-level analysis presets.
+Prefer fluent calculator APIs for one-off usage. Use explicit :class:`Scope`
+objects when the same preprocessing preset should be shared across many
+calculators.
 """
 
 from __future__ import annotations

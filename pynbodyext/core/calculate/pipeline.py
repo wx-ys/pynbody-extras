@@ -1,42 +1,36 @@
 """Multi-output calculator pipelines.
 
-A :class:`Pipeline` groups several calculators into one shared evaluation run.
-This is useful when multiple outputs depend on overlapping subgraphs and should
-share dependency resolution, runtime cache, provenance, progress reporting, and
-diagnostics.
+:class:`Pipeline` groups several calculators into one shared execution run.
+This is the standard way to compute several related outputs while reusing
+shared dependencies, cache state, trace collection, and performance reporting.
 
-Each output is registered under its dictionary key in :attr:`Result.named`, so
-pipeline outputs can be retrieved with :meth:`Result.get` after one run.
+Each pipeline output is registered under its dictionary key in
+:attr:`Result.named`, so outputs can be retrieved after one run with
+:meth:`Result.get`.
 
-When To Use Pipeline
---------------------
 Use :class:`Pipeline` when you want to:
 
-- evaluate several outputs in one shared run
+- evaluate several outputs in one run
 - reuse overlapping dependencies automatically
 - expose outputs by stable names
-- apply one filter/transform scope to several outputs at once
+- apply one filter or transform scope to several outputs at once
 
-Most users compose :class:`Pipeline` directly rather than subclassing it.
-
-Basic Usage
------------
-A basic pipeline groups named outputs::
+Basic Example
+-------------
+Group several outputs under stable names::
 
     from pynbodyext.core.calculate import Pipeline, PropertyBase
 
+    @PropertyBase.dataclass
     class StellarMass(PropertyBase[float]):
-        def instance_signature(self):
-            return ("stellar_mass",)
 
-        def calculate(self, sim):
+        def calculate(self, sim, params=None):
             return float(sim["mass"].sum())
 
+    @PropertyBase.dataclass
     class MeanTemperature(PropertyBase[float]):
-        def instance_signature(self):
-            return ("mean_temperature",)
 
-        def calculate(self, sim):
+        def calculate(self, sim, params=None):
             return float(sim["temp"].mean())
 
     pipe = Pipeline(
@@ -53,49 +47,16 @@ A basic pipeline groups named outputs::
 
 Why Pipeline Helps
 ------------------
-The main advantage of :class:`Pipeline` is not just returning a dictionary.  It
-ensures all outputs participate in one shared execution graph.  If two outputs
-depend on the same child calculator, that dependency is only evaluated once.
+The main benefit of :class:`Pipeline` is shared execution, not just returning
+a dictionary. If two outputs depend on the same child calculator, that child is
+evaluated once inside the same run context.
 
-For example, a reusable property can be shared across outputs::
-
-    class CountParticles(PropertyBase[int]):
-        def instance_signature(self):
-            return ("count_particles",)
-
-        def calculate(self, sim):
-            return int(len(sim))
-
-    count = CountParticles().keep("count")
-
-    pipe = Pipeline(
-        {
-            "count": count,
-            "mass": StellarMass(),
-        }
-    )
-
-    result = pipe.run(sim)
-    print(result.get("count"))
+This is especially useful for analysis summaries built from overlapping
+building blocks.
 
 Scoped Pipeline
 ---------------
-Pipelines compose with filters and transforms like any other calculator::
-
-    import numpy as np
-
-    from pynbodyext.core.calculate import FilterBase
-
-    class TemperatureAbove(FilterBase):
-        def __init__(self, threshold):
-            super().__init__()
-            self.threshold = threshold
-
-        def instance_signature(self):
-            return ("temperature_above", self.threshold)
-
-        def build_mask(self, sim, params):
-            return sim["temp"] > self.threshold
+A pipeline composes with filters and transforms like any other calculator::
 
     hot_summary = Pipeline(
         {
@@ -107,27 +68,34 @@ Pipelines compose with filters and transforms like any other calculator::
 
     result = hot_summary.run(sim, progress="phase")
     print(result.value["mass"])
+    print(result.reports["trace_tree"])
 
-Custom Pipeline Subclass
-------------------------
-Subclass :class:`Pipeline` only when you need custom multi-output orchestration,
-such as special failure handling or output registration rules.  In most cases,
-plain composition is simpler and keeps signatures easier to reason about.
-
-Inspection Example
+Inspecting Results
 ------------------
-Pipelines work especially well with the result reporting tools::
+A pipeline result is still a normal :class:`Result`::
 
     result = pipe.run(sim, progress="phase")
-    print(result.pipeline_report())
-    print(result.reports["trace_tree"])
-    print(result.perf_summary)
+    print(result.value)
+    print(result.get("mass"))
+    print(result.reports["perf"])
+    print(result.reports["cache"])
+
+Subclassing
+-----------
+Most users should compose :class:`Pipeline` directly rather than subclassing
+it.
+
+Subclass :class:`Pipeline` only when you need custom multi-output
+orchestration, such as non-standard failure handling or output registration
+rules.
 
 Notes
 -----
-Pipeline output keys should be stable and unique.  Prefer short semantic names
-such as ``mass``, ``re``, ``temp_mean``, or ``hot_fraction`` over positional or
-temporary labels.
+Keep output keys stable and unique. If a pipeline output name collides with
+another named node, execution will fail.
+
+If one child seems to recompute unexpectedly, inspect the shared dependency
+graph through the trace and cache reports.
 """
 
 from __future__ import annotations
