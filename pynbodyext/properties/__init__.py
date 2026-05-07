@@ -14,7 +14,6 @@ __all__ = [
     "PropertyBase",
     "ParamSum",
     "ParamContain",
-    "ParameterContain",
     "KappaRot",
     "KappaRotMean",
     "VolumeDensity",

@@ -78,12 +78,23 @@ class AngMomVec(PropertyBase[SimArray]):
     """Angular momentum vector property"""
 
     def calculate(self, sim: SimSnap, params: Any = None) -> SimArray:
+        if len(sim) == 0:
+            self.warning("AngMomVec received an empty particle snapshot")
+            raise ValueError("Cannot compute angular momentum for an empty particle snapshot.")
+
         mass = sim["mass"].reshape((len(sim["mass"]), 1))
         pos = sim["pos"]
         vel = sim["vel"]
 
         cross = np.cross(pos, vel)
         angmom = (mass * cross).sum(axis=0)
+
+        if not np.all(np.isfinite(angmom)):
+            self.warning(f"AngMomVec produced a non-finite vector: {angmom}")
+            raise ValueError(f"Angular momentum vector contains non-finite values: {angmom}.")
+        if np.all(angmom == 0):
+            self.warning("AngMomVec produced a zero vector")
+            raise ValueError("Angular momentum vector is zero; cannot define an orientation.")
 
         angmom.units = sim["mass"].units * sim["pos"].units * sim["vel"].units
         return angmom
@@ -103,9 +114,25 @@ class KappaRot(PropertyBase[float]):
     """
 
     def calculate(self, sim: SimSnap, params: Any = None) -> float:
+        if len(sim) == 0:
+            self.warning("KappaRot received an empty particle snapshot")
+            raise ValueError("Cannot compute kappa_rot for an empty particle snapshot.")
+
         Krot = np.sum(0.5 * sim["mass"] * (sim["vcxy"] ** 2))
         K = np.sum(sim["mass"] * sim["ke"])
-        return float(Krot / K)
+
+        if not np.isfinite(Krot):
+            self.warning(f"KappaRot rotational kinetic energy is non-finite: {Krot}")
+            raise ValueError(f"Rotational kinetic energy is non-finite: {Krot}.")
+        if not np.isfinite(K) or K <= 0.0:
+            self.warning(f"KappaRot total kinetic energy is invalid: {K}")
+            raise ValueError(f"Total kinetic energy must be finite and positive, got {K}.")
+
+        value = Krot / K
+        if not np.isfinite(value):
+            self.warning(f"KappaRot result is non-finite: {value}")
+            raise ValueError(f"kappa_rot is non-finite: {value}.")
+        return float(value)
 
 @PropertyBase.dataclass
 class KappaRotMean(PropertyBase[float]):
