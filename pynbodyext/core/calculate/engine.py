@@ -94,6 +94,7 @@ from pynbody.array import SimArray
 from .context import ExecutionContext, FilterResult, NodeInput, NodeProgressEvent, RunOptions, RunProgressEvent
 from .enums import CachePolicy, ErrorPolicy, NodeStatus, RecordPolicy
 from .exceptions import CycleError
+from .observer import render_observer_report
 from .result import ErrorInfo, ProvenanceInfo, Result, ResultNode, ValueSummary
 
 if TYPE_CHECKING:
@@ -359,13 +360,14 @@ class EvalEngine:
     ) -> _NodeExecutionState:
         state = _NodeExecutionState()
         with ctx.node_scope(node_result, node):
-            try:
-                state.raw_value = node.execute(ctx, work)
-                state.raw_value = node.materialize(ctx, state.raw_value)
-                state.public_value = node.public_value(state.raw_value)
-                state.public_value = node.materialize_public(ctx, state.public_value)
-            except Exception as exc:
-                raise _NodeExecutionFailure(exc, state) from exc
+            with ctx.observe_node_access(node_result, node):
+                try:
+                    state.raw_value = node.execute(ctx, work)
+                    state.raw_value = node.materialize(ctx, state.raw_value)
+                    state.public_value = node.public_value(state.raw_value)
+                    state.public_value = node.materialize_public(ctx, state.public_value)
+                except Exception as exc:
+                    raise _NodeExecutionFailure(exc, state) from exc
         return state
 
     def _record_node_error(
@@ -473,6 +475,7 @@ class EvalEngine:
         cache_report = ctx.cache.report_text()
         trace_timeline = ctx.trace.render_timeline()
         trace_tree = ctx.trace.render_tree(ctx.node_registry, root.node_id)
+        observer_report = render_observer_report(ctx.access_observations.values())
 
         perf_summary = ctx.perf.summary(ctx.node_registry, cache_hit_count=ctx.cache.hit_count)
         cache_summary = ctx.cache.summary()
@@ -488,6 +491,7 @@ class EvalEngine:
         root.artifacts["cache_report"] = cache_report
         root.artifacts["trace_timeline"] = trace_timeline
         root.artifacts["trace_tree"] = trace_tree
+        root.artifacts["observer_report"] = observer_report
         root.artifacts["log_events"] = list(ctx.log_events)
 
         return Result(
@@ -495,6 +499,7 @@ class EvalEngine:
             root=root,
             nodes=dict(ctx.node_registry),
             named=named,
+            observations=dict(ctx.access_observations),
             provenance=provenance,
             perf_summary=perf_summary,
             warnings=list(ctx.warnings),
@@ -502,12 +507,22 @@ class EvalEngine:
             reports={
                 "perf": perf_report,
                 "cache": cache_report,
+                "observer": observer_report,
                 "trace_timeline": trace_timeline,
                 "trace_tree": trace_tree,
             },
             diagnostics={
                 "trace_events": list(ctx.trace.events),
                 "cache_events": list(ctx.cache.events),
+                "observations": {
+                    node_id: observation.as_dict()
+                    for node_id, observation in ctx.access_observations.items()
+                },
+                "observer_events": [
+                    event.as_dict()
+                    for observation in ctx.access_observations.values()
+                    for event in observation.events
+                ],
                 "log_events": list(ctx.log_events),
                 "named_values": named_values,
             },

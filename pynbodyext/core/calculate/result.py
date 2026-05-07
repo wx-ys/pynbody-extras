@@ -17,6 +17,7 @@ A :class:`Result` exposes several layers of output:
 - ``perf_summary``: aggregate runtime counters
 - ``reports``: formatted trace/cache/performance reports
 - ``diagnostics``: raw event payloads
+- ``observations``: per-node pynbody field read/dirty/delete observations
 
 Common Usage
 ------------
@@ -45,6 +46,7 @@ Use ``result.diagnostics`` for raw machine-friendly event streams, such as:
 - trace events
 - cache events
 - emitted logs
+- observed pynbody field access events
 
 When To Read This Module Directly
 ---------------------------------
@@ -77,6 +79,7 @@ from .display import (
     mimebundle,
 )
 from .enums import NodeKind, NodeStatus, RecordPolicy
+from .observer import AccessObservation, render_observer_report
 
 T = TypeVar("T")
 
@@ -158,6 +161,7 @@ class ResultNode:
     children: list[str] = field(default_factory=list)
     phases: list[PhaseRecord] = field(default_factory=list)
     artifacts: dict[str, Any] = field(default_factory=dict)
+    observation: AccessObservation | None = None
     error: ErrorInfo | None = None
 
     @property
@@ -233,6 +237,7 @@ class Result(Generic[T]):
     root: ResultNode
     nodes: dict[str, ResultNode]
     named: dict[str, ResultNode] = field(default_factory=dict)
+    observations: dict[str, AccessObservation] = field(default_factory=dict)
     provenance: ProvenanceInfo | None = None
     perf_summary: PerfSummary = field(default_factory=PerfSummary)
     warnings: list[str] = field(default_factory=list)
@@ -372,6 +377,33 @@ class Result(Generic[T]):
     def log_events(self) -> list[Any]:
         """Return runtime log events captured during evaluation."""
         return list(self.diagnostic("log_events", []))
+
+    def observer_events(self) -> list[Any]:
+        """Return raw pynbody field observer events."""
+        return list(self.diagnostic("observer_events", []))
+
+    def access_observations(self) -> dict[str, AccessObservation]:
+        """Return per-node pynbody field access observations."""
+        if self.observations:
+            return dict(self.observations)
+        return {
+            node_id: node.observation
+            for node_id, node in self.nodes.items()
+            if node.observation is not None
+        }
+
+    def observation_of(self, node: str | ResultNode) -> AccessObservation | None:
+        """Return the access observation for one node, if available."""
+        resolved = ResultQuery.resolve_node(self, node)
+        if resolved.observation is not None:
+            return resolved.observation
+        return self.observations.get(resolved.node_id)
+
+    def observer_report(self, *, include_empty: bool = False) -> str:
+        """Return a formatted pynbody field observer report."""
+        if not include_empty:
+            return self.report("observer")
+        return render_observer_report(self.access_observations().values(), include_empty=True)
 
     def iter_nodes(self) -> list[ResultNode]:
         """Return result nodes in registry order."""
@@ -524,6 +556,11 @@ class ResultQuery:
                 lines.append(f"preview: {resolved.value_summary.preview}")
         if resolved.error is not None:
             lines.append(f"error: {resolved.error.error_type}: {resolved.error.message}")
+        if resolved.observation is not None:
+            lines.append(f"observer_events: {resolved.observation.event_count}")
+            lines.append(f"observer_reads: {len(resolved.observation.reads)}")
+            lines.append(f"observer_dirty: {len(resolved.observation.dirty_fields)}")
+            lines.append(f"observer_deletes: {len(resolved.observation.deletes)}")
         return "\n".join(lines)
 
     @staticmethod
@@ -584,6 +621,8 @@ class ResultRepr:
             parts.append(f"children={len(node.children)}")
         if node.error is not None:
             parts.append(f"error={node.error.error_type!r}")
+        if node.observation is not None and node.observation.event_count:
+            parts.append(f"observer_events={node.observation.event_count}")
         return f"ResultNode({', '.join(parts)})"
 
     @staticmethod
@@ -601,6 +640,11 @@ class ResultRepr:
             rows.append(("value", node.value_summary))
         if node.error is not None:
             rows.append(("error", f"{node.error.error_type}: {node.error.message}"))
+        if node.observation is not None:
+            rows.append(("observer events", node.observation.event_count))
+            rows.append(("observer reads", len(node.observation.reads)))
+            rows.append(("observer dirty", len(node.observation.dirty_fields)))
+            rows.append(("observer deletes", len(node.observation.deletes)))
         return html_card("ResultNode", rows)
 
     @staticmethod
@@ -616,6 +660,8 @@ class ResultRepr:
             parts.append(f"warnings={len(result.warnings)}")
         if result.errors:
             parts.append(f"errors={len(result.errors)}")
+        if result.observations:
+            parts.append(f"observations={len(result.observations)}")
         return f"Result({', '.join(parts)})"
 
     @staticmethod

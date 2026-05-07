@@ -206,6 +206,7 @@ from .exceptions import CalculatorError, CycleError
 from .expr import ConstantProperty, LambdaProperty, OpProperty
 from .fields import Param, ParamSpec, ParamView, collect_param_specs
 from .filters import AndFilter, FilterBase, NotFilter, OrFilter
+from .observer import AccessEvent, AccessObservation
 from .params import DynamicParamSpec, dynamic_value_dependencies, dynamic_value_signature, resolve_dynamic_value
 from .perf import PerfCollector
 from .pipeline import Pipeline
@@ -272,6 +273,8 @@ __all__ = [
     "resolve_dynamic_value",
     "Result",
     "ResultNode",
+    "AccessEvent",
+    "AccessObservation",
     "ValueSummary",
     "PhaseRecord",
     "ErrorInfo",

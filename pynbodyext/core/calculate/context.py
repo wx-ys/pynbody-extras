@@ -702,6 +702,7 @@ class ExecutionContext:
     warnings: list[str] = field(default_factory=list)
     errors: list[ErrorInfo] = field(default_factory=list)
     log_events: list[LogEvent] = field(default_factory=list)
+    access_observations: dict[str, Any] = field(default_factory=dict)
 
     _node_counter: int = 0
     mutation_generation: int = 0
@@ -784,6 +785,19 @@ class ExecutionContext:
         )
         log_fn = getattr(logger, level, logger.debug)
         log_fn(message)
+
+    @contextmanager
+    def observe_node_access(self, node_result: ResultNode, node: CalculatorBase[Any, Any]) -> Iterator[Any]:
+        """Observe pynbody snapshot field access for one executing node."""
+        from .observer import observe_sim_access
+
+        with observe_sim_access(node_result.node_id, node.log_label) as observation:
+            try:
+                yield observation
+            finally:
+                node_result.observation = observation
+                node_result.artifacts["observer"] = observation.as_dict()
+                self.access_observations[node_result.node_id] = observation
 
     @contextmanager
     def node_scope(self, node_result: ResultNode, node: CalculatorBase[Any, Any]) -> Iterator[None]:
