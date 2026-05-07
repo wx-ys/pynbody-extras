@@ -93,7 +93,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
 from .base import CalculatorBase
 from .fields import ParamView
-from .runtime import CalcRuntime
+from .runtime import CalcRuntime, bind_runtime
 
 if TYPE_CHECKING:
     from .base import BoundCalculator
@@ -177,11 +177,12 @@ class RuntimeCalculatorBase(CalculatorBase[TRaw, TPublic], Generic[TRaw, TPublic
         """Execute the unified runtime lifecycle."""
         runtime = self.make_runtime(ctx, input)
 
-        with ctx.phase(self, "resolve_params"):
-            values = self.resolve_params(runtime)
-            params = self.prepare_resolved_params(runtime, values)
+        with bind_runtime(runtime):
+            with ctx.phase(self, "resolve_params"):
+                values = self.resolve_params(runtime)
+                params = self.prepare_resolved_params(runtime, values)
 
-        with ctx.phase(self, "calculate"):
-            computed = self.compute(runtime, params)
+            with ctx.phase(self, "calculate"):
+                computed = self.compute(runtime, params)
 
-        return self.wrap_raw(runtime, computed)
+            return self.wrap_raw(runtime, computed)

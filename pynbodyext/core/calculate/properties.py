@@ -80,7 +80,9 @@ Which Hook To Implement
 Most :class:`PropertyBase` subclasses should implement :meth:`calculate`.
 
 Use :meth:`calculate_with_params` when you want the explicit prepared
-parameter shape.
+parameter shape. Simple ``calculate`` hooks can call ``self.log(...)`` or the
+``self.debug/info/warning/error(...)`` helpers during a run without accepting
+``ctx`` directly.
 
 Only drop to the runtime-level hooks when the property truly needs direct
 access to the execution context or node input.
