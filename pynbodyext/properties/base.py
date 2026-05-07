@@ -1,33 +1,5 @@
 """
-Compatibility property module backed by the new calculator framework.
-
-This module preserves the historical import path::
-
-    from pynbodyext.properties.base import PropertyBase, ParamSum, ParameterContain
-
-while delegating the core property and expression implementation to
-:mod:`pynbodyext.core.calculate`.
-
-The following names are re-exported directly from the new framework:
-
-- :class:`PropertyBase`
-- :class:`ConstantProperty`
-- :class:`LambdaProperty`
-- :class:`OpProperty`
-- :class:`ParamSum`
-- :class:`ParamContain`
-- :class:`KappaRot`
-
-Legacy compatibility alias:
-
-- :class:`ParameterContain` -> :class:`ParamContain`
-
-The concrete density-style properties that do not yet exist in
-:mod:`pynbodyext.core.calculate` remain implemented locally:
-
-- :class:`VolumeDensity`
-- :class:`SurfaceDensity`
-- :class:`RadiusAtSurfaceDensity`
+Some basic properties that are commonly used as building blocks for more complex properties.
 """
 
 from __future__ import annotations
@@ -120,12 +92,22 @@ class ParamSum(PropertyBase[Any]):
 
 @PropertyBase.dataclass
 class VolumeDensity(PropertyBase[SimArray]):
-    """Mean volume density inside a volume filter or radius range."""
+    """Mean volume density inside a volume filter or radius range.
+
+    Parameters
+    ----------
+    rmax: ValueLike or dynamic value
+        Outer radius of the volume.  Calculator-valued radii are resolved at run time
+    rmin: ValueLike or dynamic value, default: 0.0
+        Inner radius of the volume.  Calculator-valued radii are resolved at run time
+    parameter: str
+        Field name to use as the weight for the density calculation.
+    """
 
 
     rmax: Param[ValueLike] = Param(field_name="pos")
-    parameter: str = "mass"
     rmin: Param[ValueLike] = Param(default=0.0, field_name="pos")
+    parameter: str = "mass"
 
 
     def calculate(self, sim, params = None):
@@ -173,20 +155,31 @@ class SurfaceDensity(PropertyBase[SimArray]):
 class RadiusAtSurfaceDensity(PropertyBase[SimArray]):
     """Radius where the surface density reaches a target value.
 
-    In ``mode='shell'`` the surface density is measured in the shell
-    ``[r - eps/2, r + eps/2]``.
-
-    In ``mode='total'`` the surface density is defined as::
-
-        Sigma(<r) = M(<r) / (pi r^2)
-
-    A 1D bisection in radius is used to solve ``Sigma(r) = target``.
+    Parameters
+    ----------
+    target: ValueLike or dynamic value
+        Target surface density to match.  Calculator-valued targets are resolved at run time.
+    mode: str, default: "shell"
+        Method to compute the surface density profile.  Options are:
+        - "shell": Compute surface density in thin shells (default)
+        - "total": Compute surface density using the total mass enclosed within each radius
+    parameter: str, default: "mass"
+        Field name to use for the surface density calculation.
+    r_key: str, default: "rxy"
+        Field name to use for the radius in the surface density calculation.
+    eps: float, default: 0.01
+        Radial width to use for the "shell" mode.  Should be small compared to
+        the typical radius of interest.
     """
     target: Param[ValueLike]
     parameter: str = "mass"
     mode: str = "shell"
     r_key: str = "rxy"
     eps: float = 0.01
+
+    def __post_init__(self):
+        if self.mode not in ("shell", "total"):
+            raise ValueError(f"Invalid mode: {self.mode}. Expected 'shell' or 'total'.")
 
     def _target_value(self, sim, params = None):
         surf_units = sim[params.parameter].units / sim["pos"].units**2

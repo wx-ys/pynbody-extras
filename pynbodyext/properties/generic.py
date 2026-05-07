@@ -1,12 +1,4 @@
-"""Generic property calculators backed by the new calculator framework.
-
-This module provides small reusable property nodes for common halo and galaxy
-measurements, such as centers, angular-momentum vectors, virial radii, spin
-parameters, and pattern speeds.
-
-All local classes inherit from the new :class:`pynbodyext.calculate.PropertyBase`.
-The :class:`KappaRot` property is re-exported from :mod:`pynbodyext.core.calculate`
-so this module stays aligned with the new calculator implementation.
+"""Some generic properties.
 """
 
 
@@ -132,7 +124,15 @@ class KappaRotMean(PropertyBase[float]):
 
 @PropertyBase.dataclass
 class VirialRadius(PropertyBase[float]):
-    """Virial radius property"""
+    """Virial radius property
+
+    Parameters
+    ----------
+    overdensity: float, default: 178.
+        Overdensity threshold for defining the virial radius.
+    rho_def: {"critical", "matter"}, default: "critical"
+        Whether the overdensity is relative to the critical density or the mean matter density.
+    """
     overdensity: float = 178.
     rho_def: Literal["critical", "matter"] = "critical"
 
