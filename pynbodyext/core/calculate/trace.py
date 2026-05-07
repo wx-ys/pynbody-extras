@@ -181,7 +181,11 @@ class TraceCollector:
                 lines.extend(render(child_id, child_prefix, index == len(node.children) - 1))
             return lines
 
-        return "\n".join(render(root_id, "", True))
+        root = nodes[root_id]
+        lines = [f"{root.label} [{root.node_id}]"]
+        for index, child_id in enumerate(root.children):
+            lines.extend(render(child_id, "", index == len(root.children) - 1))
+        return "\n".join(lines)
 
     def report_text(self, nodes: dict[str, ResultNode] | None = None, root_id: str | None = None) -> str:
         """Render trace timeline and optionally a tree section."""

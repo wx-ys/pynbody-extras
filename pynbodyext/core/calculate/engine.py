@@ -94,7 +94,7 @@ from pynbody.array import SimArray
 from .context import ExecutionContext, FilterResult, NodeInput, NodeProgressEvent, RunOptions, RunProgressEvent
 from .enums import CachePolicy, ErrorPolicy, NodeStatus, RecordPolicy
 from .exceptions import CycleError
-from .observer import render_observer_report
+from .observer import observation_phase, render_observer_report
 from .result import ErrorInfo, ProvenanceInfo, Result, ResultNode, ValueSummary
 
 if TYPE_CHECKING:
@@ -363,9 +363,10 @@ class EvalEngine:
             with ctx.observe_node_access(node_result, node):
                 try:
                     state.raw_value = node.execute(ctx, work)
-                    state.raw_value = node.materialize(ctx, state.raw_value)
-                    state.public_value = node.public_value(state.raw_value)
-                    state.public_value = node.materialize_public(ctx, state.public_value)
+                    with observation_phase("materialize"):
+                        state.raw_value = node.materialize(ctx, state.raw_value)
+                        state.public_value = node.public_value(state.raw_value)
+                        state.public_value = node.materialize_public(ctx, state.public_value)
                 except Exception as exc:
                     raise _NodeExecutionFailure(exc, state) from exc
         return state

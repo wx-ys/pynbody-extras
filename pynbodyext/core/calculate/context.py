@@ -132,6 +132,7 @@ class NodeProgressEvent:
     finished_at: float | None = None
     elapsed_s: float | None = None
     from_cache: bool = False
+    access_summary: str | None = None
 
 @dataclass(slots=True)
 class PhaseProgressEvent:
@@ -146,6 +147,7 @@ class PhaseProgressEvent:
     started_at: float | None = None
     finished_at: float | None = None
     elapsed_s: float | None = None
+    access_summary: str | None = None
 
 def _format_count(value: int | None) -> str:
     return str(value) if value is not None else "-"
@@ -247,8 +249,9 @@ class LoggerProgressSink:
             return
 
         cache_suffix = " cache-hit" if event.from_cache else ""
+        access_suffix = f" {event.access_summary}" if event.access_summary else ""
         self.log.info(
-            "%s[%s] %s <%s> %s %s%s",
+            "%s[%s] %s <%s> %s %s%s%s",
             self._node_prefix(event.depth),
             _node_ref(event.node_id),
             event.node_name,
@@ -256,6 +259,7 @@ class LoggerProgressSink:
             _status_text(event.status),
             format_time(event.elapsed_s),
             cache_suffix,
+            access_suffix,
         )
 
     def on_phase_start(self, event: PhaseProgressEvent) -> None:
@@ -273,13 +277,15 @@ class LoggerProgressSink:
         """Log a phase summary event."""
         if not self._shows_phase():
             return
+        access_suffix = f" {event.access_summary}" if event.access_summary else ""
         self.log.info(
-            "%s[%s] phase %s %s %s",
+            "%s[%s] phase %s %s %s%s",
             self._phase_prefix(event.depth),
             _node_ref(event.node_id),
             event.phase,
             _status_text(event.status),
             format_time(event.elapsed_s),
+            access_suffix,
         )
 
 @dataclass(slots=True)
@@ -372,8 +378,9 @@ class TqdmProgressSink:
 
         if self.verbosity in {"node", "phase", "debug"}:
             cache_suffix = " cache-hit" if event.from_cache else ""
+            access_suffix = f" {event.access_summary}" if event.access_summary else ""
             self._set_postfix(
-                f"{event.node_name} {_status_text(event.status)} {format_time(event.elapsed_s)}{cache_suffix}"
+                f"{event.node_name} {_status_text(event.status)} {format_time(event.elapsed_s)}{cache_suffix}{access_suffix}"
             )
 
     def on_phase_start(self, event: PhaseProgressEvent) -> None:
@@ -388,8 +395,9 @@ class TqdmProgressSink:
             self._fallback.on_phase_end(event)
             return
         if self.verbosity in {"phase", "debug"}:
+            access_suffix = f" {event.access_summary}" if event.access_summary else ""
             self._set_postfix(
-                f"{event.node_name}:{event.phase} {_status_text(event.status)} {format_time(event.elapsed_s)}"
+                f"{event.node_name}:{event.phase} {_status_text(event.status)} {format_time(event.elapsed_s)}{access_suffix}"
             )
 
 BasicProgressSink = LoggerProgressSink
@@ -832,6 +840,16 @@ class ExecutionContext:
         finally:
             self._node_stack.pop()
             finished_at = time.perf_counter()
+            access_summary = None
+            try:
+                from .observer import format_observation_access
+
+                access_summary = format_observation_access(
+                    node_result.observation,
+                    include_reads=False,
+                )
+            except Exception:
+                access_summary = None
             self._progress_sink.on_node_end(
                 NodeProgressEvent(
                     run_id=self.run_id,
@@ -843,6 +861,7 @@ class ExecutionContext:
                     started_at=started_at,
                     finished_at=finished_at,
                     elapsed_s=finished_at - started_at,
+                    access_summary=access_summary,
                 )
             )
             self.log("debug", f"node end: {node_name} status={status}", node_id=node_result.node_id)
@@ -862,6 +881,8 @@ class ExecutionContext:
                 node_name = f"{node.log_label}.scope"
             elif phase_name == "calculate":
                 node_name = f"{node.log_label}.scope"
+            elif phase_name == "revert":
+                node_name = f"{node.log_label}.scope"
         depth = len(self._node_stack) - 1
 
         self._progress_sink.on_phase_start(
@@ -879,15 +900,18 @@ class ExecutionContext:
         status = "ok"
         record: Any = None
 
+        from .observer import observation_phase
+
         with self.trace.phase(current.node_id, node_name, phase_name):
             try:
-                with self.perf.phase(
-                    phase_name,
-                    measure_time=self.options.perf_time,
-                    measure_memory=self.options.perf_memory,
-                ) as phase_record:
-                    record = phase_record
-                    yield
+                with observation_phase(phase_name):
+                    with self.perf.phase(
+                        phase_name,
+                        measure_time=self.options.perf_time,
+                        measure_memory=self.options.perf_memory,
+                    ) as phase_record:
+                        record = phase_record
+                        yield
             except Exception:
                 status = "error"
                 self.log("error", f"{node_name}:{phase_name} error", node_id=current.node_id, phase=phase_name)
@@ -895,6 +919,17 @@ class ExecutionContext:
             finally:
                 if record is not None:
                     current.phases.append(record)
+                    access_summary = None
+                    try:
+                        from .observer import current_observation, format_observation_access
+
+                        access_summary = format_observation_access(
+                            current_observation(),
+                            phase=phase_name,
+                            include_reads=True,
+                        )
+                    except Exception:
+                        access_summary = None
                     self._progress_sink.on_phase_end(
                         PhaseProgressEvent(
                             run_id=self.run_id,
@@ -906,6 +941,7 @@ class ExecutionContext:
                             started_at=record.started_at,
                             finished_at=record.finished_at,
                             elapsed_s=record.elapsed_s,
+                            access_summary=access_summary,
                         )
                     )
                     self.log(

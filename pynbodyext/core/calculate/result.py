@@ -79,7 +79,7 @@ from .display import (
     mimebundle,
 )
 from .enums import NodeKind, NodeStatus, RecordPolicy
-from .observer import AccessObservation, render_observer_report
+from .observer import AccessObservation, format_observation_access, render_observer_report
 
 T = TypeVar("T")
 
@@ -344,14 +344,26 @@ class Result(Generic[T]):
         """Return the runtime cache report."""
         return self.report("cache")
 
-    def trace_timeline(self, *, show_ids: bool = False) -> str:
+    def trace_timeline(self, *, show_ids: bool = False, include_observer: bool = True) -> str:
         """Return a trace timeline for the run."""
-        if show_ids:
-            return self.report("trace_timeline")
-        return "\n".join(
-            f"{'  ' * event.depth}{event.node_name} {event.phase}:{event.event}"
-            for event in self.trace_events()
-        )
+        lines: list[str] = []
+        for event in self.trace_events():
+            node_suffix = f" [{event.node_id}]" if show_ids else ""
+            access_suffix = ""
+            if include_observer and event.event == "leave":
+                observation = self.observations.get(event.node_id)
+                access_text = format_observation_access(
+                    observation,
+                    phase=event.phase,
+                    include_reads=True,
+                )
+                if access_text:
+                    access_suffix = f" {access_text}"
+            lines.append(
+                f"{'  ' * event.depth}{event.node_name}{node_suffix} "
+                f"{event.phase}:{event.event}{access_suffix}"
+            )
+        return "\n".join(lines)
 
     def trace_tree(self, *, show_ids: bool = False) -> str:
         """Return the stored execution trace tree."""
@@ -399,11 +411,15 @@ class Result(Generic[T]):
             return resolved.observation
         return self.observations.get(resolved.node_id)
 
-    def observer_report(self, *, include_empty: bool = False) -> str:
+    def observer_report(self, *, include_empty: bool = False, show_ids: bool = False) -> str:
         """Return a formatted pynbody field observer report."""
-        if not include_empty:
+        if not include_empty and not show_ids:
             return self.report("observer")
-        return render_observer_report(self.access_observations().values(), include_empty=True)
+        return render_observer_report(
+            self.access_observations().values(),
+            include_empty=include_empty,
+            show_ids=show_ids,
+        )
 
     def iter_nodes(self) -> list[ResultNode]:
         """Return result nodes in registry order."""
@@ -601,7 +617,11 @@ class ResultQuery:
                 lines.extend(render(child, child_prefix, index == len(children) - 1))
             return lines
 
-        return "\n".join(render(start, "", True))
+        lines = [ResultQuery.node_label(start, show_ids=show_ids)]
+        children = ResultQuery.display_children_of(result, start)
+        for index, child in enumerate(children):
+            lines.extend(render(child, "", index == len(children) - 1))
+        return "\n".join(lines)
 
 
 class ResultRepr:

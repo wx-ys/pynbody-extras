@@ -46,6 +46,7 @@ class AccessEvent:
     field: str
     sim_id: int
     sim_type: str
+    phase: str | None = None
     key_repr: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -55,6 +56,7 @@ class AccessEvent:
             "field": self.field,
             "sim_id": self.sim_id,
             "sim_type": self.sim_type,
+            "phase": self.phase,
             "key_repr": self.key_repr,
         }
 
@@ -100,6 +102,7 @@ class AccessObservation:
         *,
         fallback_to_string: bool,
     ) -> None:
+        phase = current_observation_phase()
         for name in _field_names(key, fallback_to_string=fallback_to_string):
             if operation == "read":
                 self.reads.add(name)
@@ -115,9 +118,52 @@ class AccessObservation:
                     field=name,
                     sim_id=id(sim),
                     sim_type=type(sim).__name__,
+                    phase=phase,
                     key_repr=_short_repr(key),
                 )
             )
+
+    def phases(self) -> tuple[str | None, ...]:
+        """Return observed phases in first-seen order."""
+        seen: set[str | None] = set()
+        phases: list[str | None] = []
+        for event in self.events:
+            if event.phase in seen:
+                continue
+            seen.add(event.phase)
+            phases.append(event.phase)
+        return tuple(phases)
+
+    def fields_for(
+        self,
+        operation: FieldOperation,
+        *,
+        phase: str | None | object = Ellipsis,
+    ) -> set[str]:
+        """Return observed fields for an operation, optionally limited to one phase."""
+        return {
+            event.field
+            for event in self.events
+            if event.operation == operation and (phase is Ellipsis or event.phase == phase)
+        }
+
+    def phase_summary(self, phase: str | None | object = Ellipsis) -> dict[str, Any]:
+        """Return read/dirty/delete fields for one phase or for the whole node."""
+        reads = self.fields_for("read", phase=phase)
+        dirty_fields = self.fields_for("dirty", phase=phase)
+        deletes = self.fields_for("delete", phase=phase)
+        event_count = sum(
+            1
+            for event in self.events
+            if phase is Ellipsis or event.phase == phase
+        )
+        return {
+            "reads": sorted(reads),
+            "dirty_fields": sorted(dirty_fields),
+            "writes": sorted(dirty_fields),
+            "deletes": sorted(deletes),
+            "event_count": event_count,
+        }
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -128,6 +174,7 @@ class AccessObservation:
             "writes": sorted(self.writes),
             "deletes": sorted(self.deletes),
             "event_count": self.event_count,
+            "phases": [phase if phase is not None else "node" for phase in self.phases()],
         }
 
     def as_dict(self, *, include_events: bool = True) -> dict[str, Any]:
@@ -142,10 +189,31 @@ _OBSERVATION_STACK: ContextVar[tuple[AccessObservation, ...]] = ContextVar(
     default=(),
 )
 
+_OBSERVATION_PHASE_STACK: ContextVar[tuple[str | None, ...]] = ContextVar(
+    "pynbodyext_calculate_observation_phase_stack",
+    default=(),
+)
+
 
 def current_observation() -> AccessObservation | None:
     stack = _OBSERVATION_STACK.get()
     return stack[-1] if stack else None
+
+
+def current_observation_phase() -> str | None:
+    stack = _OBSERVATION_PHASE_STACK.get()
+    return stack[-1] if stack else None
+
+
+@contextmanager
+def observation_phase(phase: str | None) -> Any:
+    """Attach a phase label to observed access events in this context."""
+    stack = _OBSERVATION_PHASE_STACK.get()
+    token = _OBSERVATION_PHASE_STACK.set(stack + (phase,))
+    try:
+        yield
+    finally:
+        _OBSERVATION_PHASE_STACK.reset(token)
 
 
 def _all_subclasses(cls: type[Any]) -> list[type[Any]]:
@@ -294,14 +362,74 @@ def _format_fields(values: set[str], *, max_items: int = 8) -> str:
     items = sorted(values)
     if len(items) > max_items:
         shown = items[:max_items]
-        return ", ".join(shown) + f", ... (+{len(items) - max_items})"
+        return ", ".join(shown) + f" ..(+{len(items) - max_items})"
     return ", ".join(items)
+
+
+def _join_fields(values: set[str] | list[str] | tuple[str, ...], *, max_items: int | None = None) -> str:
+    if not values:
+        return "-"
+    items = sorted(values)
+    if max_items is not None and len(items) > max_items:
+        return ", ".join(items[:max_items]) + f" ..(+{len(items) - max_items})"
+    return ", ".join(items)
+
+
+def _wrap_cell(text: str, width: int) -> list[str]:
+    if len(text) <= width:
+        return [text]
+    parts = text.split(", ")
+    lines: list[str] = []
+    current = ""
+    for part in parts:
+        candidate = part if not current else f"{current}, {part}"
+        if len(candidate) <= width:
+            current = candidate
+            continue
+        if current:
+            lines.append(current)
+        current = part
+    if current:
+        lines.append(current)
+    return lines or [text]
+
+
+def _phase_label(phase: str | None) -> str:
+    return phase if phase is not None else "node"
+
+
+def format_observation_access(
+    observation: AccessObservation | None,
+    *,
+    phase: str | None | object = Ellipsis,
+    include_reads: bool = True,
+    read_items: int = 4,
+    dirty_items: int | None = None,
+    delete_items: int | None = None,
+) -> str:
+    """Return a compact access suffix such as ``read=pos dirty=vel del=r``."""
+    if observation is None or observation.is_empty:
+        return ""
+
+    reads = observation.fields_for("read", phase=phase)
+    dirty_fields = observation.fields_for("dirty", phase=phase)
+    deletes = observation.fields_for("delete", phase=phase)
+
+    parts: list[str] = []
+    if include_reads and reads:
+        parts.append(f"read[{_join_fields(reads, max_items=read_items)}]")
+    if dirty_fields:
+        parts.append(f"dirty[{_join_fields(dirty_fields, max_items=dirty_items)}]")
+    if deletes:
+        parts.append(f"del[{_join_fields(deletes, max_items=delete_items)}]")
+    return "; ".join(parts)
 
 
 def render_observer_report(
     observations: Any,
     *,
     include_empty: bool = False,
+    show_ids: bool = False,
 ) -> str:
     """Render a compact text report for access observations."""
     items = list(observations)
@@ -311,15 +439,50 @@ def render_observer_report(
     if not items:
         return "No observed pynbody field access events."
 
-    header = "Node                           | Reads                    | Dirty                    | Deletes"
+    widths = {
+        "node": 16 if not show_ids else 25,
+        "phase": 14,
+        "reads": 34,
+        "dirty": 34,
+        "deletes": 28,
+    }
+    header = (
+        f"{'Node':<{widths['node']}} | "
+        f"{'Phase':<{widths['phase']}} | "
+        f"{'Reads':<{widths['reads']}} | "
+        f"{'Dirty':<{widths['dirty']}} | "
+        f"{'Deletes':<{widths['deletes']}}"
+    )
     lines = ["Observer", "-" * len(header), header, "-" * len(header)]
     for observation in items:
-        label = observation.node_label[:30]
-        lines.append(
-            f"{label:<30} | "
-            f"{_format_fields(observation.reads):<24} | "
-            f"{_format_fields(observation.dirty_fields):<24} | "
-            f"{_format_fields(observation.deletes)}"
-        )
+        phases = observation.phases() or (None,)
+        for phase in phases:
+            reads = observation.fields_for("read", phase=phase)
+            dirty_fields = observation.fields_for("dirty", phase=phase)
+            deletes = observation.fields_for("delete", phase=phase)
+            if not include_empty and not (reads or dirty_fields or deletes):
+                continue
+
+            label = observation.node_label
+            if show_ids:
+                label = f"[{observation.node_id.rsplit(':', 1)[-1]}] {label}"
+            if len(label) > widths["node"]:
+                label = label[: widths["node"] - 2] + ".."
+
+            read_lines = _wrap_cell(_join_fields(reads, max_items=5), widths["reads"])
+            dirty_lines = _wrap_cell(_join_fields(dirty_fields), widths["dirty"])
+            delete_lines = _wrap_cell(_join_fields(deletes), widths["deletes"])
+            line_count = max(len(read_lines), len(dirty_lines), len(delete_lines))
+
+            for index in range(line_count):
+                node_text = label if index == 0 else ""
+                phase_text = _phase_label(phase) if index == 0 else ""
+                lines.append(
+                    f"{node_text:<{widths['node']}} | "
+                    f"{phase_text:<{widths['phase']}} | "
+                    f"{(read_lines[index] if index < len(read_lines) else ''):<{widths['reads']}} | "
+                    f"{(dirty_lines[index] if index < len(dirty_lines) else ''):<{widths['dirty']}} | "
+                    f"{(delete_lines[index] if index < len(delete_lines) else ''):<{widths['deletes']}}"
+                )
     lines.append("-" * len(header))
     return "\n".join(lines)
