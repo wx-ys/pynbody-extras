@@ -20,6 +20,7 @@ Use :class:`RunOptions` (or equivalent keyword arguments on ``run``) to control
 execution behavior such as:
 
 - progress verbosity
+- field-access observation
 - error handling policy
 - value recording policy
 - timing and memory collection
@@ -493,6 +494,9 @@ class RunOptions:
         "phase", "debug", "bar", or "bar:<verbosity>", or "bar-only".
     perf_time, perf_memory : bool
         Enable time and memory collection.
+    observe : bool, default: True
+        Enable diagnostic observation of pynbody snapshot field reads and
+        invalidations. Disable this to avoid installing observer patches.
     backend : str, default: "serial"
         Backend label reserved for future execution backends.
     default_record_policy : RecordPolicy, default: RecordPolicy.SUMMARY
@@ -507,6 +511,7 @@ class RunOptions:
     progress: bool | str | ProgressSink | list[ProgressSink] | tuple[ProgressSink, ...] | None = None
     perf_time: bool = True
     perf_memory: bool = False
+    observe: bool = True
     backend: str = "serial"
     default_record_policy: RecordPolicy = RecordPolicy.SUMMARY
     errors: ErrorPolicy | str = ErrorPolicy.RAISE
@@ -520,7 +525,7 @@ class RunOptions:
             "RunOptions("
             f"cache={self.cache!r}, progress={self.progress!r}, "
             f"perf_time={self.perf_time!r}, perf_memory={self.perf_memory!r}, "
-            f"backend={self.backend!r}, errors={display_value(self.errors)!r}"
+            f"observe={self.observe!r}, backend={self.backend!r}, errors={display_value(self.errors)!r}"
             ")"
         )
 
@@ -535,6 +540,7 @@ class RunOptions:
                 ("progress", self.progress),
                 ("perf time", self.perf_time),
                 ("perf memory", self.perf_memory),
+                ("observe", self.observe),
                 ("backend", self.backend),
                 ("record policy", display_value(self.default_record_policy)),
                 ("errors", display_value(self.errors)),
@@ -797,6 +803,10 @@ class ExecutionContext:
     @contextmanager
     def observe_node_access(self, node_result: ResultNode, node: CalculatorBase[Any, Any]) -> Iterator[Any]:
         """Observe pynbody snapshot field access for one executing node."""
+        if not self.options.observe:
+            yield None
+            return
+
         from .observer import observe_sim_access
 
         with observe_sim_access(node_result.node_id, node.log_label) as observation:

@@ -596,6 +596,7 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         progress: bool | ProgressVerbosity | ProgressSink | list[ProgressSink] | tuple[ProgressSink, ...] | None = None,
         perf_time: bool | None = None,
         perf_memory: bool | None = None,
+        observe: bool | None = None,
         backend: str | None = None,
         default_record_policy: RecordPolicy | None = None,
         errors: ErrorPolicy | str | None = None,
@@ -612,7 +613,7 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
             pynbody snapshot or compatible simulation object.
         options : RunOptions, optional
             Base execution options to merge with keyword overrides.
-        cache, progress, perf_time, perf_memory,
+        cache, progress, perf_time, perf_memory, observe,
         backend, default_record_policy, errors, cache_small_value_bytes : optional
             Per-run overrides for :class:`RunOptions`.
 
@@ -628,6 +629,7 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
             progress=progress,
             perf_time=perf_time,
             perf_memory=perf_memory,
+            observe=observe,
             backend=backend,
             default_record_policy=default_record_policy,
             errors=errors,
@@ -643,6 +645,7 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         progress: bool | ProgressVerbosity | ProgressSink | list[ProgressSink] | tuple[ProgressSink, ...] | None = None,
         perf_time: bool | None = None,
         perf_memory: bool | None = None,
+        observe: bool | None = None,
         backend: str | None = None,
         default_record_policy: RecordPolicy | None = None,
         errors: ErrorPolicy | str | None = None,
@@ -658,6 +661,8 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
             merged.perf_time = perf_time
         if perf_memory is not None:
             merged.perf_memory = perf_memory
+        if observe is not None:
+            merged.observe = observe
         if backend is not None:
             merged.backend = backend
         if default_record_policy is not None:
@@ -680,6 +685,7 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         progress: bool | ProgressVerbosity | ProgressSink | list[ProgressSink] | tuple[ProgressSink, ...] | None = None,
         perf_time: bool | None = None,
         perf_memory: bool | None = None,
+        observe: bool | None = None,
         backend: str | None = None,
         default_record_policy: RecordPolicy | None = None,
         errors: ErrorPolicy | str | None = None,
@@ -696,6 +702,7 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
             progress=progress,
             perf_time=perf_time,
             perf_memory=perf_memory,
+            observe=observe,
             backend=backend,
             default_record_policy=default_record_policy,
             errors=errors,
@@ -775,6 +782,10 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
     ) -> CalculatorBase[TRaw, TPublic]:
         """Return a copy with a default progress reporting option."""
         return self._with_options(progress=progress)
+
+    def with_observer(self, enabled: bool = True) -> CalculatorBase[TRaw, TPublic]:
+        """Return a copy with diagnostic field-access observation enabled or disabled."""
+        return self._with_options(observe=enabled)
 
     def with_backend(self, name: str) -> CalculatorBase[TRaw, TPublic]:
         """Return a copy with a default backend label."""
