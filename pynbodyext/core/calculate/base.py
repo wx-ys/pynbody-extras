@@ -457,6 +457,41 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
             self.dynamic_param_dependencies(),
         )
 
+    def current_runtime(self) -> Any | None:
+        """Return the active runtime when this node is inside a run."""
+        from .runtime import current_runtime
+
+        return current_runtime()
+
+    def log(self, level: str, message: str, *, phase: str | None = None) -> None:
+        """Record a runtime log event from simple subclass hooks.
+
+        This is primarily for ``calculate(self, sim, params=None)`` and
+        ``build_handle(...)`` hooks that do not accept ``ctx`` directly. When
+        called outside a calculator run, it falls back to the package logger.
+        """
+        runtime = self.current_runtime()
+        if runtime is not None:
+            runtime.log(level, message, phase=phase)
+            return
+
+        from pynbodyext.log import logger
+
+        log_fn = getattr(logger, level, logger.debug)
+        log_fn(message)
+
+    def debug(self, message: str, *, phase: str | None = None) -> None:
+        self.log("debug", message, phase=phase)
+
+    def info(self, message: str, *, phase: str | None = None) -> None:
+        self.log("info", message, phase=phase)
+
+    def warning(self, message: str, *, phase: str | None = None) -> None:
+        self.log("warning", message, phase=phase)
+
+    def error(self, message: str, *, phase: str | None = None) -> None:
+        self.log("error", message, phase=phase)
+
     def children(self) -> list[CalculatorBase[Any, Any]]:
         """Return child nodes shown in graph displays."""
         return self.dependencies()
