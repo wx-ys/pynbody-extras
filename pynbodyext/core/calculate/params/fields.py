@@ -100,12 +100,12 @@ from typing import (
     overload,
 )
 
-from .params import DynamicParamSpec, dynamic_value_dependencies, dynamic_value_signature
+from .resolution import DynamicParamSpec, dynamic_value_dependencies, dynamic_value_signature
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .base import CalculatorBase
+    from pynbodyext.core.calculate.nodes.base import CalculatorBase
 
 T = TypeVar("T")
 

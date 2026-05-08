@@ -122,34 +122,14 @@ import numpy as np
 from pynbody import units
 from pynbody.array import SimArray
 
-from .context import (
-    ExecutionContext,
-    FilterResult,
-    NodeInput,
-    ProgressSink,
-    ProgressVerbosity,
-    RunOptions,
-    TransformResult,
-)
-from .display import (
+from pynbodyext.core.calculate.display import (
     compact_repr,
     display_value,
     html_card,
     html_pre,
     mimebundle,
 )
-from .engine import EvalEngine
-from .enums import (
-    BuiltinKinds,
-    CachePolicy,
-    EffectPolicy,
-    ErrorPolicy,
-    NodeKind,
-    RecordPolicy,
-    normalize_kind,
-)
-from .fields import Param
-from .params import (
+from pynbodyext.core.calculate.params import (
     DynamicParamSpec,
     RuntimeValueResolver,
     StandaloneValueResolver,
@@ -158,16 +138,30 @@ from .params import (
     dynamic_value_signature,
     resolve_value_for,
 )
-from .scopes import ScopeSpec
+from pynbodyext.core.calculate.params.fields import Param
+from pynbodyext.core.calculate.result.enums import (
+    BuiltinKinds,
+    CachePolicy,
+    EffectPolicy,
+    ErrorPolicy,
+    NodeKind,
+    RecordPolicy,
+    normalize_kind,
+)
+from pynbodyext.core.calculate.runtime.input import FilterResult, NodeInput, TransformResult
+from pynbodyext.core.calculate.runtime.options import RunOptions
+from pynbodyext.core.calculate.runtime.scopes import ScopeSpec
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    from pynbodyext.core.calculate.result.result import Result
+    from pynbodyext.core.calculate.runtime.context import ExecutionContext
+    from pynbodyext.core.calculate.runtime.progress import ProgressSink, ProgressVerbosity
     from pynbodyext.util._type import SingleElementArray, UnitLike
 
     from .filters import FilterBase
     from .properties import PropertyBase
-    from .result import Result
     from .transforms import TransformBase
 T = TypeVar("T")
 U = TypeVar("U")
@@ -242,7 +236,7 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         **dataclass_kwargs: Any,
     ) -> type[TCalc] | Callable[[type[TCalc]], type[TCalc]]:
         """Decorate an explicit subclass with dataclass-style calculator fields."""
-        from .declarative import dataclass_calc
+        from pynbodyext.core.calculate.params.declarative import dataclass_calc
 
         def wrap(raw_cls: type[TCalc]) -> type[TCalc]:
             if not issubclass(raw_cls, cls):
@@ -459,7 +453,7 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
 
     def current_runtime(self) -> Any | None:
         """Return the active runtime when this node is inside a run."""
-        from .runtime import current_runtime
+        from pynbodyext.core.calculate.runtime import current_runtime
 
         return current_runtime()
 
@@ -561,14 +555,14 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
 
     def to_signature(self, *, inline_array_bytes: int = 128) -> Any:
         """Return a structured signature that can reconstruct this calculator when possible."""
-        from .signature import calculator_to_signature
+        from pynbodyext.core.calculate.result.signature import calculator_to_signature
 
         return calculator_to_signature(self, inline_array_bytes=inline_array_bytes)
 
     @classmethod
     def from_signature(cls, signature: Any) -> CalculatorBase[Any, Any]:
         """Reconstruct a calculator from a structured signature."""
-        from .signature import calculator_from_signature
+        from pynbodyext.core.calculate.result.signature import calculator_from_signature
 
         calculator = calculator_from_signature(signature)
         if not isinstance(calculator, CalculatorBase):
@@ -758,6 +752,8 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         Result[TPublic]
             Result object containing the public value and diagnostics from this run.
         """
+        from pynbodyext.core.calculate.runtime.engine import EvalEngine
+
         engine = EvalEngine()
         merged = self._resolve_run_options(
             options=options,

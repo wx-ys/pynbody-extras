@@ -68,7 +68,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar
 
-from .display import (
+from pynbodyext.core.calculate.diagnostics.observer import (
+    AccessObservation,
+    format_observation_access,
+    render_observer_report,
+)
+from pynbodyext.core.calculate.display import (
     compact_repr,
     display_value,
     format_mem,
@@ -78,8 +83,8 @@ from .display import (
     html_table,
     mimebundle,
 )
+
 from .enums import NodeKind, NodeStatus, RecordPolicy
-from .observer import AccessObservation, format_observation_access, render_observer_report
 
 T = TypeVar("T")
 

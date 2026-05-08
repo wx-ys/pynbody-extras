@@ -91,14 +91,18 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 import numpy as np
 from pynbody.array import SimArray
 
-from .context import ExecutionContext, FilterResult, NodeInput, NodeProgressEvent, RunOptions, RunProgressEvent
-from .enums import CachePolicy, ErrorPolicy, NodeStatus, RecordPolicy
-from .exceptions import CycleError
-from .observer import observation_phase, render_observer_report
-from .result import ErrorInfo, ProvenanceInfo, Result, ResultNode, ValueSummary
+from pynbodyext.core.calculate.diagnostics.observer import observation_phase, render_observer_report
+from pynbodyext.core.calculate.result.enums import CachePolicy, ErrorPolicy, NodeStatus, RecordPolicy
+from pynbodyext.core.calculate.result.exceptions import CycleError
+from pynbodyext.core.calculate.result.result import ErrorInfo, ProvenanceInfo, Result, ResultNode, ValueSummary
+
+from .context import ExecutionContext
+from .input import FilterResult, NodeInput
+from .options import RunOptions
+from .progress import NodeProgressEvent, RunProgressEvent
 
 if TYPE_CHECKING:
-    from .base import CalculatorBase
+    from pynbodyext.core.calculate.nodes.base import CalculatorBase
 
 T = TypeVar("T")
 TRaw = TypeVar("TRaw")

@@ -10,8 +10,10 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from .base import CalculatorBase
-    from .context import ExecutionContext, NodeInput
+    from pynbodyext.core.calculate.nodes.base import CalculatorBase
+
+    from .context import ExecutionContext
+    from .input import NodeInput
 
 
 _CURRENT_RUNTIME: ContextVar[Any] = ContextVar(

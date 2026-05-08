@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar, cast, dataclass_transform, overload
 
-from .base import CalculatorBase
+from pynbodyext.core.calculate.nodes.base import CalculatorBase
+
 from .fields import (
     Param,
     collect_param_specs,

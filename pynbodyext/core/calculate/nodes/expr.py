@@ -21,14 +21,16 @@ from typing import TYPE_CHECKING, Any, Generic, TypeAlias, TypeVar
 import numpy as np
 from pynbody.array import SimArray
 
+from pynbodyext.core.calculate.result.enums import BuiltinKinds
+
 from .base import CalculatorBase
-from .enums import BuiltinKinds
 from .properties import PropertyBase
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .context import ExecutionContext, NodeInput
+    from pynbodyext.core.calculate.runtime.context import ExecutionContext
+    from pynbodyext.core.calculate.runtime.input import NodeInput
 
 TValue = TypeVar("TValue")
 

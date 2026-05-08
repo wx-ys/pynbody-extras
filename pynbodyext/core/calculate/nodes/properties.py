@@ -103,8 +103,9 @@ from __future__ import annotations
 from abc import ABC
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 
-from .enums import BuiltinKinds
-from .template import RuntimeCalculatorBase
+from pynbodyext.core.calculate.result.enums import BuiltinKinds
+
+from .runtime_base import RuntimeCalculatorBase
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -112,8 +113,7 @@ if TYPE_CHECKING:
     from pynbody.array import SimArray
     from pynbody.snapshot import SimSnap
 
-    from .context import ExecutionContext, NodeInput
-    from .runtime import CalcRuntime
+    from pynbodyext.core.calculate.runtime import CalcRuntime, ExecutionContext, NodeInput
 
 
 TProp = TypeVar("TProp")

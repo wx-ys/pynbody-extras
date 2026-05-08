@@ -102,13 +102,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from pynbodyext.core.calculate.result.enums import BuiltinKinds, ErrorPolicy
+
 from .base import CalculatorBase
-from .enums import BuiltinKinds, ErrorPolicy
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from .context import ExecutionContext, NodeInput
+    from pynbodyext.core.calculate.runtime.context import ExecutionContext
+    from pynbodyext.core.calculate.runtime.input import NodeInput
 
 
 class Pipeline(CalculatorBase[dict[str, Any],dict[str, Any]]):

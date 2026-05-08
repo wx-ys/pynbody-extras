@@ -91,13 +91,16 @@ from __future__ import annotations
 from abc import ABC
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
+from pynbodyext.core.calculate.params.fields import ParamView
+from pynbodyext.core.calculate.runtime import CalcRuntime, bind_runtime
+
 from .base import CalculatorBase
-from .fields import ParamView
-from .runtime import CalcRuntime, bind_runtime
 
 if TYPE_CHECKING:
+    from pynbodyext.core.calculate.runtime.context import ExecutionContext
+    from pynbodyext.core.calculate.runtime.input import NodeInput
+
     from .base import BoundCalculator
-    from .context import ExecutionContext, NodeInput
     from .filters import FilterBase
     from .transforms import TransformBase
 

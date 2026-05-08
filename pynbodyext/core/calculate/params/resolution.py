@@ -65,13 +65,15 @@ import numpy as np
 from pynbody import units
 from pynbody.array import SimArray
 
+from pynbodyext.core.calculate.runtime.context import ExecutionContext
+from pynbodyext.core.calculate.runtime.input import NodeInput
 from pynbodyext.util._type import get_signature_safe
 
-from .context import ExecutionContext, NodeInput
-
 if TYPE_CHECKING:
-    from .base import CalculatorBase
-    from .context import ExecutionContext, NodeInput, RunOptions
+    from pynbodyext.core.calculate.nodes.base import CalculatorBase
+    from pynbodyext.core.calculate.runtime.context import ExecutionContext
+    from pynbodyext.core.calculate.runtime.input import NodeInput
+    from pynbodyext.core.calculate.runtime.options import RunOptions
 
 TPublic = TypeVar("TPublic")
 
@@ -99,7 +101,7 @@ class DynamicParamSpec:
 
 def dynamic_value_signature(value: Any) -> Any:
     """Return a stable signature fragment for a dynamic parameter value."""
-    from .base import CalculatorBase
+    from pynbodyext.core.calculate.nodes.base import CalculatorBase
 
     signature: Any
 
@@ -133,7 +135,7 @@ def dynamic_value_signature(value: Any) -> Any:
 
 def dynamic_value_dependencies(value: Any) -> list[CalculatorBase[Any, Any]]:
     """Return calculator dependencies nested inside a dynamic value."""
-    from .base import CalculatorBase
+    from pynbodyext.core.calculate.nodes.base import CalculatorBase
 
     if isinstance(value, CalculatorBase):
         return [value]
@@ -262,7 +264,7 @@ def resolve_value_for(
     allow_callable: bool = True,
     coerce_unit_string: bool = False,
 ) -> Any:
-    from .base import CalculatorBase
+    from pynbodyext.core.calculate.nodes.base import CalculatorBase
 
     if isinstance(value, CalculatorBase):
         if resolver.active_sim is None and not allow_calculator:

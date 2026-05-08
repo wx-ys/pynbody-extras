@@ -112,14 +112,23 @@ from typing import TYPE_CHECKING, Any, Generic, TypeAlias, TypeVar, cast
 from pynbody.snapshot import SimSnap
 from pynbody.transformation import Transformation
 
-from .context import ExecutionContext, FilterResult, NodeInput, TransformResult
-from .display import display_value
-from .enums import BuiltinKinds, CachePolicy, EffectPolicy, RevertPolicy, normalize_revert_policy
-from .runtime import CalcRuntime, TransformRuntime
-from .template import RuntimeCalculatorBase
+from pynbodyext.core.calculate.display import display_value
+from pynbodyext.core.calculate.result.enums import (
+    BuiltinKinds,
+    CachePolicy,
+    EffectPolicy,
+    RevertPolicy,
+    normalize_revert_policy,
+)
+from pynbodyext.core.calculate.runtime import CalcRuntime, TransformRuntime
+from pynbodyext.core.calculate.runtime.input import FilterResult, NodeInput, TransformResult
+
+from .runtime_base import RuntimeCalculatorBase
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+    from pynbodyext.core.calculate.runtime.context import ExecutionContext
 
     from .base import CalculatorBase
     from .filters import FilterBase
@@ -362,7 +371,7 @@ class TransformBase(
     def cleanup(self, ctx: ExecutionContext, handle: HandleT) -> None:
         """Revert a transform handle when it is revertible."""
         if self.is_revertible(handle):
-            from .observer import observation_phase
+            from pynbodyext.core.calculate.diagnostics.observer import observation_phase
 
             with observation_phase("revert"):
                 handle.revert() # type: ignore[attr-defined]
@@ -476,7 +485,7 @@ class TransformChain(TransformBase[tuple[TransformStep, ...]]):
             if cleanup is None:
                 continue
 
-            from .observer import observation_phase
+            from pynbodyext.core.calculate.diagnostics.observer import observation_phase
 
             with observation_phase("revert"):
                 cleanup(ctx, handle_obj)

@@ -22,7 +22,7 @@ from pynbody import units
 from pynbody.array import SimArray
 from pynbody.family import Family, get_family
 
-from .fields import collect_param_specs
+from pynbodyext.core.calculate.params.fields import collect_param_specs
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -261,7 +261,7 @@ def _encode_calculator_value(value: Any, path: str, inline_array_bytes: int) -> 
 
 
 def _encode_value(value: Any, path: str, inline_array_bytes: int) -> _Encoded:
-    from .base import CalculatorBase
+    from pynbodyext.core.calculate.nodes.base import CalculatorBase
 
     if isinstance(value, CalculatorBase):
         encoded = _encode_calculator_value(value, path, inline_array_bytes)
@@ -627,7 +627,7 @@ def _transform_state(calculator: Any, inline_array_bytes: int, path: str) -> tup
 
 def _is_transform_base_instance(value: Any) -> bool:
     try:
-        from .transforms import TransformBase
+        from pynbodyext.core.calculate.nodes.transforms import TransformBase
     except Exception:
         return False
     return isinstance(value, TransformBase)
@@ -663,8 +663,9 @@ def _encode_scope(scope: Any, path: str, inline_array_bytes: int) -> _Encoded:
 
 
 def _decode_scope(payload: dict[str, Any]) -> Any:
+    from pynbodyext.core.calculate.runtime.scopes import ScopeSpec
+
     from .enums import RevertPolicy
-    from .scopes import ScopeSpec
 
     transforms = tuple(_decode_value(item) for item in payload.get("transforms", ()))
     filter_node = _decode_value(payload["filter"]) if "filter" in payload else None
@@ -705,10 +706,15 @@ def _decode_dataclass_calculator(payload: dict[str, Any]) -> Any:
 
 
 def _encode_special_calculator(calculator: Any, path: str, inline_array_bytes: int) -> _Encoded | None:
-    from .base import BoundCalculator, CombinedCalculator
-    from .expr import CalculatorValueProperty, ConstantProperty, LambdaProperty, OpProperty
-    from .filters import AndFilter, NotFilter, OrFilter
-    from .transforms import TransformChain
+    from pynbodyext.core.calculate.nodes.base import BoundCalculator, CombinedCalculator
+    from pynbodyext.core.calculate.nodes.expr import (
+        CalculatorValueProperty,
+        ConstantProperty,
+        LambdaProperty,
+        OpProperty,
+    )
+    from pynbodyext.core.calculate.nodes.filters import AndFilter, NotFilter, OrFilter
+    from pynbodyext.core.calculate.nodes.transforms import TransformChain
 
     transform_state, transform_children = _transform_state(calculator, inline_array_bytes, path)
     encoded: _Encoded | None = None
@@ -775,9 +781,9 @@ def _encode_special_calculator(calculator: Any, path: str, inline_array_bytes: i
 
 
 def _decode_special_calculator(payload: dict[str, Any]) -> Any:
-    from .base import BoundCalculator, CombinedCalculator
-    from .expr import CalculatorValueProperty, ConstantProperty, OpProperty
-    from .filters import AndFilter, NotFilter, OrFilter
+    from pynbodyext.core.calculate.nodes.base import BoundCalculator, CombinedCalculator
+    from pynbodyext.core.calculate.nodes.expr import CalculatorValueProperty, ConstantProperty, OpProperty
+    from pynbodyext.core.calculate.nodes.filters import AndFilter, NotFilter, OrFilter
 
     node_type = payload["node"]
     cal: Any
@@ -820,7 +826,7 @@ def calculator_to_signature(
     _path: str = "calculator",
 ) -> CalculatorSignature:
     """Return a reconstructible signature for a supported calculator graph."""
-    from .base import CalculatorBase
+    from pynbodyext.core.calculate.nodes.base import CalculatorBase
 
     if not isinstance(calculator, CalculatorBase):
         raise TypeError(f"expected CalculatorBase, got {type(calculator)!r}")

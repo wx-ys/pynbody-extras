@@ -48,24 +48,25 @@ build on top of :class:`RuntimeCalculatorBase`, while
 
 Package Layout
 --------------
-User-facing authoring modules:
+The implementation is organized into six layers:
 
-- :mod:`.base` for :class:`CalculatorBase`
-- :mod:`.template` for :class:`RuntimeCalculatorBase`
-- :mod:`.properties` for property nodes
-- :mod:`.filters` for filter nodes
-- :mod:`.transforms` for transform nodes
-- :mod:`.pipeline` for grouped outputs
-- :mod:`.fields` and :mod:`.declarative` for dataclass-style definitions
-
-Runtime and debugging modules:
-
-- :mod:`.context` for run options and per-run execution state
-- :mod:`.result` for finished run outputs and reports
-- :mod:`.params` for dynamic parameter resolution
-- :mod:`.scopes` for filter and transform composition
-- :mod:`.engine` for graph evaluation
-- :mod:`.cache`, :mod:`.trace`, and :mod:`.perf` for diagnostics
+- :mod:`.nodes` contains calculator node authoring primitives and roles:
+    :mod:`.nodes.base`, :mod:`.nodes.runtime_base`, :mod:`.nodes.properties`,
+    :mod:`.nodes.filters`, :mod:`.nodes.transforms`, :mod:`.nodes.pipeline`,
+    and :mod:`.nodes.expr`.
+- :mod:`.params` contains declarative parameter support:
+    :mod:`.params.fields`, :mod:`.params.declarative`, and
+    :mod:`.params.resolution`.
+- :mod:`.runtime` contains execution mechanics:
+    :mod:`.runtime.engine`, :mod:`.runtime.context`, :mod:`.runtime.input`,
+    :mod:`.runtime.options`, :mod:`.runtime.runtime`, :mod:`.runtime.cache`,
+    :mod:`.runtime.scopes`, and :mod:`.runtime.progress`.
+- :mod:`.result` contains finished run models, signatures, enums, and
+    exceptions: :mod:`.result.result`, :mod:`.result.signature`,
+    :mod:`.result.enums`, and :mod:`.result.exceptions`.
+- :mod:`.diagnostics` contains :mod:`.diagnostics.trace`,
+    :mod:`.diagnostics.perf`, and :mod:`.diagnostics.observer`.
+- :mod:`.display` stays independent for shared text, HTML, and mime rendering.
 
 Quick Start
 -----------
@@ -174,22 +175,20 @@ When writing new calculators, prefer the style already used in
 fields where needed, and the narrowest role-specific hook.
 """
 
-from .base import BoundCalculator, CalculatorBase, CombinedCalculator
-from .cache import CacheEvent, ExecutionValue, RuntimeCache
-from .context import (
-    ExecutionContext,
-    FilterResult,
-    LogEvent,
-    NodeInput,
-    NullProgressSink,
-    ProgressSink,
-    RunOptions,
-    TransformResult,
-    resolve_value,
-)
-from .declarative import dataclass_calc
-from .engine import EvalEngine
-from .enums import (
+from .diagnostics.observer import AccessEvent, AccessObservation
+from .diagnostics.perf import PerfCollector
+from .diagnostics.trace import TraceCollector, TraceEvent
+from .nodes.base import BoundCalculator, CalculatorBase, CombinedCalculator
+from .nodes.expr import ConstantProperty, LambdaProperty, OpProperty
+from .nodes.filters import AndFilter, FilterBase, NotFilter, OrFilter
+from .nodes.pipeline import Pipeline
+from .nodes.properties import PropertyBase
+from .nodes.runtime_base import RuntimeCalculatorBase
+from .nodes.transforms import TransformBase, TransformChain, TransformPlan, TransformStep, chain_transforms
+from .params import DynamicParamSpec, dynamic_value_dependencies, dynamic_value_signature, resolve_dynamic_value
+from .params.declarative import dataclass_calc
+from .params.fields import Param, ParamSpec, ParamView, collect_param_specs
+from .result.enums import (
     BuiltinKinds,
     CachePolicy,
     EffectPolicy,
@@ -202,16 +201,8 @@ from .enums import (
     normalize_kind,
     normalize_revert_policy,
 )
-from .exceptions import CalculatorError, CycleError
-from .expr import ConstantProperty, LambdaProperty, OpProperty
-from .fields import Param, ParamSpec, ParamView, collect_param_specs
-from .filters import AndFilter, FilterBase, NotFilter, OrFilter
-from .observer import AccessEvent, AccessObservation
-from .params import DynamicParamSpec, dynamic_value_dependencies, dynamic_value_signature, resolve_dynamic_value
-from .perf import PerfCollector
-from .pipeline import Pipeline
-from .properties import PropertyBase
-from .result import (
+from .result.exceptions import CalculatorError, CycleError
+from .result.result import (
     ErrorInfo,
     PerfSummary,
     PhaseRecord,
@@ -220,12 +211,15 @@ from .result import (
     ResultNode,
     ValueSummary,
 )
+from .result.signature import CalculatorSignature, calculator_from_signature, calculator_to_signature
 from .runtime import CalcRuntime, TransformRuntime
-from .scopes import Scope, ScopeSpec, TransformScope
-from .signature import CalculatorSignature, calculator_from_signature, calculator_to_signature
-from .template import RuntimeCalculatorBase
-from .trace import TraceCollector, TraceEvent
-from .transforms import TransformBase, TransformChain, TransformPlan, TransformStep, chain_transforms
+from .runtime.cache import CacheEvent, ExecutionValue, RuntimeCache
+from .runtime.context import ExecutionContext, LogEvent, resolve_value
+from .runtime.engine import EvalEngine
+from .runtime.input import FilterResult, NodeInput, TransformResult
+from .runtime.options import RunOptions
+from .runtime.progress import NullProgressSink, ProgressSink
+from .runtime.scopes import Scope, ScopeSpec, TransformScope
 
 __all__ = [
     "CalculatorBase",

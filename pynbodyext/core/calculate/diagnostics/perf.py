@@ -87,7 +87,7 @@ except Exception:
     psutil = None
     _HAS_PSUTIL = False
 
-from .result import PerfSummary, PhaseRecord, ResultNode
+from pynbodyext.core.calculate.result.result import PerfSummary, PhaseRecord, ResultNode
 
 if TYPE_CHECKING:
     import logging

@@ -58,15 +58,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from .display import compact_repr, display_value, html_card, mimebundle
-from .enums import BuiltinKinds, RevertPolicy, normalize_revert_policy
+from pynbodyext.core.calculate.display import compact_repr, display_value, html_card, mimebundle
+from pynbodyext.core.calculate.result.enums import BuiltinKinds, RevertPolicy, normalize_revert_policy
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from .base import CalculatorBase
-    from .filters import FilterBase
-    from .transforms import TransformBase
+    from pynbodyext.core.calculate.nodes.base import CalculatorBase
+    from pynbodyext.core.calculate.nodes.filters import FilterBase
+    from pynbodyext.core.calculate.nodes.transforms import TransformBase
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +125,7 @@ class ScopeSpec:
             return None
         if len(self.transforms) == 1:
             return self.transforms[0]
-        from .transforms import chain_transforms
+        from pynbodyext.core.calculate.nodes.transforms import chain_transforms
 
         return chain_transforms(*self.transforms)
 
@@ -251,7 +251,7 @@ class Scope:
 
     def apply(self, calculator: CalculatorBase[Any, Any]) -> CalculatorBase[Any, Any]:
         """Apply this scope to ``calculator`` and return a bound calculator."""
-        from .base import BoundCalculator
+        from pynbodyext.core.calculate.nodes.base import BoundCalculator
 
         if isinstance(calculator, BoundCalculator):
             return BoundCalculator(
@@ -265,7 +265,7 @@ class Scope:
 
     def pipeline(self, outputs: Mapping[str, CalculatorBase[Any, Any]], *, name: str | None = None) -> CalculatorBase[dict[str, Any], dict[str, Any]]:
         """Build a :class:`Pipeline` and apply this scope to it."""
-        from .pipeline import Pipeline
+        from pynbodyext.core.calculate.nodes.pipeline import Pipeline
 
         return self.apply(Pipeline(outputs, name=name))
 

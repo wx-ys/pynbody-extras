@@ -87,8 +87,6 @@ if TYPE_CHECKING:
     import logging
     from collections.abc import Iterator
 
-    from .result import ResultNode
-
 @dataclass(slots=True)
 class TraceEvent:
     """One trace event emitted by the evaluation engine."""
@@ -169,7 +167,7 @@ class TraceCollector:
             )
         return "\n".join(lines)
 
-    def render_tree(self, nodes: dict[str, ResultNode], root_id: str) -> str:
+    def render_tree(self, nodes: dict[str, Any], root_id: str) -> str:
         """Render a result-node tree with node ids."""
         def render(node_id: str, prefix: str, is_last: bool) -> list[str]:
             node = nodes[node_id]
@@ -187,7 +185,7 @@ class TraceCollector:
             lines.extend(render(child_id, "", index == len(root.children) - 1))
         return "\n".join(lines)
 
-    def report_text(self, nodes: dict[str, ResultNode] | None = None, root_id: str | None = None) -> str:
+    def report_text(self, nodes: dict[str, Any] | None = None, root_id: str | None = None) -> str:
         """Render trace timeline and optionally a tree section."""
         parts = ["Trace Timeline", self.render_timeline()]
         if nodes is not None and root_id is not None and root_id in nodes:
@@ -197,7 +195,7 @@ class TraceCollector:
     def report(
         self,
         logger: logging.Logger | None = None,
-        nodes: dict[str, ResultNode] | None = None,
+        nodes: dict[str, Any] | None = None,
         root_id: str | None = None,
     ) -> str:
         """Return the trace report and optionally log it."""

@@ -113,17 +113,20 @@ import numpy as np
 import numpy.typing as npt
 from pynbody.filt import Filter as PynbodyFilter
 
-from .context import ExecutionContext, FilterResult, NodeInput, resolve_value
-from .enums import BuiltinKinds
-from .template import RuntimeCalculatorBase
+from pynbodyext.core.calculate.result.enums import BuiltinKinds
+from pynbodyext.core.calculate.runtime.context import ExecutionContext, resolve_value
+from pynbodyext.core.calculate.runtime.input import FilterResult, NodeInput
+
+from .runtime_base import RuntimeCalculatorBase
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from pynbody.snapshot import SimSnap
 
+    from pynbodyext.core.calculate.runtime import CalcRuntime
+
     from .base import CalculatorBase
-    from .runtime import CalcRuntime
 
 MaskArray: TypeAlias = npt.NDArray[np.bool_]
 
