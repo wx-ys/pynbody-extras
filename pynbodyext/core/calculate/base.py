@@ -883,27 +883,81 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
 
 
 
-    def format_tree(self) -> str:
-        """Return a text tree of this calculator and its dependencies."""
-        def render(node: CalculatorBase[Any, Any], prefix: str, is_last: bool) -> list[str]:
-            branch = "└─" if is_last else "├─"
+    def format_tree(
+        self,
+        *,
+        max_depth: int | None = None,
+        max_children: int | None = None,
+        show_signature: bool = False,
+    ) -> str:
+        """Return a text tree of this calculator and its dependencies.
+
+        Parameters
+        ----------
+        max_depth : int, optional
+            Maximum depth to expand, with the root at depth 0.
+        max_children : int, optional
+            Maximum number of children to render for each node.
+        show_signature : bool, default: False
+            Include the short signature hash for each node.
+        """
+        if max_depth is not None and max_depth < 0:
+            raise ValueError("max_depth must be non-negative or None")
+        if max_children is not None and max_children < 0:
+            raise ValueError("max_children must be non-negative or None")
+
+        def label_for(node: CalculatorBase[Any, Any]) -> str:
             label = f"{node.tree_label}<{node.kind}>"
-            lines = [f"{prefix}{branch} {label}"]
+            if show_signature:
+                label = f"{label} #{node.signature_hash()}"
+            return label
+
+        def hidden_label(children: list[CalculatorBase[Any, Any]]) -> str:
+            if not children:
+                return "..."
+            descendants = 0
+            stack = list(children)
+            seen: set[int] = set()
+            while stack:
+                current = stack.pop()
+                key = id(current)
+                if key in seen:
+                    continue
+                seen.add(key)
+                descendants += 1
+                stack.extend(current.children())
+            suffix = "node" if descendants == 1 else "nodes"
+            return f"... {descendants} {suffix} hidden"
+
+        def render(node: CalculatorBase[Any, Any], prefix: str, is_last: bool, depth: int) -> list[str]:
+            branch = "└─" if is_last else "├─"
+            lines = [f"{prefix}{branch} {label_for(node)}"]
             next_prefix = prefix + ("   " if is_last else "│  ")
             kids = node.children()
-            for idx, child in enumerate(kids):
-                lines.extend(render(child, next_prefix, idx == len(kids) - 1))
+            if max_depth is not None and depth >= max_depth and kids:
+                lines.append(f"{next_prefix}└─ {hidden_label(kids)}")
+                return lines
+
+            visible_kids = kids if max_children is None else kids[:max_children]
+            hidden_kids = [] if max_children is None else kids[max_children:]
+            for idx, child in enumerate(visible_kids):
+                lines.extend(render(child, next_prefix, idx == len(visible_kids) - 1 and not hidden_kids, depth + 1))
+            if hidden_kids:
+                lines.append(f"{next_prefix}└─ {hidden_label(hidden_kids)}")
             return lines
 
-        lines = [f"{self.tree_label}<{self.kind}>"]
+        lines = [label_for(self)]
         kids = self.children()
-        for idx, child in enumerate(kids):
-            lines.extend(render(child, "", idx == len(kids) - 1))
+        if max_depth == 0 and kids:
+            lines.append(f"└─ {hidden_label(kids)}")
+        else:
+            visible_kids = kids if max_children is None else kids[:max_children]
+            hidden_kids = [] if max_children is None else kids[max_children:]
+            for idx, child in enumerate(visible_kids):
+                lines.extend(render(child, "", idx == len(visible_kids) - 1 and not hidden_kids, 1))
+            if hidden_kids:
+                lines.append(f"└─ {hidden_label(hidden_kids)}")
         return "\n"+"\n".join(lines)
-
-    def format_flow(self) -> str:
-        """Return a text flow representation of the calculator graph."""
-        return self.format_tree()
 
     def _clone(self, **changes: Any) -> CalculatorBase[TRaw, TPublic]:
         clone = copy.copy(self)
