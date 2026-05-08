@@ -503,7 +503,7 @@ class RunOptions:
         Recording policy for nodes without an explicit policy.
     errors : ErrorPolicy or str, default: ErrorPolicy.RAISE
         Error handling policy.
-    cache_small_value_bytes : int, default: 1000000
+    cache_small_value_bytes : int, default: 10_000_000
         Maximum public-value size for automatic cache storage.
     """
 
@@ -515,7 +515,7 @@ class RunOptions:
     backend: str = "serial"
     default_record_policy: RecordPolicy = RecordPolicy.SUMMARY
     errors: ErrorPolicy | str = ErrorPolicy.RAISE
-    cache_small_value_bytes: int = 1_000_000
+    cache_small_value_bytes: int = 10_000_000
 
     def __post_init__(self) -> None:
         self.errors = normalize_error_policy(self.errors)

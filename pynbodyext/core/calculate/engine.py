@@ -584,7 +584,8 @@ class EvalEngine:
             return False
         size = self._estimate_cache_bytes(public_value)
         if isinstance(raw_value, FilterResult):
-            size += self._estimate_cache_bytes(raw_value.mask)
+            if raw_value.mask is not public_value:
+                size += self._estimate_cache_bytes(raw_value.mask)
         elif raw_value is not public_value:
             size += self._estimate_cache_bytes(raw_value)
         return size <= options.cache_small_value_bytes

@@ -222,6 +222,7 @@ from .result import (
 )
 from .runtime import CalcRuntime, TransformRuntime
 from .scopes import Scope, ScopeSpec, TransformScope
+from .signature import CalculatorSignature, calculator_from_signature, calculator_to_signature
 from .template import RuntimeCalculatorBase
 from .trace import TraceCollector, TraceEvent
 from .transforms import TransformBase, TransformChain, TransformPlan, TransformStep, chain_transforms
@@ -283,6 +284,9 @@ __all__ = [
     "RuntimeCache",
     "ExecutionValue",
     "CacheEvent",
+    "CalculatorSignature",
+    "calculator_from_signature",
+    "calculator_to_signature",
     "TraceCollector",
     "TraceEvent",
     "PerfCollector",

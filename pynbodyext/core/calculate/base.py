@@ -559,6 +559,22 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         """
         return hashlib.sha256(self.signature_text().encode("utf-8")).hexdigest()[:length]
 
+    def to_signature(self, *, inline_array_bytes: int = 128) -> Any:
+        """Return a structured signature that can reconstruct this calculator when possible."""
+        from .signature import calculator_to_signature
+
+        return calculator_to_signature(self, inline_array_bytes=inline_array_bytes)
+
+    @classmethod
+    def from_signature(cls, signature: Any) -> CalculatorBase[Any, Any]:
+        """Reconstruct a calculator from a structured signature."""
+        from .signature import calculator_from_signature
+
+        calculator = calculator_from_signature(signature)
+        if not isinstance(calculator, CalculatorBase):
+            raise TypeError(f"signature did not reconstruct a CalculatorBase: {type(calculator)!r}")
+        return calculator
+
     @abstractmethod
     def execute(self, ctx: ExecutionContext, input: NodeInput) -> TRaw:
         """Execute the calculator against an active :class:`NodeInput`.
