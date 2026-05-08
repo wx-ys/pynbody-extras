@@ -522,14 +522,7 @@ class EvalEngine:
             ctx.runtime_store[root.node_id].public_value if root.node_id in ctx.runtime_store else None,
         )
 
-        root.artifacts["perf_report"] = perf_report
-        root.artifacts["cache_report"] = cache_report
-        root.artifacts["trace_timeline"] = trace_timeline
-        root.artifacts["trace_tree"] = trace_tree
-        root.artifacts["observer_report"] = observer_report
-        root.artifacts["log_events"] = list(ctx.log_events)
-
-        return Result(
+        result = Result(
             value=root_value,
             root=root,
             nodes=dict(ctx.node_registry),
@@ -562,6 +555,18 @@ class EvalEngine:
                 "named_values": named_values,
             },
         )
+        execution_tree_report = result.report_execution_tree()
+
+        root.artifacts["perf_report"] = perf_report
+        root.artifacts["cache_report"] = cache_report
+        root.artifacts["trace_timeline"] = trace_timeline
+        root.artifacts["trace_tree"] = trace_tree
+        root.artifacts["observer_report"] = observer_report
+        root.artifacts["execution_tree_report"] = execution_tree_report
+        root.artifacts["log_events"] = list(ctx.log_events)
+        result.reports["execution_tree"] = execution_tree_report
+
+        return result
 
     def _should_store_runtime_cache(
         self,

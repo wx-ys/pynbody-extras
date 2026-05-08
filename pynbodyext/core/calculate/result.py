@@ -340,11 +340,15 @@ class Result(Generic[T]):
         """Return a named diagnostic payload."""
         return self.diagnostics.get(name, default)
 
-    def cache_report(self) -> str:
+    def report_cache(self) -> str:
         """Return the runtime cache report."""
         return self.report("cache")
 
-    def trace_timeline(self, *, show_ids: bool = False, include_observer: bool = True) -> str:
+    def cache_report(self) -> str:
+        """Alias for :meth:`report_cache`."""
+        return self.report_cache()
+
+    def report_trace_timeline(self, *, show_ids: bool = False, include_observer: bool = True) -> str:
         """Return a trace timeline for the run."""
         lines: list[str] = []
         for event in self.trace_events():
@@ -365,7 +369,11 @@ class Result(Generic[T]):
             )
         return "\n".join(lines)
 
-    def trace_tree(self, *, show_ids: bool = False) -> str:
+    def trace_timeline(self, *, show_ids: bool = False, include_observer: bool = True) -> str:
+        """Alias for :meth:`report_trace_timeline`."""
+        return self.report_trace_timeline(show_ids=show_ids, include_observer=include_observer)
+
+    def report_trace_tree(self, *, show_ids: bool = False) -> str:
         """Return the stored execution trace tree."""
         text = self.report("trace_tree")
         if show_ids:
@@ -377,6 +385,10 @@ class Result(Generic[T]):
             else:
                 lines.append(line)
         return "\n".join(lines)
+
+    def trace_tree(self, *, show_ids: bool = False) -> str:
+        """Alias for :meth:`report_trace_tree`."""
+        return self.report_trace_tree(show_ids=show_ids)
 
     def trace_events(self) -> list[Any]:
         """Return raw trace events."""
@@ -411,7 +423,7 @@ class Result(Generic[T]):
             return resolved.observation
         return self.observations.get(resolved.node_id)
 
-    def observer_report(self, *, include_empty: bool = False, show_ids: bool = False) -> str:
+    def report_observer(self, *, include_empty: bool = False, show_ids: bool = False) -> str:
         """Return a formatted pynbody field observer report."""
         if not include_empty and not show_ids:
             return self.report("observer")
@@ -455,26 +467,78 @@ class Result(Generic[T]):
         """Return a detailed text description of one result node."""
         return ResultQuery.describe_node(self, node)
 
-    def node_tree(self, node: str | ResultNode | None = None, *, show_ids: bool = False) -> str:
+    def report_node_tree(
+        self,
+        node: str | ResultNode | None = None,
+        *,
+        show_ids: bool = False,
+        max_depth: int | None = None,
+        max_children: int | None = None,
+    ) -> str:
         """Return a tree view of evaluated nodes."""
-        return ResultQuery.node_tree(self, node=node, show_ids=show_ids)
+        return ResultQuery.node_tree(
+            self,
+            node=node,
+            show_ids=show_ids,
+            max_depth=max_depth,
+            max_children=max_children,
+        )
 
-    def perf_report(self, *, show_ids: bool = False) -> str:
+    def report_execution_tree(
+        self,
+        node: str | ResultNode | None = None,
+        *,
+        show_ids: bool = False,
+        max_depth: int | None = None,
+        max_children: int | None = None,
+        include_perf: bool = True,
+        include_cache: bool = True,
+        include_observer: bool = True,
+        include_values: bool = False,
+    ) -> str:
+        """Return a tree report annotated with runtime diagnostics."""
+        return ResultQuery.execution_tree(
+            self,
+            node=node,
+            show_ids=show_ids,
+            max_depth=max_depth,
+            max_children=max_children,
+            include_perf=include_perf,
+            include_cache=include_cache,
+            include_observer=include_observer,
+            include_values=include_values,
+        )
+
+    def report_perf(
+        self,
+        *,
+        show_ids: bool = False,
+        max_depth: int | None = None,
+        max_children: int | None = None,
+    ) -> str:
         """Return a formatted performance report."""
-        return ResultRepr.perf_table(self, show_ids=show_ids)
+        return ResultRepr.perf_table(
+            self,
+            show_ids=show_ids,
+            max_depth=max_depth,
+            max_children=max_children,
+        )
 
-    def summary(self) -> str:
+    def report_summary(self) -> str:
         """Return a compact text summary of the run."""
         return ResultRepr.summary(self)
 
-    def pipeline_report(
+    def report_pipeline(
         self,
         *,
         include_perf: bool = True,
         include_trace: bool = False,
         include_cache: bool = False,
         include_errors: bool = True,
+        include_execution_tree: bool = False,
         show_ids: bool = False,
+        max_depth: int | None = None,
+        max_children: int | None = None,
     ) -> str:
         """Return a multi-section text report for the run.
 
@@ -491,7 +555,10 @@ class Result(Generic[T]):
             include_trace=include_trace,
             include_cache=include_cache,
             include_errors=include_errors,
+            include_execution_tree=include_execution_tree,
             show_ids=show_ids,
+            max_depth=max_depth,
+            max_children=max_children,
         )
 
 
@@ -600,27 +667,356 @@ class ResultQuery:
         return label
 
     @staticmethod
+    def _validate_tree_limits(max_depth: int | None, max_children: int | None) -> None:
+        if max_depth is not None and max_depth < 0:
+            raise ValueError("max_depth must be non-negative or None")
+        if max_children is not None and max_children < 0:
+            raise ValueError("max_children must be non-negative or None")
+
+    @staticmethod
+    def _subtree_nodes(result: Result[Any], roots: list[ResultNode]) -> list[ResultNode]:
+        out: list[ResultNode] = []
+        seen: set[str] = set()
+        stack = list(reversed(roots))
+        while stack:
+            node = stack.pop()
+            if node.node_id in seen:
+                continue
+            seen.add(node.node_id)
+            out.append(node)
+            stack.extend(reversed(ResultQuery.display_children_of(result, node)))
+        return out
+
+    @staticmethod
+    def _hidden_count_label(result: Result[Any], roots: list[ResultNode]) -> str:
+        count = len(ResultQuery._subtree_nodes(result, roots))
+        suffix = "node" if count == 1 else "nodes"
+        return f"... {count} {suffix} hidden"
+
+    @staticmethod
+    def _visible_tree_nodes(
+        result: Result[Any],
+        start: ResultNode,
+        *,
+        max_depth: int | None = None,
+        max_children: int | None = None,
+    ) -> tuple[list[ResultNode], int]:
+        visible: list[ResultNode] = []
+        hidden_ids: set[str] = set()
+        visible_ids: set[str] = set()
+
+        def hide(roots: list[ResultNode]) -> None:
+            for node in ResultQuery._subtree_nodes(result, roots):
+                if node.node_id not in visible_ids:
+                    hidden_ids.add(node.node_id)
+
+        def visit(node: ResultNode, depth: int) -> None:
+            visible.append(node)
+            visible_ids.add(node.node_id)
+            children = ResultQuery.display_children_of(result, node)
+            if max_depth is not None and depth >= max_depth and children:
+                hide(children)
+                return
+
+            visible_children = children if max_children is None else children[:max_children]
+            hidden_children = [] if max_children is None else children[max_children:]
+            for child in visible_children:
+                visit(child, depth + 1)
+            hide(hidden_children)
+
+        visit(start, 0)
+        return visible, len(hidden_ids)
+
+    @staticmethod
+    def _node_elapsed_s(node: ResultNode) -> float | None:
+        values = [phase.elapsed_s for phase in node.phases if phase.elapsed_s is not None]
+        if not values:
+            return None
+        return sum(values)
+
+    @staticmethod
+    def _cache_events_by_node(result: Result[Any]) -> dict[str, dict[str, int]]:
+        grouped: dict[str, dict[str, int]] = {}
+        for event in result.cache_events():
+            node_id = getattr(event, "node_id", None)
+            if not node_id:
+                continue
+            node_events = grouped.setdefault(node_id, {})
+            event_name = str(getattr(event, "event", ""))
+            node_events[event_name] = node_events.get(event_name, 0) + 1
+        return grouped
+
+    @staticmethod
+    def _cache_suffix(
+        node: ResultNode,
+        cache_events: dict[str, dict[str, int]],
+        *,
+        hit_occurrence: bool = False,
+    ) -> str:
+        if hit_occurrence:
+            return "hit"
+
+        events = cache_events.get(node.node_id, {})
+        parts: list[str] = []
+        hits = events.get("hit", 0)
+        stores = events.get("store", 0)
+        if stores:
+            parts.append("store" if stores == 1 else f"{stores} stores")
+            if hits:
+                parts.append(f"nhit={hits}")
+        elif hits:
+            parts.append("hit" if hits == 1 else f"{hits} hits")
+        return "; ".join(parts)
+
+    @staticmethod
+    def _format_field_set(values: set[str], *, max_items: int = 4) -> str:
+        if not values:
+            return ""
+        items = sorted(values)
+        if len(items) <= max_items:
+            return ",".join(items)
+        hidden = len(items) - max_items
+        return f"{','.join(items[:max_items])},+{hidden}"
+
+    @staticmethod
+    def _value_suffix(node: ResultNode) -> str:
+        if node.value_summary is None:
+            return ""
+        summary = node.value_summary
+        parts = [summary.python_type]
+        if summary.shape is not None:
+            parts.append(f"shape={summary.shape!r}")
+        if summary.units is not None:
+            parts.append(f"units={summary.units}")
+        return " ".join(parts)
+
+    @staticmethod
+    def _execution_label(
+        result: Result[Any],
+        node: ResultNode,
+        *,
+        show_ids: bool,
+        include_perf: bool,
+        include_cache: bool,
+        include_observer: bool,
+        include_values: bool,
+        cache_events: dict[str, dict[str, int]],
+        hit_occurrence: bool = False,
+    ) -> str:
+        label = ResultQuery.node_label(node, show_ids=show_ids)
+        parts: list[str] = []
+
+        if hit_occurrence:
+            return f"{label}  [cache=hit]"
+
+        if node.error is not None:
+            parts.append(f"error={node.error.error_type}")
+        elif node.status != NodeStatus.OK:
+            parts.append(f"status={display_value(node.status)}")
+
+        if include_perf:
+            elapsed = ResultQuery._node_elapsed_s(node)
+            if elapsed is not None:
+                parts.append(format_time(elapsed))
+
+        if include_cache:
+            cache_text = ResultQuery._cache_suffix(node, cache_events)
+            if cache_text:
+                parts.append(f"cache={cache_text}")
+
+        if include_observer:
+            access_text = format_observation_access(
+                result.observation_of(node),
+                read_items=3,
+                dirty_items=3,
+                delete_items=2,
+            )
+            if access_text:
+                parts.append(access_text)
+
+        if include_values:
+            value_text = ResultQuery._value_suffix(node)
+            if value_text:
+                parts.append(f"value={value_text}")
+
+        if not parts:
+            return label
+        return f"{label}  [{'; '.join(parts)}]"
+
+    @staticmethod
+    def _hidden_execution_summary(
+        result: Result[Any],
+        roots: list[ResultNode],
+        *,
+        include_perf: bool,
+        include_cache: bool,
+        include_observer: bool,
+        cache_events: dict[str, dict[str, int]],
+    ) -> str:
+        nodes = ResultQuery._subtree_nodes(result, roots)
+        suffix = "node" if len(nodes) == 1 else "nodes"
+        parts = [f"... {len(nodes)} {suffix} hidden"]
+
+        if include_perf:
+            elapsed_values = [ResultQuery._node_elapsed_s(node) for node in nodes]
+            elapsed = sum(value for value in elapsed_values if value is not None)
+            if elapsed:
+                parts.append(format_time(elapsed))
+
+        if include_cache:
+            hits = sum(cache_events.get(node.node_id, {}).get("hit", 0) for node in nodes)
+            stores = sum(cache_events.get(node.node_id, {}).get("store", 0) for node in nodes)
+            cache_parts: list[str] = []
+            if stores:
+                cache_parts.append(f"{stores} store")
+            if hits:
+                cache_parts.append(f"nhit={hits}")
+            if cache_parts:
+                parts.append(f"cache={','.join(cache_parts)}")
+
+        if include_observer:
+            reads: set[str] = set()
+            dirty_fields: set[str] = set()
+            deletes: set[str] = set()
+            for node in nodes:
+                observation = result.observation_of(node)
+                if observation is None:
+                    continue
+                reads.update(observation.reads)
+                dirty_fields.update(observation.dirty_fields)
+                deletes.update(observation.deletes)
+            read_text = ResultQuery._format_field_set(reads, max_items=3)
+            dirty_text = ResultQuery._format_field_set(dirty_fields, max_items=3)
+            delete_text = ResultQuery._format_field_set(deletes, max_items=2)
+            if read_text:
+                parts.append(f"read={read_text}")
+            if dirty_text:
+                parts.append(f"dirty={dirty_text}")
+            if delete_text:
+                parts.append(f"del={delete_text}")
+
+        return "; ".join(parts)
+
+    @staticmethod
     def node_tree(
         result: Result[Any],
         node: str | ResultNode | None = None,
         *,
         show_ids: bool = False,
+        max_depth: int | None = None,
+        max_children: int | None = None,
     ) -> str:
+        ResultQuery._validate_tree_limits(max_depth, max_children)
         start = result.root if node is None else ResultQuery.resolve_node(result, node)
 
-        def render(current: ResultNode, prefix: str, is_last: bool) -> list[str]:
+        def render(current: ResultNode, prefix: str, is_last: bool, depth: int) -> list[str]:
             branch = "└─" if is_last else "├─"
             lines = [f"{prefix}{branch} {ResultQuery.node_label(current, show_ids=show_ids)}"]
             child_prefix = prefix + ("   " if is_last else "│  ")
             children = ResultQuery.display_children_of(result, current)
-            for index, child in enumerate(children):
-                lines.extend(render(child, child_prefix, index == len(children) - 1))
+            if max_depth is not None and depth >= max_depth and children:
+                lines.append(f"{child_prefix}└─ {ResultQuery._hidden_count_label(result, children)}")
+                return lines
+
+            visible_children = children if max_children is None else children[:max_children]
+            hidden_children = [] if max_children is None else children[max_children:]
+            for index, child in enumerate(visible_children):
+                is_child_last = index == len(visible_children) - 1 and not hidden_children
+                lines.extend(render(child, child_prefix, is_child_last, depth + 1))
+            if hidden_children:
+                lines.append(f"{child_prefix}└─ {ResultQuery._hidden_count_label(result, hidden_children)}")
             return lines
 
         lines = [ResultQuery.node_label(start, show_ids=show_ids)]
         children = ResultQuery.display_children_of(result, start)
-        for index, child in enumerate(children):
-            lines.extend(render(child, "", index == len(children) - 1))
+        if max_depth == 0 and children:
+            lines.append(f"└─ {ResultQuery._hidden_count_label(result, children)}")
+        else:
+            visible_children = children if max_children is None else children[:max_children]
+            hidden_children = [] if max_children is None else children[max_children:]
+            for index, child in enumerate(visible_children):
+                is_child_last = index == len(visible_children) - 1 and not hidden_children
+                lines.extend(render(child, "", is_child_last, 1))
+            if hidden_children:
+                lines.append(f"└─ {ResultQuery._hidden_count_label(result, hidden_children)}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def execution_tree(
+        result: Result[Any],
+        node: str | ResultNode | None = None,
+        *,
+        show_ids: bool = False,
+        max_depth: int | None = None,
+        max_children: int | None = None,
+        include_perf: bool = True,
+        include_cache: bool = True,
+        include_observer: bool = True,
+        include_values: bool = False,
+    ) -> str:
+        ResultQuery._validate_tree_limits(max_depth, max_children)
+        start = result.root if node is None else ResultQuery.resolve_node(result, node)
+        cache_events = ResultQuery._cache_events_by_node(result)
+        rendered_nodes: set[str] = set()
+
+        def label(current: ResultNode, *, hit_occurrence: bool = False) -> str:
+            return ResultQuery._execution_label(
+                result,
+                current,
+                show_ids=show_ids,
+                include_perf=include_perf,
+                include_cache=include_cache,
+                include_observer=include_observer,
+                include_values=include_values,
+                cache_events=cache_events,
+                hit_occurrence=hit_occurrence,
+            )
+
+        def hidden_summary(children: list[ResultNode]) -> str:
+            return ResultQuery._hidden_execution_summary(
+                result,
+                children,
+                include_perf=include_perf,
+                include_cache=include_cache,
+                include_observer=include_observer,
+                cache_events=cache_events,
+            )
+
+        def render(current: ResultNode, prefix: str, is_last: bool, depth: int) -> list[str]:
+            branch = "└─" if is_last else "├─"
+            hit_occurrence = current.node_id in rendered_nodes
+            lines = [f"{prefix}{branch} {label(current, hit_occurrence=hit_occurrence)}"]
+            if hit_occurrence:
+                return lines
+            rendered_nodes.add(current.node_id)
+            child_prefix = prefix + ("   " if is_last else "│  ")
+            children = ResultQuery.display_children_of(result, current)
+            if max_depth is not None and depth >= max_depth and children:
+                lines.append(f"{child_prefix}└─ {hidden_summary(children)}")
+                return lines
+
+            visible_children = children if max_children is None else children[:max_children]
+            hidden_children = [] if max_children is None else children[max_children:]
+            for index, child in enumerate(visible_children):
+                is_child_last = index == len(visible_children) - 1 and not hidden_children
+                lines.extend(render(child, child_prefix, is_child_last, depth + 1))
+            if hidden_children:
+                lines.append(f"{child_prefix}└─ {hidden_summary(hidden_children)}")
+            return lines
+
+        lines = [label(start)]
+        rendered_nodes.add(start.node_id)
+        children = ResultQuery.display_children_of(result, start)
+        if max_depth == 0 and children:
+            lines.append(f"└─ {hidden_summary(children)}")
+        else:
+            visible_children = children if max_children is None else children[:max_children]
+            hidden_children = [] if max_children is None else children[max_children:]
+            for index, child in enumerate(visible_children):
+                is_child_last = index == len(visible_children) - 1 and not hidden_children
+                lines.extend(render(child, "", is_child_last, 1))
+            if hidden_children:
+                lines.append(f"└─ {hidden_summary(hidden_children)}")
         return "\n".join(lines)
 
 
@@ -709,11 +1105,18 @@ class ResultRepr:
         return html_card(
             "Result",
             rows,
-            body=named_table + html_pre(result.node_tree()),
+            body=named_table + html_pre(result.report_execution_tree(max_depth=4)),
         )
 
     @staticmethod
-    def perf_table(result: Result[Any], *, show_ids: bool = False) -> str:
+    def perf_table(
+        result: Result[Any],
+        *,
+        show_ids: bool = False,
+        max_depth: int | None = None,
+        max_children: int | None = None,
+    ) -> str:
+        ResultQuery._validate_tree_limits(max_depth, max_children)
         title = result.root.name or str(result.root.kind)
         lines: list[str] = [title] if title else []
         header = "Node                           | Phase           | Time         | Mem Used       | Peak Mem       | RSS Delta"
@@ -721,7 +1124,25 @@ class ResultRepr:
         lines.append(header)
         lines.append("-" * len(header))
 
-        for node in result.nodes.values():
+        if max_depth is None and max_children is None:
+            nodes = list(result.nodes.values())
+            hidden_count = 0
+        else:
+            visible_nodes, hidden_count = ResultQuery._visible_tree_nodes(
+                result,
+                result.root,
+                max_depth=max_depth,
+                max_children=max_children,
+            )
+            seen_node_ids: set[str] = set()
+            nodes = []
+            for node in visible_nodes:
+                if node.node_id in seen_node_ids:
+                    continue
+                seen_node_ids.add(node.node_id)
+                nodes.append(node)
+
+        for node in nodes:
             node_label = ResultQuery.node_label(
                 node, show_ids=show_ids, show_ref=True, show_kind=True, max_width=30
             )
@@ -734,6 +1155,18 @@ class ResultRepr:
                     f"{format_mem(phase.memory_peak):>14} | "
                     f"{format_mem(phase.rss_used):>10}"
                 )
+
+        if hidden_count:
+            hidden_suffix = "node" if hidden_count == 1 else "nodes"
+            hidden_label = f"... {hidden_count} {hidden_suffix} hidden"
+            lines.append(
+                f"{hidden_label[:30]:<30} | "
+                f"{'-':<15} | "
+                f"{'-':>12} | "
+                f"{'-':>14} | "
+                f"{'-':>14} | "
+                f"{'-':>10}"
+            )
 
         lines.append("-" * len(header))
         lines.append(
@@ -809,22 +1242,45 @@ class ResultRepr:
         include_trace: bool = False,
         include_cache: bool = False,
         include_errors: bool = True,
+        include_execution_tree: bool = False,
         show_ids: bool = False,
+        max_depth: int | None = None,
+        max_children: int | None = None,
     ) -> str:
         sections: list[str] = [
             "Summary",
             ResultRepr.summary(result),
             "Pipeline",
-            ResultQuery.node_tree(result, show_ids=show_ids),
+            ResultQuery.node_tree(
+                result,
+                show_ids=show_ids,
+                max_depth=max_depth,
+                max_children=max_children,
+            ),
         ]
 
+        if include_execution_tree:
+            execution_text = ResultQuery.execution_tree(
+                result,
+                show_ids=show_ids,
+                max_depth=max_depth,
+                max_children=max_children,
+            ).strip()
+            if execution_text:
+                sections.extend(["Execution", execution_text])
+
         if include_perf:
-            perf_text = ResultRepr.perf_table(result, show_ids=show_ids).strip()
+            perf_text = ResultRepr.perf_table(
+                result,
+                show_ids=show_ids,
+                max_depth=max_depth,
+                max_children=max_children,
+            ).strip()
             if perf_text:
                 sections.extend(["Performance", perf_text])
 
         if include_trace:
-            trace_text = result.trace_timeline(show_ids=show_ids).strip()
+            trace_text = result.report_trace_timeline(show_ids=show_ids).strip()
             if trace_text:
                 sections.extend(["Trace Timeline", trace_text])
 

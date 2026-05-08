@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Literal
 
-FieldOperation = Literal["read", "dirty", "delete"]
+FieldOperation = Literal["read", "dirty", "delete", "derive"]
 
 _MAX_REPR_LENGTH = 120
 
@@ -70,6 +70,7 @@ class AccessObservation:
     reads: set[str] = field(default_factory=set)
     dirty_fields: set[str] = field(default_factory=set)
     deletes: set[str] = field(default_factory=set)
+    derived_fields: set[str] = field(default_factory=set)
     events: list[AccessEvent] = field(default_factory=list)
 
     @property
@@ -94,6 +95,9 @@ class AccessObservation:
     def record_delete(self, sim: Any, key: Any) -> None:
         self._record("delete", sim, key, fallback_to_string=True)
 
+    def record_derive(self, sim: Any, key: Any) -> None:
+        self._record("derive", sim, key, fallback_to_string=True)
+
     def _record(
         self,
         operation: FieldOperation,
@@ -110,6 +114,8 @@ class AccessObservation:
                 self.dirty_fields.add(name)
             elif operation == "delete":
                 self.deletes.add(name)
+            elif operation == "derive":
+                self.derived_fields.add(name)
 
             self.events.append(
                 AccessEvent(
@@ -152,6 +158,7 @@ class AccessObservation:
         reads = self.fields_for("read", phase=phase)
         dirty_fields = self.fields_for("dirty", phase=phase)
         deletes = self.fields_for("delete", phase=phase)
+        derived_fields = self.fields_for("derive", phase=phase)
         event_count = sum(
             1
             for event in self.events
@@ -162,6 +169,7 @@ class AccessObservation:
             "dirty_fields": sorted(dirty_fields),
             "writes": sorted(dirty_fields),
             "deletes": sorted(deletes),
+            "derived_fields": sorted(derived_fields),
             "event_count": event_count,
         }
 
@@ -173,6 +181,7 @@ class AccessObservation:
             "dirty_fields": sorted(self.dirty_fields),
             "writes": sorted(self.writes),
             "deletes": sorted(self.deletes),
+            "derived_fields": sorted(self.derived_fields),
             "event_count": self.event_count,
             "phases": [phase if phase is not None else "node" for phase in self.phases()],
         }
@@ -194,6 +203,11 @@ _OBSERVATION_PHASE_STACK: ContextVar[tuple[str | None, ...]] = ContextVar(
     default=(),
 )
 
+_DERIVATION_STACK: ContextVar[tuple[str, ...]] = ContextVar(
+    "pynbodyext_calculate_derivation_stack",
+    default=(),
+)
+
 
 def current_observation() -> AccessObservation | None:
     stack = _OBSERVATION_STACK.get()
@@ -202,6 +216,11 @@ def current_observation() -> AccessObservation | None:
 
 def current_observation_phase() -> str | None:
     stack = _OBSERVATION_PHASE_STACK.get()
+    return stack[-1] if stack else None
+
+
+def current_derivation_field() -> str | None:
+    stack = _DERIVATION_STACK.get()
     return stack[-1] if stack else None
 
 
@@ -214,6 +233,17 @@ def observation_phase(phase: str | None) -> Any:
         yield
     finally:
         _OBSERVATION_PHASE_STACK.reset(token)
+
+
+@contextmanager
+def derivation_field(field: str) -> Any:
+    """Mark writes caused by materializing one derived array."""
+    stack = _DERIVATION_STACK.get()
+    token = _DERIVATION_STACK.set(stack + (field,))
+    try:
+        yield
+    finally:
+        _DERIVATION_STACK.reset(token)
 
 
 def _all_subclasses(cls: type[Any]) -> list[type[Any]]:
@@ -284,6 +314,7 @@ class _SnapshotPatchManager:
         for target_cls in _candidate_snapshot_classes():
             cls._patch_method(target_cls, "__getitem__", _wrap_getitem)
             cls._patch_method(target_cls, "_dirty", _wrap_dirty)
+            cls._patch_method(target_cls, "_derive_array", _wrap_derive_array)
             cls._patch_method(target_cls, "__delitem__", _wrap_delitem)
 
     @classmethod
@@ -323,8 +354,22 @@ def _wrap_dirty(original: Any) -> Any:
         observation = current_observation()
         if observation is not None:
             key = args[0] if args else kwargs.get("name")
-            observation.record_dirty(self, key)
+            if key == current_derivation_field():
+                observation.record_derive(self, key)
+            else:
+                observation.record_dirty(self, key)
         return value
+
+    return wrapped
+
+
+def _wrap_derive_array(original: Any) -> Any:
+    @wraps(original)
+    def wrapped(self: Any, name: Any, *args: Any, **kwargs: Any) -> Any:
+        if isinstance(name, str):
+            with derivation_field(name):
+                return original(self, name, *args, **kwargs)
+        return original(self, name, *args, **kwargs)
 
     return wrapped
 
@@ -401,6 +446,7 @@ def format_observation_access(
     read_items: int = 4,
     dirty_items: int | None = None,
     delete_items: int | None = None,
+    derive_items: int | None = None,
 ) -> str:
     """Return a compact access suffix such as ``read=pos dirty=vel del=r``."""
     if observation is None or observation.is_empty:
@@ -409,6 +455,7 @@ def format_observation_access(
     reads = observation.fields_for("read", phase=phase)
     dirty_fields = observation.fields_for("dirty", phase=phase)
     deletes = observation.fields_for("delete", phase=phase)
+    derived_fields = observation.fields_for("derive", phase=phase)
 
     parts: list[str] = []
     if include_reads and reads:
@@ -417,6 +464,8 @@ def format_observation_access(
         parts.append(f"dirty[{_join_fields(dirty_fields, max_items=dirty_items)}]")
     if deletes:
         parts.append(f"del[{_join_fields(deletes, max_items=delete_items)}]")
+    if derived_fields:
+        parts.append(f"derive[{_join_fields(derived_fields, max_items=derive_items)}]")
     return "; ".join(parts)
 
 
@@ -440,13 +489,15 @@ def render_observer_report(
         "reads": 34,
         "dirty": 34,
         "deletes": 28,
+        "derived": 28,
     }
     header = (
         f"{'Node':<{widths['node']}} | "
         f"{'Phase':<{widths['phase']}} | "
         f"{'Reads':<{widths['reads']}} | "
         f"{'Dirty':<{widths['dirty']}} | "
-        f"{'Deletes':<{widths['deletes']}}"
+        f"{'Deletes':<{widths['deletes']}} | "
+        f"{'Derived':<{widths['derived']}}"
     )
     lines = ["Observer", "-" * len(header), header, "-" * len(header)]
     for observation in items:
@@ -455,7 +506,8 @@ def render_observer_report(
             reads = observation.fields_for("read", phase=phase)
             dirty_fields = observation.fields_for("dirty", phase=phase)
             deletes = observation.fields_for("delete", phase=phase)
-            if not include_empty and not (reads or dirty_fields or deletes):
+            derived_fields = observation.fields_for("derive", phase=phase)
+            if not include_empty and not (reads or dirty_fields or deletes or derived_fields):
                 continue
 
             label = observation.node_label
@@ -466,13 +518,15 @@ def render_observer_report(
             reads_text = _join_fields(reads, max_items=4, max_length=widths["reads"])
             dirty_text = _join_fields(dirty_fields, max_length=widths["dirty"])
             delete_text = _join_fields(deletes, max_length=widths["deletes"])
+            derived_text = _join_fields(derived_fields, max_length=widths["derived"])
 
             lines.append(
                 f"{label:<{widths['node']}} | "
                 f"{phase_text:<{widths['phase']}} | "
                 f"{reads_text:<{widths['reads']}} | "
                 f"{dirty_text:<{widths['dirty']}} | "
-                f"{delete_text:<{widths['deletes']}}"
+                f"{delete_text:<{widths['deletes']}} | "
+                f"{derived_text:<{widths['derived']}}"
             )
     lines.append("-" * len(header))
     return "\n".join(lines)

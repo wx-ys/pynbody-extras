@@ -362,8 +362,14 @@ class TransformBase(
     def cleanup(self, ctx: ExecutionContext, handle: HandleT) -> None:
         """Revert a transform handle when it is revertible."""
         if self.is_revertible(handle):
-            handle.revert() # type: ignore[attr-defined]
-            ctx.advance_mutation_generation(f"revert {self.log_label}")
+            from .observer import observation_phase
+
+            with observation_phase("revert"):
+                handle.revert() # type: ignore[attr-defined]
+                ctx.advance_mutation_generation(
+                    f"revert {self.log_label}",
+                    observed_phase="revert",
+                )
 
     @classmethod
     def chain(cls, *transforms: TransformBase[Any]) -> TransformBase[Any]:
@@ -435,7 +441,8 @@ class TransformChain(TransformBase[tuple[TransformStep, ...]]):
         except Exception:
             if steps:
                 try:
-                    self.cleanup(ctx, tuple(steps))
+                    with ctx.phase(self, "revert"):
+                        self.cleanup(ctx, tuple(steps))
                     ctx.log("debug", f"cleaned up {len(steps)} steps after error in transform chain")
                 except Exception as cleanup_error:
                     ctx.log("error", f"transform cleanup failed after error: {cleanup_error}")
@@ -469,7 +476,10 @@ class TransformChain(TransformBase[tuple[TransformStep, ...]]):
             if cleanup is None:
                 continue
 
-            cleanup(ctx, handle_obj)
+            from .observer import observation_phase
+
+            with observation_phase("revert"):
+                cleanup(ctx, handle_obj)
 
     def then(self, transform: TransformBase[Any]) -> TransformBase[Any]:
         """Append another transform after this chain."""
