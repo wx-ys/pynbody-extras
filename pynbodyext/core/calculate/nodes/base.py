@@ -156,6 +156,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from pynbodyext.core.calculate.result.result import Result
+    from pynbodyext.core.calculate.result.signature import CalculatorSignature
     from pynbodyext.core.calculate.runtime.context import ExecutionContext
     from pynbodyext.core.calculate.runtime.progress import ProgressSink, ProgressVerbosity
     from pynbodyext.util._type import SingleElementArray, UnitLike
@@ -553,7 +554,7 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         """
         return hashlib.sha256(self.signature_text().encode("utf-8")).hexdigest()[:length]
 
-    def to_signature(self, *, inline_array_bytes: int = 128) -> Any:
+    def to_signature(self, *, inline_array_bytes: int = 128) -> CalculatorSignature:
         """Return a structured signature that can reconstruct this calculator when possible."""
         from pynbodyext.core.calculate.result.signature import calculator_to_signature
 
@@ -897,8 +898,8 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
 
     def format_tree(
         self,
-        *,
         max_depth: int | None = None,
+        *,
         max_children: int | None = None,
         show_signature: bool = False,
     ) -> str:
