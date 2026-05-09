@@ -27,7 +27,7 @@ from .base import CalculatorBase
 from .properties import PropertyBase
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from pynbodyext.core.calculate.runtime.context import ExecutionContext
     from pynbodyext.core.calculate.runtime.input import NodeInput
@@ -131,11 +131,8 @@ class ConstantProperty(PropertyBase[TValue]):
     def tree_label(self) -> str:
         return f"Const({self._value!r})"
 
-    def instance_signature(self) -> tuple[Any, ...]:
-        value = self._value
-        if isinstance(value, (int, float, np.floating, bool, str)):
-            return ("const", value)
-        return ("const_obj", id(value))
+    def signature_payload(self) -> Mapping[str, Any] | None:
+        return {"value": self._value}
 
     def calculate(self, sim: Any, params: Any = None) -> TValue:
         return self._value
@@ -159,8 +156,8 @@ class LambdaProperty(PropertyBase[TValue]):
         super().__init__(name=name)
         self._func = func
 
-    def instance_signature(self) -> tuple[Any, ...]:
-        return ("lambda", id(self._func))
+    def signature_payload(self) -> Mapping[str, Any] | None:
+        return {"func": self._func}
 
     def calculate(self, sim: Any, params: Any = None) -> TValue:
         return self._func(sim)
@@ -244,8 +241,8 @@ class OpProperty(PropertyBase[Any]):
         symbol = _OP_TREE_SYMBOLS.get(self.op_name, self.op_name)
         return f"OpProperty({symbol})"
 
-    def instance_signature(self) -> tuple[Any, ...]:
-        return ("op", self.op_name)
+    def signature_payload(self) -> Mapping[str, Any] | None:
+        return {"op_name": self.op_name}
 
     def declared_dependencies(self) -> list[CalculatorBase[Any,Any]]:
         deps: list[CalculatorBase[Any,Any]] = []

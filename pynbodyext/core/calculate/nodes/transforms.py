@@ -183,24 +183,11 @@ class TransformBase(
         self.revert_policy = normalize_revert_policy(revert_policy)
         self.measure_filter = measure_filter
 
-    def instance_signature(self) -> tuple[Any, ...]:
-        return ("transform", self.move_all, self.revert_policy.value)
-
-    def signature(self) -> tuple[Any, ...]:
-        """Return a signature that includes transform metadata."""
-        return (
-            self.kind,
-            self.__class__.__name__,
-            (
-                "transform_meta",
-                self.move_all,
-                self.revert_policy.value,
-                self.measure_filter.signature() if self.measure_filter is not None else None,
-                self.instance_signature(),
-                ("dynamic", self.dynamic_param_signature()),
-            ),
-            tuple(dep.signature() for dep in self.dependencies()),
-        )
+    def signature_payload(self) -> Mapping[str, Any] | None:
+        payload: dict[str, Any] = {}
+        if not self.move_all:
+            payload["move_all"] = self.move_all
+        return payload or None
 
     def declared_dependencies(self) -> list[CalculatorBase[Any,Any]]:
         if self.measure_filter is None:

@@ -280,8 +280,8 @@ class AndFilter(FilterBase):
     def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:
         return [self.left, self.right]
 
-    def instance_signature(self) -> tuple[Any, ...]:
-        return ("and",)
+    def signature_payload(self) -> Mapping[str, Any] | None:
+        return {"left": self.left, "right": self.right}
 
     def _build_mask_runtime(self, sim: SimSnap, params: Any, ctx: ExecutionContext, input: NodeInput) -> Any:
         return ctx.public_value(self.left, input) & ctx.public_value(self.right, input)
@@ -298,8 +298,8 @@ class OrFilter(FilterBase):
     def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:
         return [self.left, self.right]
 
-    def instance_signature(self) -> tuple[Any, ...]:
-        return ("or",)
+    def signature_payload(self) -> Mapping[str, Any] | None:
+        return {"left": self.left, "right": self.right}
 
     def _build_mask_runtime(self, sim: SimSnap, params: Any, ctx: ExecutionContext, input: NodeInput) -> Any:
         return ctx.public_value(self.left, input) | ctx.public_value(self.right, input)
@@ -315,8 +315,8 @@ class NotFilter(FilterBase):
     def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:
         return [self.child]
 
-    def instance_signature(self) -> tuple[Any, ...]:
-        return ("not",)
+    def signature_payload(self) -> Mapping[str, Any] | None:
+        return {"child": self.child}
 
     def _build_mask_runtime(self, sim: SimSnap, params: Any, ctx: ExecutionContext, input: NodeInput) -> Any:
         return ~ctx.public_value(self.child, input)

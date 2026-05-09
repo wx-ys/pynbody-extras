@@ -636,7 +636,15 @@ def _pretty_lambda_property(payload: dict[str, Any]) -> str:
     return "LambdaProperty(<function>)"
 
 def _pretty_generic_calculator(payload: dict[str, Any]) -> str:
-    return _short_class_name(str(payload.get("class", "Calculator")))
+    class_name = _short_class_name(str(payload.get("class", "Calculator")))
+    identity = payload.get("identity", {})
+    if not identity or identity == {"opaque_id": identity.get("opaque_id")}:
+        return class_name
+
+    parts = [f"{key}={_pretty_value(value)}" for key, value in identity.items() if key != "opaque_id"]
+    if not parts:
+        return class_name
+    return f"{class_name}({', '.join(parts)})"
 
 _CALCULATOR_PRETTY_HANDLERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "dataclass": _pretty_dataclass_calculator,
@@ -837,26 +845,49 @@ def _encode_special_calculator(calculator: Any, path: str, inline_array_bytes: i
     return encoded
 
 def _encode_generic_calculator(calculator: Any, path: str, inline_array_bytes: int) -> _Encoded:
-    identity = _encode_value(calculator.instance_signature(), f"{path}.identity", inline_array_bytes)
+    payload_items = calculator.signature_payload()
+    children: list[_Encoded] = []
+    identity_payload: dict[str, Any] = {}
+
+    if payload_items is None:
+        identity_payload["opaque_id"] = id(calculator)
+    else:
+        for key, value in payload_items.items():
+            encoded = _encode_value(value, f"{path}.identity.{key}", inline_array_bytes)
+            identity_payload[key] = encoded.value
+            children.append(encoded)
+
     deps = [
         _encode_calculator_value(dep, f"{path}.deps[{idx}]", inline_array_bytes)
         for idx, dep in enumerate(calculator.dependencies())
     ]
+    children.extend(deps)
+
     transform_state, transform_children = _transform_state(calculator, inline_array_bytes, path)
+    children.extend(transform_children)
 
     payload: dict[str, Any] = {
         "node": "generic",
         "class": _class_path(calculator),
-        "identity": identity.value,
+        "identity": identity_payload,
     }
     if deps:
         payload["deps"] = [item.value for item in deps]
     if transform_state is not None:
         payload["transform"] = transform_state
 
-    merged = _merge_encoded(payload, [identity, *deps, *transform_children])
-    paths = merged.paths if path in merged.paths else (*merged.paths, path)
-    return _Encoded(merged.value, constructible=False, paths=paths)
+    merged = _merge_encoded(payload, children)
+    if payload_items is None:
+        return _Encoded(
+            merged.value,
+            constructible=False,
+            paths=(*merged.paths, path),
+        )
+    return _Encoded(
+        merged.value,
+        constructible=False,
+        paths=(*merged.paths, path),
+    )
 
 
 def _decode_bound_node(payload: dict[str, Any]) -> Any:

@@ -34,7 +34,7 @@ Typical reasons to inherit from :class:`CalculatorBase` directly are:
 
 Direct Subclass Example
 -----------------------
-A direct subclass usually implements :meth:`instance_signature`,
+A direct subclass usually implements :meth:`signature_payload`,
 :meth:`declared_dependencies`, and :meth:`execute`::
 
     class HotMassFraction(CalculatorBase[dict[str, float], float]):
@@ -43,12 +43,11 @@ A direct subclass usually implements :meth:`instance_signature`,
             self.hot_mass = hot_mass
             self.total_mass = total_mass
 
-        def instance_signature(self):
-            return (
-                "hot_mass_fraction",
-                self.hot_mass.signature(),
-                self.total_mass.signature(),
-            )
+        def signature_payload(self):
+            return {
+                "hot_mass": self.hot_mass,
+                "total_mass": self.total_mass,
+            }
 
         def declared_dependencies(self):
             return [self.hot_mass, self.total_mass]
@@ -90,7 +89,7 @@ transforms, naming, and pipelines like any other calculator.
 
 Notes
 -----
-Keep :meth:`instance_signature` stable across structurally equivalent
+Keep :meth:`signature_payload` stable across structurally equivalent
 instances. If the node depends on child calculators, always expose them through
 :meth:`declared_dependencies` so traversal, caching, and result graphs stay
 correct.
@@ -132,7 +131,6 @@ from pynbodyext.core.calculate.params import (
     StandaloneValueResolver,
     ValueResolver,
     dynamic_value_dependencies,
-    dynamic_value_signature,
     resolve_value_for,
 )
 from pynbodyext.core.calculate.params.fields import Param
@@ -305,7 +303,7 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
 
     Notes
     -----
-    Subclasses should make :meth:`instance_signature` stable for calculators
+    Subclasses should make :meth:`signature_payload` stable for calculators
     that should share cache entries across equivalent instances.
     """
 
@@ -382,13 +380,22 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         """Label used by format_tree()."""
         return self.log_label
 
+    def _repr_init_text(self) -> str:
+        from pynbodyext.core.calculate.result.signature import calculator_pretty_init_args
+
+        init_text = calculator_pretty_init_args(self)
+        if init_text:
+            return init_text
+
+        payload = self.signature_payload()
+        if not payload:
+            return ""
+
+        parts = [f"{key}={compact_repr(value)}" for key, value in payload.items()]
+        return ", ".join(parts)
+
     def _repr_fields(self) -> list[tuple[str | None, Any]]:
         fields: list[tuple[str | None, Any]] = []
-        signature = self.instance_signature()
-        if signature and isinstance(signature[0], str):
-            fields.extend((None, value) for value in signature[1:])
-        elif signature:
-            fields.append(("signature", signature))
         if self.name is not None:
             fields.append(("name", self.name))
         if self.record_policy is not None:
@@ -414,10 +421,16 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
 
     def __repr__(self) -> str:
         parts: list[str] = []
+
+        init_text = self._repr_init_text()
+        if init_text:
+            parts.append(init_text)
+
         for key, value in self._repr_fields():
             text = compact_repr(value)
             parts.append(text if key is None else f"{key}={text}")
-        return f"{self.__class__.__name__}({', '.join(parts)})"
+
+        return f"{self.__class__.__name__}({'; '.join(parts)})"
 
     def _repr_pretty_(self, printer: Any, cycle: bool) -> None:
         printer.text(f"{self.__class__.__name__}(...)" if cycle else repr(self))
@@ -431,16 +444,6 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
 
     def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, str]:
         return mimebundle(repr(self), self._repr_html_())
-
-    def instance_signature(self) -> tuple[Any, ...]:
-        """Return the instance-specific part of the node signature.
-
-        Returns
-        -------
-        tuple
-            Hashable or JSON-normalizable values describing this instance.
-        """
-        return ("id", id(self))
 
     def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:
         """Return explicitly declared calculator dependencies for this node."""
@@ -459,12 +462,20 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
             return DynamicParamSpec(field_name=spec)
         return DynamicParamSpec()
 
-    def dynamic_param_signature(self) -> tuple[Any, ...]:
-        """Return signature fragments for declared dynamic parameters."""
-        return tuple(
-            (name, dynamic_value_signature(getattr(self, name)))
-            for name in self.dynamic_param_names()
-        )
+    def signature_payload(self) -> Mapping[str, Any] | None:
+        """Return calculator state used by CalculatorSignature generic fallback.
+
+        Dataclass calculators and special calculator nodes do not need this.
+        Non-dataclass custom calculators should override it when their behavior
+        depends on constructor state beyond declared dependencies.
+
+        Returns
+        -------
+        Mapping[str, Any] | None
+            A JSON-encodable-or-encodable-by-signature mapping describing this
+            calculator's identity state, or None to fall back to opaque identity.
+        """
+        return None
 
     def dynamic_param_dependencies(self) -> list[CalculatorBase[Any, Any]]:
         """Return calculator dependencies nested inside dynamic parameters."""

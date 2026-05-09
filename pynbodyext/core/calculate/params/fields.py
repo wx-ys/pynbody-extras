@@ -100,7 +100,7 @@ from typing import (
     overload,
 )
 
-from .resolution import DynamicParamSpec, dynamic_value_dependencies, dynamic_value_signature
+from .resolution import DynamicParamSpec, dynamic_value_dependencies
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -373,26 +373,6 @@ def declarative_dynamic_param_specs(cls: type[Any]) -> dict[str, DynamicParamSpe
         if spec.kind == "dynamic"
     }
 
-
-def declarative_instance_signature(instance: Any) -> tuple[Any, ...]:
-    """Build a stable signature fragment from declarative calculator fields."""
-    values: list[tuple[str, Any]] = []
-    for spec in collect_param_specs(type(instance)):
-        if spec.kind != "static" or not spec.signature:
-            continue
-        value = getattr(instance, spec.name)
-        values.append((spec.name, value))
-    return (type(instance).__name__, tuple(values))
-
-
-def declarative_dynamic_param_signature(instance: Any) -> tuple[Any, ...]:
-    """Build signature fragments for declarative dynamic parameters."""
-    values: list[tuple[str, Any]] = []
-    for spec in collect_param_specs(type(instance)):
-        if spec.kind != "dynamic" or not spec.signature:
-            continue
-        values.append((spec.name, dynamic_value_signature(getattr(instance, spec.name))))
-    return tuple(values)
 
 
 def declarative_dependencies(instance: Any) -> list[CalculatorBase[Any, Any]]:

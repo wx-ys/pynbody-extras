@@ -11,9 +11,7 @@ from .fields import (
     Param,
     collect_param_specs,
     declarative_dependencies,
-    declarative_dynamic_param_signature,
     declarative_dynamic_param_specs,
-    declarative_instance_signature,
 )
 
 if TYPE_CHECKING:
@@ -23,16 +21,10 @@ if TYPE_CHECKING:
 TCalc = TypeVar("TCalc", bound=CalculatorBase[Any, Any])
 
 
-def _instance_signature(instance: CalculatorBase[Any, Any]) -> tuple[Any, ...]:
-    return declarative_instance_signature(instance)
-
 
 def _declared_dependencies(instance: CalculatorBase[Any, Any]) -> list[CalculatorBase[Any, Any]]:
     return declarative_dependencies(instance)
 
-
-def _dynamic_param_signature(instance: CalculatorBase[Any, Any]) -> tuple[Any, ...]:
-    return declarative_dynamic_param_signature(instance)
 
 
 @overload
@@ -73,14 +65,9 @@ def dataclass_calc(
         inherited_specs.update(dynamic_specs)
         dc_cls.dynamic_param_specs = inherited_specs
 
-        if raw_cls.instance_signature is CalculatorBase.instance_signature:
-            type.__setattr__(dc_cls, "instance_signature", _instance_signature)
-
         if raw_cls.declared_dependencies is CalculatorBase.declared_dependencies:
             type.__setattr__(dc_cls, "declared_dependencies", _declared_dependencies)
 
-        if raw_cls.dynamic_param_signature is CalculatorBase.dynamic_param_signature:
-            type.__setattr__(dc_cls, "dynamic_param_signature", _dynamic_param_signature)
 
         type.__setattr__(dc_cls, "__calculate_param_specs__", collect_param_specs(dc_cls))
         return dc_cls
