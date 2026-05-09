@@ -102,7 +102,6 @@ from __future__ import annotations
 
 import copy
 from abc import ABC, abstractmethod
-from enum import Enum
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -594,40 +593,6 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         """Return the canonical cache key for this calculator."""
         return self.to_signature().cache_key()
 
-    @classmethod
-    def _signature_jsonable(cls, value: Any) -> Any:
-        fallback = {
-            "__non_portable__": f"{value.__class__.__module__}.{value.__class__.__qualname__}",
-            "id": id(value),
-        }
-
-        result: Any
-        if value is None or isinstance(value, (str, bool, int, float)):
-            result = value
-        elif isinstance(value, Enum):
-            result = value.value
-        elif isinstance(value, np.generic):
-            result = value.item()
-        elif isinstance(value, (tuple, list)):
-            result = [cls._signature_jsonable(item) for item in value]
-        elif isinstance(value, dict):
-            result = {
-                "__dict__": [
-                    [cls._signature_jsonable(key), cls._signature_jsonable(item)]
-                    for key, item in sorted(value.items(), key=lambda pair: repr(pair[0]))
-                ]
-            }
-        else:
-            signature = getattr(value, "signature", None)
-            if callable(signature):
-                try:
-                    result = {"__signature__": cls._signature_jsonable(signature())}
-                except Exception:
-                    result = fallback
-            else:
-                result = fallback
-
-        return result
 
     def signature_text(self) -> str:
         """Return the canonical JSON representation of this calculator."""
@@ -1132,13 +1097,6 @@ class BoundCalculator(CalculatorBase[TRaw, TPublic], Generic[TBase, TRaw, TPubli
     def tree_label(self) -> str:
         return self.log_label
 
-    def instance_signature(self) -> tuple[Any, ...]:
-        return (
-            "bound",
-            self.base.signature(),
-            self.scope.signature(),
-        )
-
     def children(self) -> list[CalculatorBase[Any, Any]]:
         """Display children for graph views.
 
@@ -1300,9 +1258,6 @@ class CombinedCalculator(
         if not isinstance(other, CalculatorBase):
             raise TypeError(f"unsupported operand for &: {type(other)!r}")
         return CombinedCalculator(self, other)
-
-    def instance_signature(self) -> tuple[Any, ...]:
-        return ("combined", tuple(item.signature() for item in self.items))
 
     def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:
         return list(self.items)

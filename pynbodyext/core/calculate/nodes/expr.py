@@ -184,9 +184,6 @@ class CalculatorValueProperty(PropertyBase[TValue], Generic[TValue]):
         super().__init__(name=name)
         self.calculator = calculator
 
-    def instance_signature(self) -> tuple[Any, ...]:
-        return ("calculator_value", self.calculator.signature())
-
     def declared_dependencies(self) -> list[CalculatorBase[Any,Any]]:
         return [self.calculator]
 

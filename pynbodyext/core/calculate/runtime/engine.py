@@ -490,10 +490,11 @@ class EvalEngine:
         started: float,
     ) -> Result[TPublic]:
         finished = time.perf_counter()
+        root_signature = node.to_signature()
         provenance = ProvenanceInfo(
-            calculator_signature=node.signature(),
-            calculator_signature_text=node.signature_text(),
-            calculator_signature_hash=node.signature_hash(),
+            calculator_signature=root_signature.cache_key(),
+            calculator_signature_text=root_signature.to_json(),
+            calculator_signature_hash=root_signature.short_hash(),
             sim_signature=ctx.sim_signature,
             started_at=started,
             finished_at=finished,

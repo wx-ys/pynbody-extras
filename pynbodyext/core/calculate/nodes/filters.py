@@ -281,7 +281,7 @@ class AndFilter(FilterBase):
         return [self.left, self.right]
 
     def instance_signature(self) -> tuple[Any, ...]:
-        return ("and", self.left.signature(), self.right.signature())
+        return ("and",)
 
     def _build_mask_runtime(self, sim: SimSnap, params: Any, ctx: ExecutionContext, input: NodeInput) -> Any:
         return ctx.public_value(self.left, input) & ctx.public_value(self.right, input)
@@ -299,7 +299,7 @@ class OrFilter(FilterBase):
         return [self.left, self.right]
 
     def instance_signature(self) -> tuple[Any, ...]:
-        return ("or", self.left.signature(), self.right.signature())
+        return ("or",)
 
     def _build_mask_runtime(self, sim: SimSnap, params: Any, ctx: ExecutionContext, input: NodeInput) -> Any:
         return ctx.public_value(self.left, input) | ctx.public_value(self.right, input)
@@ -316,7 +316,7 @@ class NotFilter(FilterBase):
         return [self.child]
 
     def instance_signature(self) -> tuple[Any, ...]:
-        return ("not", self.child.signature())
+        return ("not",)
 
     def _build_mask_runtime(self, sim: SimSnap, params: Any, ctx: ExecutionContext, input: NodeInput) -> Any:
         return ~ctx.public_value(self.child, input)

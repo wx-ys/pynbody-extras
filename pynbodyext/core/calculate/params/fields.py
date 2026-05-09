@@ -324,6 +324,10 @@ def _is_param_annotation(annotation: Any) -> bool:
 
 def collect_param_specs(cls: type[Any]) -> tuple[ParamSpec, ...]:
     """Collect declarative calculator field metadata from a dataclass class."""
+    cached = getattr(cls, "__calculate_param_specs__", None)
+    if cached is not None:
+        return cached
+
     if not is_dataclass(cls):
         return ()
 
@@ -353,7 +357,12 @@ def collect_param_specs(cls: type[Any]) -> tuple[ParamSpec, ...]:
 
         specs.append(ParamSpec(name=item.name, kind="static"))
 
-    return tuple(specs)
+    result = tuple(specs)
+    try:
+        type.__setattr__(cls, "__calculate_param_specs__", result)
+    except Exception:
+        pass
+    return result
 
 
 def declarative_dynamic_param_specs(cls: type[Any]) -> dict[str, DynamicParamSpec]:

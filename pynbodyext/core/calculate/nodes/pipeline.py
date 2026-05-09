@@ -144,9 +144,6 @@ class Pipeline(CalculatorBase[dict[str, Any],dict[str, Any]]):
                     "which conflicts with another output key."
                 )
 
-    def instance_signature(self) -> tuple[Any, ...]:
-        return ("pipeline", tuple((key, child.signature()) for key, child in self.outputs.items()))
-
     def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:
         return list(self.outputs.values())
 

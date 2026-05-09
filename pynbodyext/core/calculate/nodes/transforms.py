@@ -402,8 +402,6 @@ class TransformChain(TransformBase[tuple[TransformStep, ...]]):
                 raise TypeError(f"TransformChain only accepts transform nodes, got {type(transform)!r}")
         self.transforms = tuple(transforms)
 
-    def instance_signature(self) -> tuple[Any, ...]:
-        return ("transform_chain", tuple(transform.signature() for transform in self.transforms))
 
     def declared_dependencies(self) -> list[CalculatorBase[Any,Any]]:
         return list(self.transforms)
@@ -497,9 +495,6 @@ class TransformChain(TransformBase[tuple[TransformStep, ...]]):
 
 class TransformPlan(TransformChain):
     """Named alias for a planned transform chain."""
-
-    def instance_signature(self) -> tuple[Any, ...]:
-        return ("transform_plan", tuple(transform.signature() for transform in self.transforms))
 
 
 def chain_transforms(*transforms: TransformBase[Any]) -> TransformBase[Any]:
