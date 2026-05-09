@@ -188,7 +188,108 @@ def _merge_dependencies(*groups: list[CalculatorBase[Any, Any]]) -> list[Calcula
             seen.add(key)
             merged.append(dep)
     return merged
+def _tree_kind_label(kind: str, *, compact: bool) -> str:
+    if not compact:
+        return kind
+    return {
+        "property": "prop",
+        "filter": "filt",
+        "transform": "trans",
+        "calculator": "calc",
+        "combined": "comb",
+    }.get(kind, kind)
 
+
+def _tree_input_node(node: CalculatorBase[Any, Any]) -> CalculatorBase[Any, Any]:
+    if isinstance(node, BoundCalculator):
+        return node.base
+    return node
+
+
+def _tree_label_for(
+    node: CalculatorBase[Any, Any],
+    *,
+    show_inputs: bool,
+    compact_kinds: bool,
+) -> str:
+    from pynbodyext.core.calculate.result.signature import calculator_pretty_init_args
+
+    label = node.tree_label
+    input_node = _tree_input_node(node)
+
+    if show_inputs:
+        init_text = calculator_pretty_init_args(input_node)
+        if init_text:
+            label = f"{label}({init_text})"
+
+    kind = _tree_kind_label(node.kind, compact=compact_kinds)
+    return f"{label}<{kind}>"
+
+
+def _tree_hidden_label(children: list[CalculatorBase[Any, Any]]) -> str:
+    if not children:
+        return "..."
+
+    descendants = 0
+    stack = list(children)
+    seen: set[int] = set()
+
+    while stack:
+        current = stack.pop()
+        key = id(current)
+        if key in seen:
+            continue
+        seen.add(key)
+        descendants += 1
+        stack.extend(current.children())
+
+    suffix = "node" if descendants == 1 else "nodes"
+    return f"... {descendants} {suffix} hidden"
+
+
+def _tree_render_children(
+    node: CalculatorBase[Any, Any],
+    *,
+    prefix: str,
+    depth: int,
+    max_depth: int | None,
+    max_children: int | None,
+    show_inputs: bool,
+    compact_kinds: bool,
+) -> list[str]:
+    children = node.children()
+    if not children:
+        return []
+
+    if max_depth is not None and depth >= max_depth:
+        return [f"{prefix}└─ {_tree_hidden_label(children)}"]
+
+    visible_children = children if max_children is None else children[:max_children]
+    hidden_children = [] if max_children is None else children[max_children:]
+
+    lines: list[str] = []
+    for index, child in enumerate(visible_children):
+        is_last = index == len(visible_children) - 1 and not hidden_children
+        branch = "└─" if is_last else "├─"
+        lines.append(f"{prefix}{branch} {_tree_label_for(child, show_inputs=show_inputs, compact_kinds=compact_kinds)}")
+
+        child_prefix = prefix + ("   " if is_last else "│  ")
+        lines.extend(
+            _tree_render_children(
+                child,
+                prefix=child_prefix,
+                depth=depth + 1,
+                max_depth=max_depth,
+                max_children=max_children,
+                show_inputs=show_inputs,
+                compact_kinds=compact_kinds,
+            )
+        )
+
+    if hidden_children:
+        lines.append(f"{prefix}└─ {_tree_hidden_label(hidden_children)}")
+
+    return lines
 class CalculatorBase(Generic[TRaw, TPublic], ABC):
     """Abstract base class for executable calculator nodes.
 
@@ -281,7 +382,7 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
 
     @property
     def tree_label(self) -> str:
-        """Label used by format_tree()/format_flow()."""
+        """Label used by format_tree()."""
         return self.log_label
 
     def _repr_fields(self) -> list[tuple[str | None, Any]]:
@@ -899,78 +1000,41 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
     def format_tree(
         self,
         max_depth: int | None = None,
+        show_inputs: bool = True,
         *,
         max_children: int | None = None,
-        show_signature: bool = False,
+        compact_kinds: bool = True,
     ) -> str:
-        """Return a text tree of this calculator and its dependencies.
-
-        Parameters
-        ----------
-        max_depth : int, optional
-            Maximum depth to expand, with the root at depth 0.
-        max_children : int, optional
-            Maximum number of children to render for each node.
-        show_signature : bool, default: False
-            Include the short signature hash for each node.
-        """
+        """Return a text tree of this calculator and its dependencies."""
         if max_depth is not None and max_depth < 0:
             raise ValueError("max_depth must be non-negative or None")
         if max_children is not None and max_children < 0:
             raise ValueError("max_children must be non-negative or None")
 
-        def label_for(node: CalculatorBase[Any, Any]) -> str:
-            label = f"{node.tree_label}<{node.kind}>"
-            if show_signature:
-                label = f"{label} #{node.signature_hash()}"
-            return label
+        lines = [
+            _tree_label_for(
+                self,
+                show_inputs=show_inputs,
+                compact_kinds=compact_kinds,
+            )
+        ]
 
-        def hidden_label(children: list[CalculatorBase[Any, Any]]) -> str:
-            if not children:
-                return "..."
-            descendants = 0
-            stack = list(children)
-            seen: set[int] = set()
-            while stack:
-                current = stack.pop()
-                key = id(current)
-                if key in seen:
-                    continue
-                seen.add(key)
-                descendants += 1
-                stack.extend(current.children())
-            suffix = "node" if descendants == 1 else "nodes"
-            return f"... {descendants} {suffix} hidden"
-
-        def render(node: CalculatorBase[Any, Any], prefix: str, is_last: bool, depth: int) -> list[str]:
-            branch = "└─" if is_last else "├─"
-            lines = [f"{prefix}{branch} {label_for(node)}"]
-            next_prefix = prefix + ("   " if is_last else "│  ")
-            kids = node.children()
-            if max_depth is not None and depth >= max_depth and kids:
-                lines.append(f"{next_prefix}└─ {hidden_label(kids)}")
-                return lines
-
-            visible_kids = kids if max_children is None else kids[:max_children]
-            hidden_kids = [] if max_children is None else kids[max_children:]
-            for idx, child in enumerate(visible_kids):
-                lines.extend(render(child, next_prefix, idx == len(visible_kids) - 1 and not hidden_kids, depth + 1))
-            if hidden_kids:
-                lines.append(f"{next_prefix}└─ {hidden_label(hidden_kids)}")
-            return lines
-
-        lines = [label_for(self)]
-        kids = self.children()
-        if max_depth == 0 and kids:
-            lines.append(f"└─ {hidden_label(kids)}")
+        if max_depth == 0 and self.children():
+            lines.append(f"└─ {_tree_hidden_label(self.children())}")
         else:
-            visible_kids = kids if max_children is None else kids[:max_children]
-            hidden_kids = [] if max_children is None else kids[max_children:]
-            for idx, child in enumerate(visible_kids):
-                lines.extend(render(child, "", idx == len(visible_kids) - 1 and not hidden_kids, 1))
-            if hidden_kids:
-                lines.append(f"└─ {hidden_label(hidden_kids)}")
-        return "\n"+"\n".join(lines)
+            lines.extend(
+                _tree_render_children(
+                    self,
+                    prefix="",
+                    depth=1,
+                    max_depth=max_depth,
+                    max_children=max_children,
+                    show_inputs=show_inputs,
+                    compact_kinds=compact_kinds,
+                )
+            )
+
+        return "\n" + "\n".join(lines)
 
     def _clone(self, **changes: Any) -> CalculatorBase[TRaw, TPublic]:
         clone = copy.copy(self)

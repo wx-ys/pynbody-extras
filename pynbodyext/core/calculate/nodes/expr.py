@@ -57,6 +57,8 @@ def as_property(other: object | None) -> PropertyBase[Any]:
     """Coerce a value or calculator into a property expression node."""
     if isinstance(other, PropertyBase):
         return other
+    # only PropertyBase supports operations,
+    # so we wrap calculators in a PropertyBase bridge to allow them to be used in expressions.
     if isinstance(other, CalculatorBase):
         return CalculatorValueProperty(other)
     return ConstantProperty(other)
@@ -125,6 +127,10 @@ class ConstantProperty(PropertyBase[TValue]):
         super().__init__(name=name)
         self._value = value
 
+    @property
+    def tree_label(self) -> str:
+        return f"Const({self._value!r})"
+
     def instance_signature(self) -> tuple[Any, ...]:
         value = self._value
         if isinstance(value, (int, float, np.floating, bool, str)):
@@ -190,6 +196,13 @@ class CalculatorValueProperty(PropertyBase[TValue], Generic[TValue]):
             fields.append(("name", self.name))
         return fields
 
+    @property
+    def tree_label(self) -> str:
+        return self.calculator.tree_label
+
+    def children(self) -> list[CalculatorBase[Any, Any]]:
+        return self.calculator.children()
+
     def calculate(self, sim: Any, params: Any = None) -> Any:
         raise RuntimeError("CalculatorValueProperty must execute through the engine.")
 
@@ -197,7 +210,23 @@ class CalculatorValueProperty(PropertyBase[TValue], Generic[TValue]):
         with ctx.phase(self, "calculate"):
             return ctx.public_value(self.calculator, input)
 
-
+_OP_TREE_SYMBOLS = {
+    "add": "+",
+    "mul": "*",
+    "sub": "-",
+    "truediv": "/",
+    "pow": "**",
+    "lt": "<",
+    "le": "<=",
+    "gt": ">",
+    "ge": ">=",
+    "eq": "==",
+    "ne": "!=",
+    "neg": "-",
+    "pos": "+",
+    "abs": "abs",
+    "clip": "clip",
+}
 class OpProperty(PropertyBase[Any]):
     """Symbolic property operation evaluated by the execution engine."""
 
@@ -213,6 +242,10 @@ class OpProperty(PropertyBase[Any]):
         super().__init__(name=name)
         self.op_name = op_name
         self.operands = operands
+    @property
+    def tree_label(self) -> str:
+        symbol = _OP_TREE_SYMBOLS.get(self.op_name, self.op_name)
+        return f"OpProperty({symbol})"
 
     def instance_signature(self) -> tuple[Any, ...]:
         return ("op", self.op_name)
