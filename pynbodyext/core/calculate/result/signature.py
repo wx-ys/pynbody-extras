@@ -40,7 +40,24 @@ __all__ = [
 def _make_unit(value: Any) -> Any:
     return units.Unit(value)
 
-
+def _freeze_signature_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, list):
+        return tuple(_freeze_signature_value(item) for item in value)
+    if isinstance(value, tuple):
+        return ("tuple", tuple(_freeze_signature_value(item) for item in value))
+    if isinstance(value, dict):
+        return (
+            "dict",
+            tuple(
+                (str(key), _freeze_signature_value(item))
+                for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+            ),
+        )
+    raise TypeError(f"unsupported signature payload value: {type(value)!r}")
 @dataclass(frozen=True, slots=True)
 class CalculatorSignature:
     """Structured signature for one calculator graph.
@@ -62,6 +79,13 @@ class CalculatorSignature:
     def short_hash(self, *, length: int = 12) -> str:
         """Return a short hash prefix."""
         return self.hash[:length]
+
+    def frozen_payload(self) -> Any:
+        """Return a hashable representation of the payload."""
+        return _freeze_signature_value(self.payload)
+
+    def cache_key(self) -> tuple[Any, ...]:
+        return ("calculator_signature", self.frozen_payload())
 
     def as_dict(self, *, full: bool = False) -> dict[str, Any]:
         """Return a JSON-compatible dictionary.
@@ -611,6 +635,8 @@ def _pretty_calculator_value_property(payload: dict[str, Any]) -> str:
 def _pretty_lambda_property(payload: dict[str, Any]) -> str:
     return "LambdaProperty(<function>)"
 
+def _pretty_generic_calculator(payload: dict[str, Any]) -> str:
+    return _short_class_name(str(payload.get("class", "Calculator")))
 
 _CALCULATOR_PRETTY_HANDLERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "dataclass": _pretty_dataclass_calculator,
@@ -622,6 +648,7 @@ _CALCULATOR_PRETTY_HANDLERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "calculator_value_property": _pretty_calculator_value_property,
     "op_property": _pretty_op,
     "lambda_property": _pretty_lambda_property,
+    "generic": _pretty_generic_calculator,
 }
 
 
@@ -809,6 +836,28 @@ def _encode_special_calculator(calculator: Any, path: str, inline_array_bytes: i
 
     return encoded
 
+def _encode_generic_calculator(calculator: Any, path: str, inline_array_bytes: int) -> _Encoded:
+    identity = _encode_value(calculator.instance_signature(), f"{path}.identity", inline_array_bytes)
+    deps = [
+        _encode_calculator_value(dep, f"{path}.deps[{idx}]", inline_array_bytes)
+        for idx, dep in enumerate(calculator.dependencies())
+    ]
+    transform_state, transform_children = _transform_state(calculator, inline_array_bytes, path)
+
+    payload: dict[str, Any] = {
+        "node": "generic",
+        "class": _class_path(calculator),
+        "identity": identity.value,
+    }
+    if deps:
+        payload["deps"] = [item.value for item in deps]
+    if transform_state is not None:
+        payload["transform"] = transform_state
+
+    merged = _merge_encoded(payload, [identity, *deps, *transform_children])
+    paths = merged.paths if path in merged.paths else (*merged.paths, path)
+    return _Encoded(merged.value, constructible=False, paths=paths)
+
 
 def _decode_bound_node(payload: dict[str, Any]) -> Any:
     from pynbodyext.core.calculate.nodes.base import BoundCalculator
@@ -886,7 +935,7 @@ def calculator_to_signature(
     inline_array_bytes: int = DEFAULT_INLINE_ARRAY_BYTES,
     _path: str = "calculator",
 ) -> CalculatorSignature:
-    """Return a reconstructible signature for a supported calculator graph."""
+    """Return a structured signature for a calculator graph."""
     from pynbodyext.core.calculate.nodes.base import CalculatorBase
 
     if not isinstance(calculator, CalculatorBase):
@@ -895,9 +944,9 @@ def calculator_to_signature(
     encoded = _encode_special_calculator(calculator, _path, inline_array_bytes)
     if encoded is None:
         if is_dataclass(calculator):
-            encoded = _encode_dataclass_calculator(calculator, _path, inline_array_bytes) # type: ignore[unreachable]
+            encoded = _encode_dataclass_calculator(calculator, _path, inline_array_bytes)   # type: ignore
         else:
-            encoded = _non_constructible(calculator, _path, "calculator class does not expose reconstructible fields")
+            encoded = _encode_generic_calculator(calculator, _path, inline_array_bytes)
 
     return CalculatorSignature(
         payload=encoded.value,
@@ -1063,6 +1112,9 @@ def _tree_constant_property_head(payload: dict[str, Any]) -> str:
 def _tree_calculator_value_property_head(payload: dict[str, Any]) -> str:
     return _tree_calculator_head(payload["calculator"])
 
+def _tree_generic_head(payload: dict[str, Any]) -> str:
+    return _short_class_name(str(payload.get("class", "Calculator")))
+
 
 _TREE_CALCULATOR_HEADERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "dataclass": _tree_dataclass_head,
@@ -1074,6 +1126,7 @@ _TREE_CALCULATOR_HEADERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "calculator_value_property": _tree_calculator_value_property_head,
     "op_property": _tree_op,
     "lambda_property": lambda payload: "LambdaProperty",
+    "generic": _tree_generic_head,
 }
 
 

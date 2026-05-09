@@ -101,8 +101,6 @@ Most subclasses should not override :meth:`run` or :meth:`__call__`.
 from __future__ import annotations
 
 import copy
-import hashlib
-import json
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import (
@@ -593,14 +591,8 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         return self.dependencies()
 
     def signature(self) -> tuple[Any, ...]:
-        """Return the full structural signature used for caching."""
-        return (
-            self.kind,
-            self.__class__.__name__,
-            self.instance_signature(),
-            ("dynamic", self.dynamic_param_signature()),
-            tuple(dep.signature() for dep in self.dependencies()),
-        )
+        """Return the canonical cache key for this calculator."""
+        return self.to_signature().cache_key()
 
     @classmethod
     def _signature_jsonable(cls, value: Any) -> Any:
@@ -638,22 +630,12 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         return result
 
     def signature_text(self) -> str:
-        """Return a stable JSON representation of :meth:`signature`."""
-        return json.dumps(
-            self._signature_jsonable(self.signature()),
-            sort_keys=True,
-            separators=(",", ":"),
-        )
+        """Return the canonical JSON representation of this calculator."""
+        return self.to_signature().to_json()
 
     def signature_hash(self, *, length: int = 12) -> str:
-        """Return a short hash of :meth:`signature_text`.
-
-        Parameters
-        ----------
-        length : int, default: 12
-            Number of hexadecimal characters to return.
-        """
-        return hashlib.sha256(self.signature_text().encode("utf-8")).hexdigest()[:length]
+        """Return a short hash of the canonical calculator signature."""
+        return self.to_signature().short_hash(length=length)
 
     def to_signature(self, *, inline_array_bytes: int = 128) -> CalculatorSignature:
         """Return a structured signature that can reconstruct this calculator when possible."""
