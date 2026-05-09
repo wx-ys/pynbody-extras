@@ -116,9 +116,9 @@ class WrapTransformation(transformation.Transformation):
     def _apply_to_snapshot(self, f: SimSnap) -> None:
         """Wraps positions in-place and records integer offsets per axis."""
         # Use raw numpy views for ufuncs like floor that expect unitless arrays.
-        x = f["x"].view(np.ndarray)
-        y = f["y"].view(np.ndarray)
-        z = f["z"].view(np.ndarray)
+        x = f["x"]
+        y = f["y"]
+        z = f["z"]
 
         L = self._resolve_boxsize_float(f)
         logger.debug("wrap: resolved boxsize L=%s", L)
@@ -222,19 +222,15 @@ class WrapTransformation(transformation.Transformation):
             # Fall back: nothing recorded. No-op to avoid surprising errors.
             return
 
-        x = f["x"].view(np.ndarray)
-        y = f["y"].view(np.ndarray)
-        z = f["z"].view(np.ndarray)
-
         L = self._resolve_boxsize_float(f)
 
         kx = self._k_offsets[:, 0]
         ky = self._k_offsets[:, 1]
         kz = self._k_offsets[:, 2]
 
-        x += kx * L
-        y += ky * L
-        z += kz * L
+        f["x"] += kx * L
+        f["y"] += ky * L
+        f["z"] += kz * L
 
         # Free memory
         self._k_offsets = None
