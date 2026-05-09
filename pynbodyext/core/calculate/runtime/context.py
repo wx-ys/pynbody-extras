@@ -298,8 +298,11 @@ class ExecutionContext:
     def node_scope(self, node_result: ResultNode, node: CalculatorBase[Any, Any]) -> Iterator[None]:
         """Context manager for entering an evaluated node."""
         parent = self.current_node
-        if parent is not None and node_result.node_id not in parent.children:
-            parent.children.append(node_result.node_id)
+        if parent is not None:
+            if node_result.node_id not in parent.children:
+                parent.children.append(node_result.node_id)
+            if parent.node_id not in node_result.parent_ids:
+                node_result.parent_ids.append(parent.node_id)
 
         node_name = node.log_label
         depth = len(self._node_stack)

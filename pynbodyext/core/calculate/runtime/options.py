@@ -35,6 +35,12 @@ class RunOptions:
         Error handling policy.
     cache_small_value_bytes : int, default: 10_000_000
         Maximum public-value size for automatic cache storage.
+    auto_record_cached_values : bool, default: True
+        When true, cached SUMMARY nodes may retain their public value in the
+        returned result.
+    auto_record_small_value_bytes : int or None, default: 1_000_000
+        Maximum public-value size for automatic SUMMARY recording of cached
+        values. ``None`` disables auto-recording.
     """
 
     cache: bool = True
@@ -46,6 +52,9 @@ class RunOptions:
     default_record_policy: RecordPolicy = RecordPolicy.SUMMARY
     errors: ErrorPolicy | str = ErrorPolicy.RAISE
     cache_small_value_bytes: int = 10_000_000
+    auto_record_cached_values: bool = True
+    auto_record_small_value_bytes: int | None = 1_000_000
+
 
     def __post_init__(self) -> None:
         self.errors = normalize_error_policy(self.errors)
@@ -55,7 +64,10 @@ class RunOptions:
             "RunOptions("
             f"cache={self.cache!r}, progress={self.progress!r}, "
             f"perf_time={self.perf_time!r}, perf_memory={self.perf_memory!r}, "
-            f"observe={self.observe!r}, backend={self.backend!r}, errors={display_value(self.errors)!r}"
+            f"observe={self.observe!r}, backend={self.backend!r}, "
+            f"errors={display_value(self.errors)!r}, "
+            f"auto_record_cached_values={self.auto_record_cached_values!r}, "
+            f"auto_record_small_value_bytes={self.auto_record_small_value_bytes!r}"
             ")"
         )
 
@@ -75,6 +87,8 @@ class RunOptions:
                 ("record policy", display_value(self.default_record_policy)),
                 ("errors", display_value(self.errors)),
                 ("small cache bytes", self.cache_small_value_bytes),
+                ("auto record cached values", self.auto_record_cached_values),
+                ("auto record small bytes", self.auto_record_small_value_bytes),
             ],
         )
 

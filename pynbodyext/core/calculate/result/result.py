@@ -155,6 +155,8 @@ class ResultNode:
     name: str | None = None
     display_name: str | None = None
     calculator_type: str | None = None
+    calculator_class_path: str | None = None
+    semantic_calculator_class_path: str | None = None
 
     record_policy: RecordPolicy | None = None
     raw_value: Any = None
@@ -163,6 +165,7 @@ class ResultNode:
     stored_raw: bool = False
     stored_value: bool = False
 
+    parent_ids: list[str] = field(default_factory=list)
     children: list[str] = field(default_factory=list)
     phases: list[PhaseRecord] = field(default_factory=list)
     artifacts: dict[str, Any] = field(default_factory=dict)
@@ -446,10 +449,29 @@ class Result(Generic[T]):
         """Return direct children of the root node."""
         return self.children_of(self.root)
 
+    def find(self, query: Any) -> list[ResultNode]:
+        """Return nodes matching a calculator class, instance, signature, or predicate."""
+        return ResultQuery.find(self, query)
+
+    def parents_of(self, node: str | ResultNode) -> list[ResultNode]:
+        """Return parent nodes for a node id, name, or node object."""
+        return ResultQuery.parents_of(self, node)
+
+    def parent_of(self, node: str | ResultNode) -> ResultNode | None:
+        """Return the unique parent node, or ``None`` for the root."""
+        return ResultQuery.parent_of(self, node)
 
     def children_of(self, node: str | ResultNode) -> list[ResultNode]:
         """Return child nodes for a node id, name, or node object."""
         return ResultQuery.children_of(self, node)
+
+    def ancestors_of(self, node: str | ResultNode) -> list[ResultNode]:
+        """Return ancestor nodes in nearest-first order."""
+        return ResultQuery.ancestors_of(self, node)
+
+    def descendants_of(self, node: str | ResultNode) -> list[ResultNode]:
+        """Return descendant nodes in depth-first order."""
+        return ResultQuery.descendants_of(self, node)
 
     def phases_of(self, node: str | ResultNode) -> list[PhaseRecord]:
         """Return phase records for a node id, name, or node object."""
@@ -569,6 +591,78 @@ class Result(Generic[T]):
 
 class ResultQuery:
     @staticmethod
+    def _class_path(value: Any) -> str:
+        cls = value if isinstance(value, type) else type(value)
+        return f"{cls.__module__}.{cls.__qualname__}"
+
+    @staticmethod
+    def _short_class_name(path: str | None) -> str | None:
+        if path is None:
+            return None
+        return path.rsplit(".", 1)[-1]
+
+    @staticmethod
+    def _reverse_parents(result: Result[Any], node_id: str) -> list[ResultNode]:
+        return [candidate for candidate in result.nodes.values() if node_id in candidate.children]
+
+    @staticmethod
+    def find(result: Result[Any], query: Any) -> list[ResultNode]:
+        if isinstance(query, ResultNode):
+            resolved = result.nodes.get(query.node_id)
+            return [resolved] if resolved is not None else []
+
+        if isinstance(query, str):
+            return [
+                node
+                for node in result.nodes.values()
+                if query in {
+                    node.name,
+                    node.display_name,
+                    node.calculator_type,
+                    node.calculator_class_path,
+                    node.semantic_calculator_class_path,
+                    ResultQuery._short_class_name(node.calculator_class_path),
+                    ResultQuery._short_class_name(node.semantic_calculator_class_path),
+                }
+            ]
+
+        if isinstance(query, type):
+            class_path = ResultQuery._class_path(query)
+            class_name = query.__name__
+            return [
+                node
+                for node in result.nodes.values()
+                if class_path in {node.semantic_calculator_class_path, node.calculator_class_path}
+                or node.calculator_type == class_name
+            ]
+
+        cache_key_factory = getattr(query, "cache_key", None)
+        if callable(cache_key_factory):
+            try:
+                cache_key = cache_key_factory()
+            except TypeError:
+                cache_key = None
+            if isinstance(cache_key, tuple):
+                return [node for node in result.nodes.values() if node.signature == cache_key]
+
+        signature_factory = getattr(query, "signature", None)
+        if callable(signature_factory):
+            try:
+                signature = signature_factory()
+            except TypeError:
+                signature = None
+            if isinstance(signature, tuple):
+                return [node for node in result.nodes.values() if node.signature == signature]
+
+        if callable(query):
+            return [node for node in result.nodes.values() if bool(query(node))]
+
+        raise TypeError(
+            "query must be a ResultNode, string, calculator class, "
+            "calculator instance, CalculatorSignature, or predicate"
+        )
+
+    @staticmethod
     def resolve_node(result: Result[Any], node: str | ResultNode) -> ResultNode:
         if isinstance(node, ResultNode):
             return node
@@ -579,10 +673,63 @@ class ResultQuery:
         raise KeyError(node)
 
     @staticmethod
+    def parents_of(result: Result[Any], node: str | ResultNode) -> list[ResultNode]:
+        resolved = ResultQuery.resolve_node(result, node)
+        if resolved.parent_ids:
+            return [result.nodes[parent_id] for parent_id in resolved.parent_ids if parent_id in result.nodes]
+        return ResultQuery._reverse_parents(result, resolved.node_id)
+
+    @staticmethod
+    def parent_of(result: Result[Any], node: str | ResultNode) -> ResultNode | None:
+        resolved = ResultQuery.resolve_node(result, node)
+        parents = ResultQuery.parents_of(result, resolved)
+        if not parents:
+            return None
+        if len(parents) != 1:
+            raise ValueError(
+                f"Node {resolved.node_id!r} has {len(parents)} parents; "
+                "use parents_of() for shared dependencies."
+            )
+        return parents[0]
+
+    @staticmethod
     def children_of(result: Result[Any], node: str | ResultNode) -> list[ResultNode]:
         resolved = ResultQuery.resolve_node(result, node)
         return [result.nodes[node_id] for node_id in resolved.children if node_id in result.nodes]
 
+    @staticmethod
+    def ancestors_of(result: Result[Any], node: str | ResultNode) -> list[ResultNode]:
+        resolved = ResultQuery.resolve_node(result, node)
+        out: list[ResultNode] = []
+        seen: set[str] = set()
+        stack = list(reversed(ResultQuery.parents_of(result, resolved)))
+
+        while stack:
+            current = stack.pop()
+            if current.node_id in seen:
+                continue
+            seen.add(current.node_id)
+            out.append(current)
+            stack.extend(reversed(ResultQuery.parents_of(result, current)))
+
+        return out
+
+    @staticmethod
+    def descendants_of(result: Result[Any], node: str | ResultNode) -> list[ResultNode]:
+        resolved = ResultQuery.resolve_node(result, node)
+        out: list[ResultNode] = []
+        seen: set[str] = set()
+        stack = list(reversed(ResultQuery.children_of(result, resolved)))
+
+        while stack:
+            current = stack.pop()
+            if current.node_id in seen:
+                continue
+            seen.add(current.node_id)
+            out.append(current)
+            stack.extend(reversed(ResultQuery.children_of(result, current)))
+
+        return out
 
     @staticmethod
     def display_children_of(result: Result[Any], node: str | ResultNode) -> list[ResultNode]:
@@ -632,12 +779,16 @@ class ResultQuery:
             f"name: {resolved.name}",
             f"kind: {resolved.kind}",
             f"status: {resolved.status}",
+            f"calculator_type: {resolved.calculator_type}",
             f"record_policy: {resolved.record_policy}",
             f"stored_value: {resolved.stored_value}",
             f"stored_raw: {resolved.stored_raw}",
+            f"parents: {len(ResultQuery.parents_of(result, resolved))}",
             f"children: {len(resolved.children)}",
             f"phases: {len(resolved.phases)}",
         ]
+        if resolved.semantic_calculator_class_path is not None:
+            lines.append(f"semantic_class: {resolved.semantic_calculator_class_path}")
         if resolved.value_summary is not None:
             lines.append(f"value_type: {resolved.value_summary.python_type}")
             if resolved.value_summary.preview:

@@ -133,6 +133,10 @@ class _NodeExecutionFailure(Exception):
 class EvalEngine:
     """Evaluate calculator DAGs in a single run context."""
 
+    def _class_path(self, value: Any) -> str:
+        cls = value if isinstance(value, type) else type(value)
+        return f"{cls.__module__}.{cls.__qualname__}"
+
     def run(
         self,
         node: CalculatorBase[TRaw, TPublic],
@@ -306,6 +310,24 @@ class EvalEngine:
         except Exception:
             return None
 
+    def _semantic_calculator_class_path(self, payload: Any) -> str | None:
+        current = payload
+        while isinstance(current, dict):
+            if current.get("node") == "bound":
+                current = current.get("base")
+                continue
+
+            class_path = current.get("class")
+            if isinstance(class_path, str):
+                return class_path
+
+            if current.get("node") == "calculator_value_property":
+                current = current.get("calculator")
+                continue
+
+            return None
+        return None
+
     def _try_cache_hit(
         self,
         node: CalculatorBase[Any, Any],
@@ -334,8 +356,11 @@ class EvalEngine:
 
         cached_node = ctx.node_registry[cached_runtime.node_id]
         parent = ctx.current_node
-        if parent is not None and cached_node.node_id not in parent.children:
-            parent.children.append(cached_node.node_id)
+        if parent is not None:
+            if cached_node.node_id not in parent.children:
+                parent.children.append(cached_node.node_id)
+            if parent.node_id not in cached_node.parent_ids:
+                cached_node.parent_ids.append(parent.node_id)
 
         node_name = cached_node.label or node.log_label
         ctx.trace.cache(
@@ -368,13 +393,16 @@ class EvalEngine:
         node: CalculatorBase[Any, Any],
         ctx: ExecutionContext,
     ) -> ResultNode:
+        structured_signature = node.to_signature()
         return ResultNode(
             node_id=ctx.new_node_id(),
             kind=node.kind,
-            signature=node.signature(),
+            signature=structured_signature.cache_key(),
             name=node.name,
             display_name=node.log_label,
             calculator_type=node.__class__.__name__,
+            calculator_class_path=self._class_path(node),
+            semantic_calculator_class_path=self._semantic_calculator_class_path(structured_signature.payload),
             record_policy=node.record_policy or ctx.options.default_record_policy,
         )
 
@@ -441,6 +469,7 @@ class EvalEngine:
     ) -> ResultNode:
         ctx.register_runtime_value(node_result.node_id, state.raw_value, state.public_value)
 
+        stored_in_runtime_cache = False
         if plan.cacheable and self._should_store_runtime_cache(
             node,
             state.raw_value,
@@ -460,6 +489,7 @@ class EvalEngine:
                 ctx.runtime_store[node_result.node_id],
                 index_compatible=plan.observed_cache_prefix is not None,
             )
+            stored_in_runtime_cache = True
 
         node_result.value_summary = self.summarize_value(state.public_value)
         node_result.status = NodeStatus.OK
@@ -469,6 +499,11 @@ class EvalEngine:
             public_value=state.public_value,
             is_root=is_root,
             had_error=False,
+            auto_record_public_value=stored_in_runtime_cache and self._should_auto_record_public_value(
+                public_value=state.public_value,
+                record_policy=node_result.record_policy,
+                options=ctx.options,
+            )
         )
         return node_result
 
@@ -595,6 +630,22 @@ class EvalEngine:
             size += self._estimate_cache_bytes(raw_value)
         return size <= options.cache_small_value_bytes
 
+    def _should_auto_record_public_value(
+        self,
+        *,
+        public_value: Any,
+        record_policy: RecordPolicy | None,
+        options: RunOptions,
+    ) -> bool:
+        if not options.auto_record_cached_values:
+            return False
+        if record_policy != RecordPolicy.SUMMARY:
+            return False
+        limit = options.auto_record_small_value_bytes
+        if limit is None:
+            return False
+        return self._estimate_cache_bytes(public_value) <= limit
+
     def _estimate_cache_bytes(self, value: Any) -> int:
         size = 2 * 1_000_000
 
@@ -624,6 +675,7 @@ class EvalEngine:
         *,
         is_root: bool,
         had_error: bool = False,
+        auto_record_public_value: bool = False,
     ) -> None:
         policy = node_result.record_policy or RecordPolicy.SUMMARY
 
@@ -657,7 +709,12 @@ class EvalEngine:
                     node_result.value = public_value
                     node_result.stored_value = True
 
-        elif policy in (RecordPolicy.SUMMARY, RecordPolicy.NONE):
+        elif policy == RecordPolicy.SUMMARY:
+            if auto_record_public_value and public_value is not None:
+                node_result.value = public_value
+                node_result.stored_value = True
+
+        elif policy == RecordPolicy.NONE:
             node_result.raw_value = None
             node_result.value = None
 

@@ -671,6 +671,8 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         default_record_policy: RecordPolicy | None = None,
         errors: ErrorPolicy | str | None = None,
         cache_small_value_bytes: int | None = None,
+        auto_record_cached_values: bool | None = None,
+        auto_record_small_value_bytes: int | None = None,
     ) -> TPublic:
         """Evaluate the calculator and return a public value.
 
@@ -703,6 +705,10 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
             Error policy for this run.
         cache_small_value_bytes: int, optional
             Cache small value bytes for this run.
+        auto_record_cached_values: bool, optional
+            Whether cached SUMMARY nodes may retain their public value.
+        auto_record_small_value_bytes: int, optional
+            Maximum public-value size eligible for automatic SUMMARY recording.
 
         Returns
         -------
@@ -721,6 +727,8 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
             default_record_policy=default_record_policy,
             errors=errors,
             cache_small_value_bytes=cache_small_value_bytes,
+            auto_record_cached_values=auto_record_cached_values,
+            auto_record_small_value_bytes=auto_record_small_value_bytes,
         ).value
 
 
@@ -737,6 +745,8 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         default_record_policy: RecordPolicy | None = None,
         errors: ErrorPolicy | str | None = None,
         cache_small_value_bytes: int | None = None,
+        auto_record_cached_values: bool | None = None,
+        auto_record_small_value_bytes: int | None = None,
     ) -> RunOptions:
         merged = copy.copy(options) if options is not None else copy.copy(self.default_options)
 
@@ -758,7 +768,10 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
             merged.errors = errors
         if cache_small_value_bytes is not None:
             merged.cache_small_value_bytes = cache_small_value_bytes
-
+        if auto_record_cached_values is not None:
+            merged.auto_record_cached_values = auto_record_cached_values
+        if auto_record_small_value_bytes is not None:
+            merged.auto_record_small_value_bytes = auto_record_small_value_bytes
         merged.errors = ErrorPolicy(merged.errors)
 
         return merged
@@ -777,6 +790,8 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         default_record_policy: RecordPolicy | None = None,
         errors: ErrorPolicy | str | None = None,
         cache_small_value_bytes: int | None = None,
+        auto_record_cached_values: bool | None = None,
+        auto_record_small_value_bytes: int | None = None,
     ) -> Result[TPublic]:
         """Run the calculator and return a Result.
 
@@ -806,6 +821,10 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
             Error policy for this run.
         cache_small_value_bytes: int, optional
             Cache small value bytes for this run.
+        auto_record_cached_values: bool, optional
+            Whether cached SUMMARY nodes may retain their public value.
+        auto_record_small_value_bytes: int, optional
+            Maximum public-value size eligible for automatic SUMMARY recording.
 
         Returns
         -------
@@ -826,6 +845,8 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
             default_record_policy=default_record_policy,
             errors=errors,
             cache_small_value_bytes=cache_small_value_bytes,
+            auto_record_cached_values=auto_record_cached_values,
+            auto_record_small_value_bytes=auto_record_small_value_bytes,
         )
         return engine.run(self, sim, merged)
 
