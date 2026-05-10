@@ -78,8 +78,15 @@ from pynbodyext.core.calculate.display import (
     display_value,
     format_mem,
     format_time,
+    html_badge,
     html_card,
+    html_data_table,
+    html_details,
+    html_metric_grid,
+    html_metric_strip,
     html_pre,
+    html_scroll_x,
+    html_section,
     html_table,
     mimebundle,
 )
@@ -1179,6 +1186,33 @@ class ResultQuery:
 class ResultRepr:
 
     @staticmethod
+    def _tone_for_status(status: Any) -> str:
+        text = str(display_value(status)).lower()
+        if text in {"ok", "success", "ready", "true"}:
+            return "ok"
+        if text in {"pending", "running", "partial", "warning"}:
+            return "warn"
+        if text in {"error", "failed", "false"}:
+            return "error"
+        return "neutral"
+
+    @staticmethod
+    def _short_class_name(path: str | None) -> str:
+        if not path:
+            return "-"
+        return path.rsplit(".", 1)[-1]
+
+    @staticmethod
+    def _format_field_set(values: set[str], *, limit: int = 6) -> str:
+        if not values:
+            return "-"
+        items = sorted(values)
+        if len(items) <= limit:
+            return ", ".join(items)
+        hidden = len(items) - limit
+        return f"{', '.join(items[:limit])}, +{hidden}"
+
+    @staticmethod
     def result_node_repr(node: ResultNode) -> str:
         parts = [
             f"label={node.label!r}",
@@ -1201,23 +1235,188 @@ class ResultRepr:
     def result_node_html(node: ResultNode) -> str:
         rows: list[tuple[str, Any]] = [
             ("label", node.label),
-            ("kind", display_value(node.kind)),
-            ("status", display_value(node.status)),
-            ("stored value", node.stored_value),
-            ("stored raw", node.stored_raw),
-            ("children", len(node.children)),
-            ("phases", len(node.phases)),
+            ("ref", node.ref),
+            ("kind", html_badge(display_value(node.kind), tone="info")),
+            (
+                "status",
+                html_badge(
+                    display_value(node.status),
+                    tone=ResultRepr._tone_for_status(node.status),
+                ),
+            ),
+            (
+                "stored",
+                " ".join(
+                    [
+                        html_badge(
+                            "value" if node.stored_value else "value: no",
+                            tone="ok" if node.stored_value else "neutral",
+                        ),
+                        html_badge(
+                            "raw" if node.stored_raw else "raw: no",
+                            tone="ok" if node.stored_raw else "neutral",
+                        ),
+                    ]
+                ),
+            ),
         ]
+
+        if node.calculator_type is not None:
+            rows.append(("calculator", node.calculator_type))
+
+        semantic_class = node.semantic_calculator_class_path or node.calculator_class_path
+        if semantic_class is not None:
+            rows.append(("class", ResultRepr._short_class_name(semantic_class)))
+
+        if node.record_policy is not None:
+            rows.append(("record", html_badge(display_value(node.record_policy), tone="neutral")))
+
+        sections: list[str] = [
+            html_metric_grid(
+                [
+                    ("parents", len(node.parent_ids)),
+                    ("children", len(node.children)),
+                    ("phases", len(node.phases)),
+                    ("events", node.observation.event_count if node.observation is not None else 0),
+                ]
+            )
+        ]
+
+        value_rows: list[tuple[str, Any]] = []
         if node.value_summary is not None:
-            rows.append(("value", node.value_summary))
-        if node.error is not None:
-            rows.append(("error", f"{node.error.error_type}: {node.error.message}"))
+            value_rows.append(("type", node.value_summary.python_type))
+            if node.value_summary.shape is not None:
+                value_rows.append(("shape", node.value_summary.shape))
+            if node.value_summary.dtype is not None:
+                value_rows.append(("dtype", node.value_summary.dtype))
+            if node.value_summary.units is not None:
+                value_rows.append(("units", node.value_summary.units))
+            if node.value_summary.preview is not None:
+                value_rows.append(("preview", node.value_summary.preview))
+        if node.stored_value:
+            value_rows.append(("public value", compact_repr(node.value, max_length=220)))
+        if node.stored_raw:
+            value_rows.append(("raw value", compact_repr(node.raw_value, max_length=220)))
+        if value_rows:
+            sections.append(
+                html_details(
+                    "Value",
+                    html_scroll_x(
+                        html_table(
+                            value_rows,
+                            class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap pynbodyext-calc-monospace",
+                        ),
+                        min_width="56rem",
+                    ),
+                )
+            )
+
+        if node.phases:
+            phase_rows = [
+                [
+                    phase.phase,
+                    format_time(phase.elapsed_s),
+                    format_mem(phase.memory_used),
+                    format_mem(phase.memory_peak),
+                    format_mem(phase.rss_used),
+                    html_badge(
+                        phase.status,
+                        tone=ResultRepr._tone_for_status(phase.status),
+                    ),
+                ]
+                for phase in node.phases
+            ]
+            sections.append(
+                html_details(
+                    "Phases",
+                    html_scroll_x(
+                        html_data_table(
+                            ["phase", "time", "mem", "peak", "rss", "status"],
+                            phase_rows,
+                            escape_values=False,
+                            class_name="pynbodyext-calc-data-table pynbodyext-calc-data-table-nowrap pynbodyext-calc-monospace",
+                        ),
+                        min_width="48rem",
+                    ),
+                )
+            )
+
         if node.observation is not None:
-            rows.append(("observer events", node.observation.event_count))
-            rows.append(("observer reads", len(node.observation.reads)))
-            rows.append(("observer dirty", len(node.observation.dirty_fields)))
-            rows.append(("observer deletes", len(node.observation.deletes)))
-        return html_card("ResultNode", rows)
+            observation_rows = [
+                ("events", node.observation.event_count),
+                ("reads", len(node.observation.reads)),
+                ("dirty", len(node.observation.dirty_fields)),
+                ("deletes", len(node.observation.deletes)),
+            ]
+            sections.append(
+                html_details(
+                    "Observer",
+                    html_scroll_x(
+                        html_table(
+                            observation_rows,
+                            class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap pynbodyext-calc-monospace",
+                        ),
+                        min_width="42rem",
+                    ),
+                )
+            )
+
+            observer_lines: list[str] = []
+            if node.observation.reads:
+                observer_lines.append(
+                    f"reads: {ResultRepr._format_field_set(node.observation.reads)}"
+                )
+            if node.observation.dirty_fields:
+                observer_lines.append(
+                    f"dirty: {ResultRepr._format_field_set(node.observation.dirty_fields)}"
+                )
+            if node.observation.deletes:
+                observer_lines.append(
+                    f"deletes: {ResultRepr._format_field_set(node.observation.deletes)}"
+                )
+            if observer_lines:
+                sections.append(
+                    html_details(
+                        "Observer fields",
+                        html_pre("\n".join(observer_lines)),
+                        open=False,
+                    )
+                )
+
+        if node.error is not None:
+            error_rows = [
+                ("type", node.error.error_type),
+                ("message", node.error.message),
+            ]
+            if node.error.phase is not None:
+                error_rows.append(("phase", node.error.phase))
+            sections.append(
+                html_section(
+                    "Error",
+                    html_scroll_x(
+                        html_table(
+                            error_rows,
+                            class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap",
+                        )
+                    ),
+                )
+            )
+
+            if node.error.traceback_text:
+                sections.append(
+                    html_details(
+                        "Traceback",
+                        html_pre(node.error.traceback_text),
+                        open=True,
+                    )
+                )
+
+        return html_card(
+            "ResultNode",
+            rows,
+            body="".join(sections),
+            escape_values=False,
+        )
 
     @staticmethod
     def result_repr(result: Result[Any]) -> str:
@@ -1238,30 +1437,164 @@ class ResultRepr:
 
     @staticmethod
     def result_html(result: Result[Any]) -> str:
+        hits = result.perf_summary.cache_hit_count
+        misses = result.perf_summary.cache_miss_count
+        stores = result.perf_summary.cache_store_count
+        cache_total = hits + misses
+        hit_rate = f"{hits / cache_total:.0%}" if cache_total else "-"
+
         rows: list[tuple[str, Any]] = [
             ("root", result.root.label),
             ("value", type(result.value).__name__),
-            ("ok", result.ok),
-            ("nodes", len(result.nodes)),
-            ("named", ", ".join(result.named) if result.named else "-"),
-            ("warnings", len(result.warnings)),
-            ("errors", len(result.errors)),
-            ("total time", format_time(result.perf_summary.total_time_s)),
-            ("cache", f"{result.perf_summary.cache_hit_count} hit / {result.perf_summary.cache_miss_count} miss"),
+            (
+                "status",
+                html_badge("ok" if result.ok else "error", tone="ok" if result.ok else "error"),
+            ),
         ]
-        named_values = result.named_values
-        named_table = ""
-        if named_values:
-            named_table = (
-                "<div class='pynbodyext-calc-section-title'>Named values</div>"
-                + html_table(
-                    [(key, compact_repr(value, max_length=80)) for key, value in named_values.items()]
+
+        if result.named:
+            rows.append(("named", compact_repr(tuple(result.named.keys()), max_length=96)))
+
+        if result.provenance is not None and result.provenance.calculator_signature_hash is not None:
+            rows.append(("signature", result.provenance.calculator_signature_hash[:12]))
+
+        sections: list[str] = [
+            html_scroll_x(
+                html_metric_strip(
+                    [
+                        ("nodes", len(result.nodes)),
+                        ("phases", result.perf_summary.phase_count),
+                        ("warnings", len(result.warnings)),
+                        ("errors", len(result.errors)),
+                        ("time", format_time(result.perf_summary.total_time_s)),
+                        ("cache", f"{hits} hit / {misses} miss"),
+                        ("hit rate", hit_rate),
+                        ("stores", stores),
+                    ]
                 )
             )
+        ]
+
+        named_values = result.named_values
+        if named_values:
+            sections.append(
+                html_section(
+                    "Named values",
+                    html_scroll_x(
+                        html_data_table(
+                            ["name", "value"],
+                            [[key, compact_repr(value, max_length=180)] for key, value in named_values.items()],
+                            class_name="pynbodyext-calc-data-table pynbodyext-calc-data-table-nowrap",
+                        )
+                    ),
+                )
+            )
+
+        if result.provenance is not None:
+            provenance_rows: list[tuple[str, Any]] = []
+            if result.provenance.calculator_signature_hash is not None:
+                provenance_rows.append(("calculator hash", result.provenance.calculator_signature_hash))
+            elif result.provenance.calculator_signature_text is not None:
+                provenance_rows.append(
+                    (
+                        "calculator",
+                        compact_repr(result.provenance.calculator_signature_text, max_length=180),
+                    )
+                )
+
+            provenance_rows.append(
+                ("sim signature", compact_repr(result.provenance.sim_signature, max_length=180))
+            )
+
+            if result.provenance.finished_at is not None:
+                provenance_rows.append(
+                    (
+                        "wall time",
+                        format_time(result.provenance.finished_at - result.provenance.started_at),
+                    )
+                )
+
+            sections.append(
+                html_details(
+                    "Provenance",
+                    html_scroll_x(
+                        html_table(
+                            provenance_rows,
+                            class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap",
+                        )
+                    ),
+                )
+            )
+
+        error_rows: list[list[Any]] = []
+        for node in ResultQuery.find_error_nodes(result)[:8]:
+            if node.error is None:
+                continue
+            error_rows.append(
+                [
+                    ResultQuery.node_label(node, show_ref=True, show_kind=True),
+                    node.error.phase or "-",
+                    f"{node.error.error_type}: {node.error.message}",
+                ]
+            )
+
+        remaining_slots = max(0, 8 - len(error_rows))
+        for error in result.errors[:remaining_slots]:
+            error_rows.append(
+                [
+                    "<run>",
+                    error.phase or "-",
+                    f"{error.error_type}: {error.message}",
+                ]
+            )
+
+        if error_rows:
+            sections.append(
+                html_section(
+                    "Errors",
+                    html_scroll_x(
+                        html_data_table(
+                            ["node", "phase", "message"],
+                            error_rows,
+                            class_name="pynbodyext-calc-data-table pynbodyext-calc-data-table-nowrap",
+                        )
+                    ),
+                )
+            )
+
+        sections.append(
+            html_details(
+                "Execution tree",
+                html_pre(result.report_execution_tree()),
+                open=not result.ok,
+            )
+        )
+
+        perf_text = result.report_perf().strip()
+        if perf_text:
+            sections.append(
+                html_details(
+                    "Performance",
+                    html_pre(perf_text),
+                    open=False,
+                )
+            )
+
+        cache_text = ResultRepr.cache_section(result).strip()
+        if cache_text:
+            sections.append(
+                html_details(
+                    "Cache",
+                    html_pre(cache_text),
+                    open=False,
+                )
+            )
+
         return html_card(
             "Result",
             rows,
-            body=named_table + html_pre(result.report_execution_tree(max_depth=4)),
+            body="".join(sections),
+            escape_values=False,
         )
 
     @staticmethod

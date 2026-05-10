@@ -121,8 +121,12 @@ from pynbody.array import SimArray
 from pynbodyext.core.calculate.display import (
     compact_repr,
     display_value,
+    html_badge,
     html_card,
+    html_details,
     html_pre,
+    html_scroll_x,
+    html_table,
     mimebundle,
 )
 from pynbodyext.core.calculate.params import (
@@ -436,10 +440,55 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         printer.text(f"{self.__class__.__name__}(...)" if cycle else repr(self))
 
     def _repr_html_(self) -> str:
+        rows: list[tuple[str, Any]] = []
+        for key, value in self._repr_summary_rows():
+            if key == "kind":
+                rows.append((key, html_badge(display_value(value), tone="info")))
+            elif key == "cache":
+                rows.append((key, html_badge(display_value(value), tone="neutral")))
+            elif key == "scope":
+                rows.append((key, html_badge(value, tone="neutral")))
+            else:
+                rows.append((key, value))
+
+        detail_rows: list[tuple[str, Any]] = []
+        positional_index = 0
+        for key, value in self._repr_fields():  # type: ignore
+            if key is None:
+                positional_index += 1   # type: ignore
+                label = f"arg{positional_index}"
+            else:
+                label = key
+            detail_rows.append((label, compact_repr(value, max_length=220)))
+
+        body_parts: list[str] = []
+        if detail_rows:
+            body_parts.append(
+                html_details(
+                    "Configuration",
+                    html_scroll_x(
+                        html_table(
+                            detail_rows,
+                            class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap pynbodyext-calc-monospace",
+                        ),
+                        min_width="56rem",
+                    ),
+                )
+            )
+
+        body_parts.append(
+            html_details(
+                "Dependency tree",
+                html_pre(self.format_tree()),
+                open=False,
+            )
+        )
+
         return html_card(
             self.__class__.__name__,
-            self._repr_summary_rows(),
-            body=html_pre(self.format_tree()),
+            rows,
+            body="".join(body_parts),
+            escape_values=False,
         )
 
     def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, str]:
