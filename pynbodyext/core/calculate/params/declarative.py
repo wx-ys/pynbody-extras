@@ -59,6 +59,7 @@ def dataclass_calc(
                 original_post_init(self)
 
         raw_cls.__post_init__ = __post_init__  # type: ignore[attr-defined]
+        dataclass_kwargs.setdefault("repr", False)
         dc_cls = cast("type[TCalc]", dataclass(raw_cls, **dataclass_kwargs))
         dynamic_specs = declarative_dynamic_param_specs(dc_cls)
         inherited_specs = dict(getattr(dc_cls, "dynamic_param_specs", {}))
