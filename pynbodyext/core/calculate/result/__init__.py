@@ -28,6 +28,8 @@ __all__ = [
     "CalculatorSignature",
     "calculator_from_signature",
     "calculator_to_signature",
+    "ResultQuery",
+    "ResultRepr",
 ]
 
 
@@ -68,4 +70,12 @@ def __getattr__(name: str) -> Any:
         from . import signature
 
         return getattr(signature, name)
+    if name == "ResultQuery":
+        from .query import ResultQuery
+
+        return ResultQuery
+    if name == "ResultRepr":
+        from .repr import ResultRepr
+
+        return ResultRepr
     raise AttributeError(name)

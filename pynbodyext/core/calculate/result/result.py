@@ -73,23 +73,7 @@ from pynbodyext.core.calculate.diagnostics.observer import (
     format_observation_access,
     render_observer_report,
 )
-from pynbodyext.core.calculate.display import (
-    compact_repr,
-    display_value,
-    format_mem,
-    format_time,
-    html_badge,
-    html_card,
-    html_data_table,
-    html_details,
-    html_metric_grid,
-    html_metric_strip,
-    html_pre,
-    html_scroll_x,
-    html_section,
-    html_table,
-    mimebundle,
-)
+from pynbodyext.core.calculate.display import compact_repr, mimebundle
 
 from .enums import NodeKind, NodeStatus, RecordPolicy
 
@@ -98,15 +82,7 @@ T = TypeVar("T")
 
 @dataclass(slots=True)
 class ValueSummary:
-    """Compact description of a runtime value.
-
-    Parameters
-    ----------
-    python_type : str
-        Name of the Python value type.
-    shape, dtype, units, preview : optional
-        Optional array and unit metadata captured for reports.
-    """
+    """Compact description of a runtime value."""
 
     python_type: str
     shape: tuple[int, ...] | None = None
@@ -188,14 +164,15 @@ class ResultNode:
     def ref(self) -> str:
         return f"n{self.node_id.rsplit(':', 1)[-1]}"
 
-
     def __repr__(self) -> str:
+        from .repr import ResultRepr
         return ResultRepr.result_node_repr(self)
 
     def _repr_pretty_(self, printer: Any, cycle: bool) -> None:
         printer.text("ResultNode(...)" if cycle else repr(self))
 
     def _repr_html_(self) -> str:
+        from .repr import ResultRepr
         return ResultRepr.result_node_html(self)
 
     def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, str]:
@@ -224,7 +201,6 @@ class PerfSummary:
     cache_hit_count: int = 0
     cache_miss_count: int = 0
     cache_store_count: int = 0
-
 
 
 @dataclass(slots=True)
@@ -262,12 +238,14 @@ class Result(Generic[T]):
     diagnostics: dict[str, Any] = field(default_factory=dict)
 
     def __repr__(self) -> str:
+        from .repr import ResultRepr
         return ResultRepr.result_repr(self)
 
     def _repr_pretty_(self, printer: Any, cycle: bool) -> None:
         printer.text("Result(...)" if cycle else repr(self))
 
     def _repr_html_(self) -> str:
+        from .repr import ResultRepr
         return ResultRepr.result_html(self)
 
     def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, str]:
@@ -297,15 +275,7 @@ class Result(Generic[T]):
         return self.named[name]
 
     def get(self, name: str, default: Any = None) -> Any:
-        """Return a named public value.
-
-        Parameters
-        ----------
-        name : str
-            Named node or pipeline output name.
-        default : object, optional
-            Value returned when the name is absent or unavailable.
-        """
+        """Return a named public value."""
         node = self.named.get(name)
         if node is None:
             return default
@@ -320,6 +290,7 @@ class Result(Generic[T]):
 
     def node(self, id_or_name: str) -> ResultNode:
         """Return a node by node id or registered name."""
+        from .query import ResultQuery
         return ResultQuery.resolve_node(self, id_or_name)
 
     def has_errors(self) -> bool:
@@ -330,14 +301,12 @@ class Result(Generic[T]):
         """Whether any warnings were collected during the run."""
         return bool(self.warnings)
 
-
     def raise_if_errors(self) -> None:
         """Raise a :class:`RuntimeError` for the first collected error."""
         if not self.errors:
             return
         first = self.errors[0]
         raise RuntimeError(f"{first.error_type}: {first.message}")
-
 
     def available_reports(self) -> tuple[str, ...]:
         """Return names of available text reports."""
@@ -433,6 +402,7 @@ class Result(Generic[T]):
 
     def observation_of(self, node: str | ResultNode) -> AccessObservation | None:
         """Return the access observation for one node, if available."""
+        from .query import ResultQuery
         resolved = ResultQuery.resolve_node(self, node)
         if resolved.observation is not None:
             return resolved.observation
@@ -458,47 +428,57 @@ class Result(Generic[T]):
 
     def find(self, query: Any) -> list[ResultNode]:
         """Return nodes matching a calculator class, instance, signature, or predicate."""
+        from .query import ResultQuery
         return ResultQuery.find(self, query)
 
     def parents_of(self, node: str | ResultNode) -> list[ResultNode]:
         """Return parent nodes for a node id, name, or node object."""
+        from .query import ResultQuery
         return ResultQuery.parents_of(self, node)
 
     def parent_of(self, node: str | ResultNode) -> ResultNode | None:
         """Return the unique parent node, or ``None`` for the root."""
+        from .query import ResultQuery
         return ResultQuery.parent_of(self, node)
 
     def children_of(self, node: str | ResultNode) -> list[ResultNode]:
         """Return child nodes for a node id, name, or node object."""
+        from .query import ResultQuery
         return ResultQuery.children_of(self, node)
 
     def ancestors_of(self, node: str | ResultNode) -> list[ResultNode]:
         """Return ancestor nodes in nearest-first order."""
+        from .query import ResultQuery
         return ResultQuery.ancestors_of(self, node)
 
     def descendants_of(self, node: str | ResultNode) -> list[ResultNode]:
         """Return descendant nodes in depth-first order."""
+        from .query import ResultQuery
         return ResultQuery.descendants_of(self, node)
 
     def phases_of(self, node: str | ResultNode) -> list[PhaseRecord]:
         """Return phase records for a node id, name, or node object."""
+        from .query import ResultQuery
         return ResultQuery.phases_of(self, node)
 
     def walk_depth_first(self) -> list[ResultNode]:
         """Return nodes in depth-first order starting at the root."""
+        from .query import ResultQuery
         return ResultQuery.walk_depth_first(self)
 
     def find_by_kind(self, kind: str) -> list[ResultNode]:
         """Return nodes whose kind matches ``kind``."""
+        from .query import ResultQuery
         return ResultQuery.find_by_kind(self, kind)
 
     def find_error_nodes(self) -> list[ResultNode]:
         """Return nodes that captured an exception."""
+        from .query import ResultQuery
         return ResultQuery.find_error_nodes(self)
-
 
     def describe_node(self, node: str | ResultNode) -> str:
         """Return a detailed text description of one result node."""
+        from .query import ResultQuery
         return ResultQuery.describe_node(self, node)
 
     def report_node_tree(
@@ -510,6 +490,7 @@ class Result(Generic[T]):
         max_children: int | None = None,
     ) -> str:
         """Return a tree view of evaluated nodes."""
+        from .query import ResultQuery
         return ResultQuery.node_tree(
             self,
             node=node,
@@ -531,6 +512,7 @@ class Result(Generic[T]):
         include_values: bool = False,
     ) -> str:
         """Return a tree report annotated with runtime diagnostics."""
+        from .query import ResultQuery
         return ResultQuery.execution_tree(
             self,
             node=node,
@@ -551,6 +533,7 @@ class Result(Generic[T]):
         max_children: int | None = None,
     ) -> str:
         """Return a formatted performance report."""
+        from .repr import ResultRepr
         return ResultRepr.perf_table(
             self,
             show_ids=show_ids,
@@ -560,6 +543,7 @@ class Result(Generic[T]):
 
     def report_summary(self) -> str:
         """Return a compact text summary of the run."""
+        from .repr import ResultRepr
         return ResultRepr.summary(self)
 
     def report_pipeline(
@@ -574,15 +558,8 @@ class Result(Generic[T]):
         max_depth: int | None = None,
         max_children: int | None = None,
     ) -> str:
-        """Return a multi-section text report for the run.
-
-        Parameters
-        ----------
-        include_perf, include_trace, include_cache, include_errors : bool
-            Select optional report sections.
-        show_ids : bool, default: False
-            Include internal node ids when true.
-        """
+        """Return a multi-section text report for the run."""
+        from .repr import ResultRepr
         return ResultRepr.pipeline_report(
             self,
             include_perf=include_perf,
@@ -594,1215 +571,3 @@ class Result(Generic[T]):
             max_depth=max_depth,
             max_children=max_children,
         )
-
-
-class ResultQuery:
-    @staticmethod
-    def _class_path(value: Any) -> str:
-        cls = value if isinstance(value, type) else type(value)
-        return f"{cls.__module__}.{cls.__qualname__}"
-
-    @staticmethod
-    def _short_class_name(path: str | None) -> str | None:
-        if path is None:
-            return None
-        return path.rsplit(".", 1)[-1]
-
-    @staticmethod
-    def _reverse_parents(result: Result[Any], node_id: str) -> list[ResultNode]:
-        return [candidate for candidate in result.nodes.values() if node_id in candidate.children]
-
-    @staticmethod
-    def find(result: Result[Any], query: Any) -> list[ResultNode]:
-        if isinstance(query, ResultNode):
-            resolved = result.nodes.get(query.node_id)
-            return [resolved] if resolved is not None else []
-
-        if isinstance(query, str):
-            return [
-                node
-                for node in result.nodes.values()
-                if query in {
-                    node.name,
-                    node.display_name,
-                    node.calculator_type,
-                    node.calculator_class_path,
-                    node.semantic_calculator_class_path,
-                    ResultQuery._short_class_name(node.calculator_class_path),
-                    ResultQuery._short_class_name(node.semantic_calculator_class_path),
-                }
-            ]
-
-        if isinstance(query, type):
-            class_path = ResultQuery._class_path(query)
-            class_name = query.__name__
-            return [
-                node
-                for node in result.nodes.values()
-                if class_path in {node.semantic_calculator_class_path, node.calculator_class_path}
-                or node.calculator_type == class_name
-            ]
-
-        cache_key_factory = getattr(query, "cache_key", None)
-        if callable(cache_key_factory):
-            try:
-                cache_key = cache_key_factory()
-            except TypeError:
-                cache_key = None
-            if isinstance(cache_key, tuple):
-                return [node for node in result.nodes.values() if node.signature == cache_key]
-
-        signature_factory = getattr(query, "signature", None)
-        if callable(signature_factory):
-            try:
-                signature = signature_factory()
-            except TypeError:
-                signature = None
-            if isinstance(signature, tuple):
-                return [node for node in result.nodes.values() if node.signature == signature]
-
-        if callable(query):
-            return [node for node in result.nodes.values() if bool(query(node))]
-
-        raise TypeError(
-            "query must be a ResultNode, string, calculator class, "
-            "calculator instance, CalculatorSignature, or predicate"
-        )
-
-    @staticmethod
-    def resolve_node(result: Result[Any], node: str | ResultNode) -> ResultNode:
-        if isinstance(node, ResultNode):
-            return node
-        if node in result.nodes:
-            return result.nodes[node]
-        if node in result.named:
-            return result.named[node]
-        raise KeyError(node)
-
-    @staticmethod
-    def parents_of(result: Result[Any], node: str | ResultNode) -> list[ResultNode]:
-        resolved = ResultQuery.resolve_node(result, node)
-        if resolved.parent_ids:
-            return [result.nodes[parent_id] for parent_id in resolved.parent_ids if parent_id in result.nodes]
-        return ResultQuery._reverse_parents(result, resolved.node_id)
-
-    @staticmethod
-    def parent_of(result: Result[Any], node: str | ResultNode) -> ResultNode | None:
-        resolved = ResultQuery.resolve_node(result, node)
-        parents = ResultQuery.parents_of(result, resolved)
-        if not parents:
-            return None
-        if len(parents) != 1:
-            raise ValueError(
-                f"Node {resolved.node_id!r} has {len(parents)} parents; "
-                "use parents_of() for shared dependencies."
-            )
-        return parents[0]
-
-    @staticmethod
-    def children_of(result: Result[Any], node: str | ResultNode) -> list[ResultNode]:
-        resolved = ResultQuery.resolve_node(result, node)
-        return [result.nodes[node_id] for node_id in resolved.children if node_id in result.nodes]
-
-    @staticmethod
-    def ancestors_of(result: Result[Any], node: str | ResultNode) -> list[ResultNode]:
-        resolved = ResultQuery.resolve_node(result, node)
-        out: list[ResultNode] = []
-        seen: set[str] = set()
-        stack = list(reversed(ResultQuery.parents_of(result, resolved)))
-
-        while stack:
-            current = stack.pop()
-            if current.node_id in seen:
-                continue
-            seen.add(current.node_id)
-            out.append(current)
-            stack.extend(reversed(ResultQuery.parents_of(result, current)))
-
-        return out
-
-    @staticmethod
-    def descendants_of(result: Result[Any], node: str | ResultNode) -> list[ResultNode]:
-        resolved = ResultQuery.resolve_node(result, node)
-        out: list[ResultNode] = []
-        seen: set[str] = set()
-        stack = list(reversed(ResultQuery.children_of(result, resolved)))
-
-        while stack:
-            current = stack.pop()
-            if current.node_id in seen:
-                continue
-            seen.add(current.node_id)
-            out.append(current)
-            stack.extend(reversed(ResultQuery.children_of(result, current)))
-
-        return out
-
-    @staticmethod
-    def display_children_of(result: Result[Any], node: str | ResultNode) -> list[ResultNode]:
-        resolved = ResultQuery.resolve_node(result, node)
-        children = ResultQuery.children_of(result, resolved)
-
-        if (
-            resolved.calculator_type == "BoundCalculator"
-            and children
-            and children[0].label == resolved.label
-            and children[0].kind == resolved.kind
-        ):
-            base_node = children[0]
-            return ResultQuery.children_of(result, base_node) + children[1:]
-
-        return children
-
-    @staticmethod
-    def phases_of(result: Result[Any], node: str | ResultNode) -> list[PhaseRecord]:
-        return list(ResultQuery.resolve_node(result, node).phases)
-
-    @staticmethod
-    def walk_depth_first(result: Result[Any]) -> list[ResultNode]:
-        out: list[ResultNode] = []
-
-        def visit(current: ResultNode) -> None:
-            out.append(current)
-            for child in ResultQuery.children_of(result, current):
-                visit(child)
-
-        visit(result.root)
-        return out
-
-    @staticmethod
-    def find_by_kind(result: Result[Any], kind: str) -> list[ResultNode]:
-        return [node for node in result.nodes.values() if str(node.kind) == kind]
-
-    @staticmethod
-    def find_error_nodes(result: Result[Any]) -> list[ResultNode]:
-        return [node for node in result.nodes.values() if node.error is not None]
-
-    @staticmethod
-    def describe_node(result: Result[Any], node: str | ResultNode) -> str:
-        resolved = ResultQuery.resolve_node(result, node)
-        lines = [
-            f"node_id: {resolved.node_id}",
-            f"name: {resolved.name}",
-            f"kind: {resolved.kind}",
-            f"status: {resolved.status}",
-            f"calculator_type: {resolved.calculator_type}",
-            f"record_policy: {resolved.record_policy}",
-            f"stored_value: {resolved.stored_value}",
-            f"stored_raw: {resolved.stored_raw}",
-            f"parents: {len(ResultQuery.parents_of(result, resolved))}",
-            f"children: {len(resolved.children)}",
-            f"phases: {len(resolved.phases)}",
-        ]
-        if resolved.semantic_calculator_class_path is not None:
-            lines.append(f"semantic_class: {resolved.semantic_calculator_class_path}")
-        if resolved.value_summary is not None:
-            lines.append(f"value_type: {resolved.value_summary.python_type}")
-            if resolved.value_summary.preview:
-                lines.append(f"preview: {resolved.value_summary.preview}")
-        if resolved.error is not None:
-            lines.append(f"error: {resolved.error.error_type}: {resolved.error.message}")
-        if resolved.observation is not None:
-            lines.append(f"observer_events: {resolved.observation.event_count}")
-            lines.append(f"observer_reads: {len(resolved.observation.reads)}")
-            lines.append(f"observer_dirty: {len(resolved.observation.dirty_fields)}")
-            lines.append(f"observer_deletes: {len(resolved.observation.deletes)}")
-        return "\n".join(lines)
-
-    @staticmethod
-    def node_label(
-        node: ResultNode,
-        *,
-        show_ids: bool = False,
-        show_ref: bool = False,
-        show_kind: bool = True,
-        max_width: int | None = None,
-    ) -> str:
-        label = node.label
-        if show_kind:
-            label = f"{label}<{node.kind}>"
-        if show_ref:
-            label = f"[{node.ref}] {label}"
-        if show_ids:
-            label = f"{label} [{node.node_id}]"
-        if max_width is not None and len(label) > max_width:
-            return label[: max_width - 3] + "..."
-        return label
-
-    @staticmethod
-    def _validate_tree_limits(max_depth: int | None, max_children: int | None) -> None:
-        if max_depth is not None and max_depth < 0:
-            raise ValueError("max_depth must be non-negative or None")
-        if max_children is not None and max_children < 0:
-            raise ValueError("max_children must be non-negative or None")
-
-    @staticmethod
-    def _subtree_nodes(result: Result[Any], roots: list[ResultNode]) -> list[ResultNode]:
-        out: list[ResultNode] = []
-        seen: set[str] = set()
-        stack = list(reversed(roots))
-        while stack:
-            node = stack.pop()
-            if node.node_id in seen:
-                continue
-            seen.add(node.node_id)
-            out.append(node)
-            stack.extend(reversed(ResultQuery.display_children_of(result, node)))
-        return out
-
-    @staticmethod
-    def _hidden_count_label(result: Result[Any], roots: list[ResultNode]) -> str:
-        count = len(ResultQuery._subtree_nodes(result, roots))
-        suffix = "node" if count == 1 else "nodes"
-        return f"... {count} {suffix} hidden"
-
-    @staticmethod
-    def _visible_tree_nodes(
-        result: Result[Any],
-        start: ResultNode,
-        *,
-        max_depth: int | None = None,
-        max_children: int | None = None,
-    ) -> tuple[list[ResultNode], int]:
-        visible: list[ResultNode] = []
-        hidden_ids: set[str] = set()
-        visible_ids: set[str] = set()
-
-        def hide(roots: list[ResultNode]) -> None:
-            for node in ResultQuery._subtree_nodes(result, roots):
-                if node.node_id not in visible_ids:
-                    hidden_ids.add(node.node_id)
-
-        def visit(node: ResultNode, depth: int) -> None:
-            visible.append(node)
-            visible_ids.add(node.node_id)
-            children = ResultQuery.display_children_of(result, node)
-            if max_depth is not None and depth >= max_depth and children:
-                hide(children)
-                return
-
-            visible_children = children if max_children is None else children[:max_children]
-            hidden_children = [] if max_children is None else children[max_children:]
-            for child in visible_children:
-                visit(child, depth + 1)
-            hide(hidden_children)
-
-        visit(start, 0)
-        return visible, len(hidden_ids)
-
-    @staticmethod
-    def _node_elapsed_s(node: ResultNode) -> float | None:
-        values = [phase.elapsed_s for phase in node.phases if phase.elapsed_s is not None]
-        if not values:
-            return None
-        return sum(values)
-
-    @staticmethod
-    def _cache_events_by_node(result: Result[Any]) -> dict[str, dict[str, int]]:
-        grouped: dict[str, dict[str, int]] = {}
-        for event in result.cache_events():
-            node_id = getattr(event, "node_id", None)
-            if not node_id:
-                continue
-            node_events = grouped.setdefault(node_id, {})
-            event_name = str(getattr(event, "event", ""))
-            node_events[event_name] = node_events.get(event_name, 0) + 1
-        return grouped
-
-    @staticmethod
-    def _cache_suffix(
-        node: ResultNode,
-        cache_events: dict[str, dict[str, int]],
-        *,
-        hit_occurrence: bool = False,
-    ) -> str:
-        if hit_occurrence:
-            return "hit"
-
-        events = cache_events.get(node.node_id, {})
-        parts: list[str] = []
-        hits = events.get("hit", 0)
-        stores = events.get("store", 0)
-        if stores:
-            parts.append("store" if stores == 1 else f"{stores} stores")
-            if hits:
-                parts.append(f"nhit={hits}")
-        elif hits:
-            parts.append("hit" if hits == 1 else f"{hits} hits")
-        return "; ".join(parts)
-
-    @staticmethod
-    def _format_field_set(values: set[str], *, max_items: int = 4) -> str:
-        if not values:
-            return ""
-        items = sorted(values)
-        if len(items) <= max_items:
-            return ",".join(items)
-        hidden = len(items) - max_items
-        return f"{','.join(items[:max_items])},+{hidden}"
-
-    @staticmethod
-    def _value_suffix(node: ResultNode) -> str:
-        if node.value_summary is None:
-            return ""
-        summary = node.value_summary
-        parts = [summary.python_type]
-        if summary.shape is not None:
-            parts.append(f"shape={summary.shape!r}")
-        if summary.units is not None:
-            parts.append(f"units={summary.units}")
-        return " ".join(parts)
-
-    @staticmethod
-    def _execution_label(
-        result: Result[Any],
-        node: ResultNode,
-        *,
-        show_ids: bool,
-        include_perf: bool,
-        include_cache: bool,
-        include_observer: bool,
-        include_values: bool,
-        cache_events: dict[str, dict[str, int]],
-        hit_occurrence: bool = False,
-    ) -> str:
-        label = ResultQuery.node_label(node, show_ids=show_ids)
-        parts: list[str] = []
-
-        if hit_occurrence:
-            return f"{label}  [cache=hit]"
-
-        if node.error is not None:
-            parts.append(f"error={node.error.error_type}")
-        elif node.status != NodeStatus.OK:
-            parts.append(f"status={display_value(node.status)}")
-
-        if include_perf:
-            elapsed = ResultQuery._node_elapsed_s(node)
-            if elapsed is not None:
-                parts.append(format_time(elapsed))
-
-        if include_cache:
-            cache_text = ResultQuery._cache_suffix(node, cache_events)
-            if cache_text:
-                parts.append(f"cache={cache_text}")
-
-        if include_observer:
-            access_text = format_observation_access(
-                result.observation_of(node),
-                read_items=3,
-                dirty_items=3,
-                delete_items=2,
-            )
-            if access_text:
-                parts.append(access_text)
-
-        if include_values:
-            value_text = ResultQuery._value_suffix(node)
-            if value_text:
-                parts.append(f"value={value_text}")
-
-        if not parts:
-            return label
-        return f"{label}  [{'; '.join(parts)}]"
-
-    @staticmethod
-    def _hidden_execution_summary(
-        result: Result[Any],
-        roots: list[ResultNode],
-        *,
-        include_perf: bool,
-        include_cache: bool,
-        include_observer: bool,
-        cache_events: dict[str, dict[str, int]],
-    ) -> str:
-        nodes = ResultQuery._subtree_nodes(result, roots)
-        suffix = "node" if len(nodes) == 1 else "nodes"
-        parts = [f"... {len(nodes)} {suffix} hidden"]
-
-        if include_perf:
-            elapsed_values = [ResultQuery._node_elapsed_s(node) for node in nodes]
-            elapsed = sum(value for value in elapsed_values if value is not None)
-            if elapsed:
-                parts.append(format_time(elapsed))
-
-        if include_cache:
-            hits = sum(cache_events.get(node.node_id, {}).get("hit", 0) for node in nodes)
-            stores = sum(cache_events.get(node.node_id, {}).get("store", 0) for node in nodes)
-            cache_parts: list[str] = []
-            if stores:
-                cache_parts.append(f"{stores} store")
-            if hits:
-                cache_parts.append(f"nhit={hits}")
-            if cache_parts:
-                parts.append(f"cache={','.join(cache_parts)}")
-
-        if include_observer:
-            reads: set[str] = set()
-            dirty_fields: set[str] = set()
-            deletes: set[str] = set()
-            for node in nodes:
-                observation = result.observation_of(node)
-                if observation is None:
-                    continue
-                reads.update(observation.reads)
-                dirty_fields.update(observation.dirty_fields)
-                deletes.update(observation.deletes)
-            read_text = ResultQuery._format_field_set(reads, max_items=3)
-            dirty_text = ResultQuery._format_field_set(dirty_fields, max_items=3)
-            delete_text = ResultQuery._format_field_set(deletes, max_items=2)
-            if read_text:
-                parts.append(f"read={read_text}")
-            if dirty_text:
-                parts.append(f"dirty={dirty_text}")
-            if delete_text:
-                parts.append(f"del={delete_text}")
-
-        return "; ".join(parts)
-
-    @staticmethod
-    def node_tree(
-        result: Result[Any],
-        node: str | ResultNode | None = None,
-        *,
-        show_ids: bool = False,
-        max_depth: int | None = None,
-        max_children: int | None = None,
-    ) -> str:
-        ResultQuery._validate_tree_limits(max_depth, max_children)
-        start = result.root if node is None else ResultQuery.resolve_node(result, node)
-
-        def render(current: ResultNode, prefix: str, is_last: bool, depth: int) -> list[str]:
-            branch = "└─" if is_last else "├─"
-            lines = [f"{prefix}{branch} {ResultQuery.node_label(current, show_ids=show_ids)}"]
-            child_prefix = prefix + ("   " if is_last else "│  ")
-            children = ResultQuery.display_children_of(result, current)
-            if max_depth is not None and depth >= max_depth and children:
-                lines.append(f"{child_prefix}└─ {ResultQuery._hidden_count_label(result, children)}")
-                return lines
-
-            visible_children = children if max_children is None else children[:max_children]
-            hidden_children = [] if max_children is None else children[max_children:]
-            for index, child in enumerate(visible_children):
-                is_child_last = index == len(visible_children) - 1 and not hidden_children
-                lines.extend(render(child, child_prefix, is_child_last, depth + 1))
-            if hidden_children:
-                lines.append(f"{child_prefix}└─ {ResultQuery._hidden_count_label(result, hidden_children)}")
-            return lines
-
-        lines = [ResultQuery.node_label(start, show_ids=show_ids)]
-        children = ResultQuery.display_children_of(result, start)
-        if max_depth == 0 and children:
-            lines.append(f"└─ {ResultQuery._hidden_count_label(result, children)}")
-        else:
-            visible_children = children if max_children is None else children[:max_children]
-            hidden_children = [] if max_children is None else children[max_children:]
-            for index, child in enumerate(visible_children):
-                is_child_last = index == len(visible_children) - 1 and not hidden_children
-                lines.extend(render(child, "", is_child_last, 1))
-            if hidden_children:
-                lines.append(f"└─ {ResultQuery._hidden_count_label(result, hidden_children)}")
-        return "\n".join(lines)
-
-    @staticmethod
-    def execution_tree(
-        result: Result[Any],
-        node: str | ResultNode | None = None,
-        *,
-        show_ids: bool = False,
-        max_depth: int | None = None,
-        max_children: int | None = None,
-        include_perf: bool = True,
-        include_cache: bool = True,
-        include_observer: bool = True,
-        include_values: bool = False,
-    ) -> str:
-        ResultQuery._validate_tree_limits(max_depth, max_children)
-        start = result.root if node is None else ResultQuery.resolve_node(result, node)
-        cache_events = ResultQuery._cache_events_by_node(result)
-        rendered_nodes: set[str] = set()
-
-        def label(current: ResultNode, *, hit_occurrence: bool = False) -> str:
-            return ResultQuery._execution_label(
-                result,
-                current,
-                show_ids=show_ids,
-                include_perf=include_perf,
-                include_cache=include_cache,
-                include_observer=include_observer,
-                include_values=include_values,
-                cache_events=cache_events,
-                hit_occurrence=hit_occurrence,
-            )
-
-        def hidden_summary(children: list[ResultNode]) -> str:
-            return ResultQuery._hidden_execution_summary(
-                result,
-                children,
-                include_perf=include_perf,
-                include_cache=include_cache,
-                include_observer=include_observer,
-                cache_events=cache_events,
-            )
-
-        def render(current: ResultNode, prefix: str, is_last: bool, depth: int) -> list[str]:
-            branch = "└─" if is_last else "├─"
-            hit_occurrence = current.node_id in rendered_nodes
-            lines = [f"{prefix}{branch} {label(current, hit_occurrence=hit_occurrence)}"]
-            if hit_occurrence:
-                return lines
-            rendered_nodes.add(current.node_id)
-            child_prefix = prefix + ("   " if is_last else "│  ")
-            children = ResultQuery.display_children_of(result, current)
-            if max_depth is not None and depth >= max_depth and children:
-                lines.append(f"{child_prefix}└─ {hidden_summary(children)}")
-                return lines
-
-            visible_children = children if max_children is None else children[:max_children]
-            hidden_children = [] if max_children is None else children[max_children:]
-            for index, child in enumerate(visible_children):
-                is_child_last = index == len(visible_children) - 1 and not hidden_children
-                lines.extend(render(child, child_prefix, is_child_last, depth + 1))
-            if hidden_children:
-                lines.append(f"{child_prefix}└─ {hidden_summary(hidden_children)}")
-            return lines
-
-        lines = [label(start)]
-        rendered_nodes.add(start.node_id)
-        children = ResultQuery.display_children_of(result, start)
-        if max_depth == 0 and children:
-            lines.append(f"└─ {hidden_summary(children)}")
-        else:
-            visible_children = children if max_children is None else children[:max_children]
-            hidden_children = [] if max_children is None else children[max_children:]
-            for index, child in enumerate(visible_children):
-                is_child_last = index == len(visible_children) - 1 and not hidden_children
-                lines.extend(render(child, "", is_child_last, 1))
-            if hidden_children:
-                lines.append(f"└─ {hidden_summary(hidden_children)}")
-        return "\n".join(lines)
-
-
-class ResultRepr:
-
-    @staticmethod
-    def _tone_for_status(status: Any) -> str:
-        text = str(display_value(status)).lower()
-        if text in {"ok", "success", "ready", "true"}:
-            return "ok"
-        if text in {"pending", "running", "partial", "warning"}:
-            return "warn"
-        if text in {"error", "failed", "false"}:
-            return "error"
-        return "neutral"
-
-    @staticmethod
-    def _short_class_name(path: str | None) -> str:
-        if not path:
-            return "-"
-        return path.rsplit(".", 1)[-1]
-
-    @staticmethod
-    def _format_field_set(values: set[str], *, limit: int = 6) -> str:
-        if not values:
-            return "-"
-        items = sorted(values)
-        if len(items) <= limit:
-            return ", ".join(items)
-        hidden = len(items) - limit
-        return f"{', '.join(items[:limit])}, +{hidden}"
-
-    @staticmethod
-    def result_node_repr(node: ResultNode) -> str:
-        parts = [
-            f"label={node.label!r}",
-            f"kind={display_value(node.kind)!r}",
-            f"status={display_value(node.status)!r}",
-        ]
-        if node.stored_value:
-            parts.append(f"value={compact_repr(node.value, max_length=60)}")
-        elif node.value_summary is not None:
-            parts.append(f"summary={compact_repr(node.value_summary, max_length=80)}")
-        if node.children:
-            parts.append(f"children={len(node.children)}")
-        if node.error is not None:
-            parts.append(f"error={node.error.error_type!r}")
-        if node.observation is not None and node.observation.event_count:
-            parts.append(f"observer_events={node.observation.event_count}")
-        return f"ResultNode({', '.join(parts)})"
-
-    @staticmethod
-    def result_node_html(node: ResultNode) -> str:
-        rows: list[tuple[str, Any]] = [
-            ("label", node.label),
-            ("ref", node.ref),
-            ("kind", html_badge(display_value(node.kind), tone="info")),
-            (
-                "status",
-                html_badge(
-                    display_value(node.status),
-                    tone=ResultRepr._tone_for_status(node.status),
-                ),
-            ),
-            (
-                "stored",
-                " ".join(
-                    [
-                        html_badge(
-                            "value" if node.stored_value else "value: no",
-                            tone="ok" if node.stored_value else "neutral",
-                        ),
-                        html_badge(
-                            "raw" if node.stored_raw else "raw: no",
-                            tone="ok" if node.stored_raw else "neutral",
-                        ),
-                    ]
-                ),
-            ),
-        ]
-
-        if node.calculator_type is not None:
-            rows.append(("calculator", node.calculator_type))
-
-        semantic_class = node.semantic_calculator_class_path or node.calculator_class_path
-        if semantic_class is not None:
-            rows.append(("class", ResultRepr._short_class_name(semantic_class)))
-
-        if node.record_policy is not None:
-            rows.append(("record", html_badge(display_value(node.record_policy), tone="neutral")))
-
-        sections: list[str] = [
-            html_metric_grid(
-                [
-                    ("parents", len(node.parent_ids)),
-                    ("children", len(node.children)),
-                    ("phases", len(node.phases)),
-                    ("events", node.observation.event_count if node.observation is not None else 0),
-                ]
-            )
-        ]
-
-        value_rows: list[tuple[str, Any]] = []
-        if node.value_summary is not None:
-            value_rows.append(("type", node.value_summary.python_type))
-            if node.value_summary.shape is not None:
-                value_rows.append(("shape", node.value_summary.shape))
-            if node.value_summary.dtype is not None:
-                value_rows.append(("dtype", node.value_summary.dtype))
-            if node.value_summary.units is not None:
-                value_rows.append(("units", node.value_summary.units))
-            if node.value_summary.preview is not None:
-                value_rows.append(("preview", node.value_summary.preview))
-        if node.stored_value:
-            value_rows.append(("public value", compact_repr(node.value, max_length=220)))
-        if node.stored_raw:
-            value_rows.append(("raw value", compact_repr(node.raw_value, max_length=220)))
-        if value_rows:
-            sections.append(
-                html_details(
-                    "Value",
-                    html_scroll_x(
-                        html_table(
-                            value_rows,
-                            class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap pynbodyext-calc-monospace",
-                        ),
-                        min_width="56rem",
-                    ),
-                )
-            )
-
-        if node.phases:
-            phase_rows = [
-                [
-                    phase.phase,
-                    format_time(phase.elapsed_s),
-                    format_mem(phase.memory_used),
-                    format_mem(phase.memory_peak),
-                    format_mem(phase.rss_used),
-                    html_badge(
-                        phase.status,
-                        tone=ResultRepr._tone_for_status(phase.status),
-                    ),
-                ]
-                for phase in node.phases
-            ]
-            sections.append(
-                html_details(
-                    "Phases",
-                    html_scroll_x(
-                        html_data_table(
-                            ["phase", "time", "mem", "peak", "rss", "status"],
-                            phase_rows,
-                            escape_values=False,
-                            class_name="pynbodyext-calc-data-table pynbodyext-calc-data-table-nowrap pynbodyext-calc-monospace",
-                        ),
-                        min_width="48rem",
-                    ),
-                )
-            )
-
-        if node.observation is not None:
-            observation_rows = [
-                ("events", node.observation.event_count),
-                ("reads", len(node.observation.reads)),
-                ("dirty", len(node.observation.dirty_fields)),
-                ("deletes", len(node.observation.deletes)),
-            ]
-            sections.append(
-                html_details(
-                    "Observer",
-                    html_scroll_x(
-                        html_table(
-                            observation_rows,
-                            class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap pynbodyext-calc-monospace",
-                        ),
-                        min_width="42rem",
-                    ),
-                )
-            )
-
-            observer_lines: list[str] = []
-            if node.observation.reads:
-                observer_lines.append(
-                    f"reads: {ResultRepr._format_field_set(node.observation.reads)}"
-                )
-            if node.observation.dirty_fields:
-                observer_lines.append(
-                    f"dirty: {ResultRepr._format_field_set(node.observation.dirty_fields)}"
-                )
-            if node.observation.deletes:
-                observer_lines.append(
-                    f"deletes: {ResultRepr._format_field_set(node.observation.deletes)}"
-                )
-            if observer_lines:
-                sections.append(
-                    html_details(
-                        "Observer fields",
-                        html_pre("\n".join(observer_lines)),
-                        open=False,
-                    )
-                )
-
-        if node.error is not None:
-            error_rows = [
-                ("type", node.error.error_type),
-                ("message", node.error.message),
-            ]
-            if node.error.phase is not None:
-                error_rows.append(("phase", node.error.phase))
-            sections.append(
-                html_section(
-                    "Error",
-                    html_scroll_x(
-                        html_table(
-                            error_rows,
-                            class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap",
-                        )
-                    ),
-                )
-            )
-
-            if node.error.traceback_text:
-                sections.append(
-                    html_details(
-                        "Traceback",
-                        html_pre(node.error.traceback_text),
-                        open=True,
-                    )
-                )
-
-        return html_card(
-            "ResultNode",
-            rows,
-            body="".join(sections),
-            escape_values=False,
-        )
-
-    @staticmethod
-    def result_repr(result: Result[Any]) -> str:
-        parts = [
-            f"value={type(result.value).__name__}",
-            f"ok={result.ok}",
-            f"nodes={len(result.nodes)}",
-        ]
-        if result.named:
-            parts.append(f"named={tuple(result.named.keys())!r}")
-        if result.warnings:
-            parts.append(f"warnings={len(result.warnings)}")
-        if result.errors:
-            parts.append(f"errors={len(result.errors)}")
-        if result.observations:
-            parts.append(f"observations={len(result.observations)}")
-        return f"Result({', '.join(parts)})"
-
-    @staticmethod
-    def result_html(result: Result[Any]) -> str:
-        hits = result.perf_summary.cache_hit_count
-        misses = result.perf_summary.cache_miss_count
-        stores = result.perf_summary.cache_store_count
-        cache_total = hits + misses
-        hit_rate = f"{hits / cache_total:.0%}" if cache_total else "-"
-
-        rows: list[tuple[str, Any]] = [
-            ("root", result.root.label),
-            ("value", type(result.value).__name__),
-            (
-                "status",
-                html_badge("ok" if result.ok else "error", tone="ok" if result.ok else "error"),
-            ),
-        ]
-
-        if result.named:
-            rows.append(("named", compact_repr(tuple(result.named.keys()), max_length=96)))
-
-        if result.provenance is not None and result.provenance.calculator_signature_hash is not None:
-            rows.append(("signature", result.provenance.calculator_signature_hash[:12]))
-
-        sections: list[str] = [
-            html_scroll_x(
-                html_metric_strip(
-                    [
-                        ("nodes", len(result.nodes)),
-                        ("phases", result.perf_summary.phase_count),
-                        ("warnings", len(result.warnings)),
-                        ("errors", len(result.errors)),
-                        ("time", format_time(result.perf_summary.total_time_s)),
-                        ("cache", f"{hits} hit / {misses} miss"),
-                        ("hit rate", hit_rate),
-                        ("stores", stores),
-                    ]
-                )
-            )
-        ]
-
-        named_values = result.named_values
-        if named_values:
-            sections.append(
-                html_section(
-                    "Named values",
-                    html_scroll_x(
-                        html_data_table(
-                            ["name", "value"],
-                            [[key, compact_repr(value, max_length=180)] for key, value in named_values.items()],
-                            class_name="pynbodyext-calc-data-table pynbodyext-calc-data-table-nowrap",
-                        )
-                    ),
-                )
-            )
-
-        if result.provenance is not None:
-            provenance_rows: list[tuple[str, Any]] = []
-            if result.provenance.calculator_signature_hash is not None:
-                provenance_rows.append(("calculator hash", result.provenance.calculator_signature_hash))
-            elif result.provenance.calculator_signature_text is not None:
-                provenance_rows.append(
-                    (
-                        "calculator",
-                        compact_repr(result.provenance.calculator_signature_text, max_length=180),
-                    )
-                )
-
-            provenance_rows.append(
-                ("sim signature", compact_repr(result.provenance.sim_signature, max_length=180))
-            )
-
-            if result.provenance.finished_at is not None:
-                provenance_rows.append(
-                    (
-                        "wall time",
-                        format_time(result.provenance.finished_at - result.provenance.started_at),
-                    )
-                )
-
-            sections.append(
-                html_details(
-                    "Provenance",
-                    html_scroll_x(
-                        html_table(
-                            provenance_rows,
-                            class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap",
-                        )
-                    ),
-                )
-            )
-
-        error_rows: list[list[Any]] = []
-        for node in ResultQuery.find_error_nodes(result)[:8]:
-            if node.error is None:
-                continue
-            error_rows.append(
-                [
-                    ResultQuery.node_label(node, show_ref=True, show_kind=True),
-                    node.error.phase or "-",
-                    f"{node.error.error_type}: {node.error.message}",
-                ]
-            )
-
-        remaining_slots = max(0, 8 - len(error_rows))
-        for error in result.errors[:remaining_slots]:
-            error_rows.append(
-                [
-                    "<run>",
-                    error.phase or "-",
-                    f"{error.error_type}: {error.message}",
-                ]
-            )
-
-        if error_rows:
-            sections.append(
-                html_section(
-                    "Errors",
-                    html_scroll_x(
-                        html_data_table(
-                            ["node", "phase", "message"],
-                            error_rows,
-                            class_name="pynbodyext-calc-data-table pynbodyext-calc-data-table-nowrap",
-                        )
-                    ),
-                )
-            )
-
-        sections.append(
-            html_details(
-                "Execution tree",
-                html_pre(result.report_execution_tree()),
-                open=not result.ok,
-            )
-        )
-
-        perf_text = result.report_perf().strip()
-        if perf_text:
-            sections.append(
-                html_details(
-                    "Performance",
-                    html_pre(perf_text),
-                    open=False,
-                )
-            )
-
-        cache_text = ResultRepr.cache_section(result).strip()
-        if cache_text:
-            sections.append(
-                html_details(
-                    "Cache",
-                    html_pre(cache_text),
-                    open=False,
-                )
-            )
-
-        return html_card(
-            "Result",
-            rows,
-            body="".join(sections),
-            escape_values=False,
-        )
-
-    @staticmethod
-    def perf_table(
-        result: Result[Any],
-        *,
-        show_ids: bool = False,
-        max_depth: int | None = None,
-        max_children: int | None = None,
-    ) -> str:
-        ResultQuery._validate_tree_limits(max_depth, max_children)
-        title = result.root.name or str(result.root.kind)
-        lines: list[str] = [title] if title else []
-        header = "Node                           | Phase           | Time         | Mem Used       | Peak Mem       | RSS Delta"
-        lines.append("-" * len(header))
-        lines.append(header)
-        lines.append("-" * len(header))
-
-        if max_depth is None and max_children is None:
-            nodes = list(result.nodes.values())
-            hidden_count = 0
-        else:
-            visible_nodes, hidden_count = ResultQuery._visible_tree_nodes(
-                result,
-                result.root,
-                max_depth=max_depth,
-                max_children=max_children,
-            )
-            seen_node_ids: set[str] = set()
-            nodes = []
-            for node in visible_nodes:
-                if node.node_id in seen_node_ids:
-                    continue
-                seen_node_ids.add(node.node_id)
-                nodes.append(node)
-
-        for node in nodes:
-            node_label = ResultQuery.node_label(
-                node, show_ids=show_ids, show_ref=True, show_kind=True, max_width=30
-            )
-            for phase in node.phases:
-                lines.append(
-                    f"{node_label:<30} | "
-                    f"{phase.phase[:15]:<15} | "
-                    f"{format_time(phase.elapsed_s):>12} | "
-                    f"{format_mem(phase.memory_used):>14} | "
-                    f"{format_mem(phase.memory_peak):>14} | "
-                    f"{format_mem(phase.rss_used):>10}"
-                )
-
-        if hidden_count:
-            hidden_suffix = "node" if hidden_count == 1 else "nodes"
-            hidden_label = f"... {hidden_count} {hidden_suffix} hidden"
-            lines.append(
-                f"{hidden_label[:30]:<30} | "
-                f"{'-':<15} | "
-                f"{'-':>12} | "
-                f"{'-':>14} | "
-                f"{'-':>14} | "
-                f"{'-':>10}"
-            )
-
-        lines.append("-" * len(header))
-        lines.append(
-            f"{'Total':<30} | {'-':<15} | "
-            f"{format_time(result.perf_summary.total_time_s):>12} | "
-            f"{'-':>14} | {'-':>14} | {'-':>10}"
-        )
-        lines.append("-" * len(header))
-        return "\n".join(lines)
-
-    @staticmethod
-    def cache_section(result: Result[Any], *, max_events: int = 12) -> str:
-        lines = [
-            "Runtime Cache",
-            f"entries: {result.perf_summary.cache_store_count}",
-            f"hits: {result.perf_summary.cache_hit_count}",
-            f"misses: {result.perf_summary.cache_miss_count}",
-            f"stores: {result.perf_summary.cache_store_count}",
-        ]
-
-        events = result.cache_events()
-        if not events:
-            return "\n".join(lines)
-
-        lines.append("")
-        lines.append("Recent events")
-        for event in events[-max_events:]:
-            if event.node_id and event.node_id in result.nodes:
-                node = result.nodes[event.node_id]
-                label = ResultQuery.node_label(
-                    node,
-                    show_ref=True,
-                    show_kind=True,
-                    max_width=48,
-                )
-            else:
-                label = "-"
-            lines.append(f"- {event.event}: {label}")
-
-        return "\n".join(lines)
-
-    @staticmethod
-    def summary(
-        result: Result[Any],
-        *,
-        include_cache_counts: bool = True
-    ) -> str:
-        root_label = result.root.label
-        lines = [
-            f"root: {root_label}",
-            f"value_type: {type(result.value).__name__}",
-            f"nodes: {len(result.nodes)}",
-            f"warnings: {len(result.warnings)}",
-            f"errors: {len(result.errors)}",
-        ]
-
-        if result.perf_summary.total_time_s is not None:
-            lines.append(f"total_time_s: {result.perf_summary.total_time_s:.6f}")
-        else:
-            lines.append("total_time_s: -")
-
-        if include_cache_counts:
-            lines.append(f"cache_hits: {result.perf_summary.cache_hit_count}")
-            lines.append(f"cache_misses: {result.perf_summary.cache_miss_count}")
-            lines.append(f"cache_stores: {result.perf_summary.cache_store_count}")
-        return "\n".join(lines)
-
-    @staticmethod
-    def pipeline_report(
-        result: Result[Any],
-        *,
-        include_perf: bool = True,
-        include_trace: bool = False,
-        include_cache: bool = False,
-        include_errors: bool = True,
-        include_execution_tree: bool = False,
-        show_ids: bool = False,
-        max_depth: int | None = None,
-        max_children: int | None = None,
-    ) -> str:
-        sections: list[str] = [
-            "Summary",
-            ResultRepr.summary(result),
-            "Pipeline",
-            ResultQuery.node_tree(
-                result,
-                show_ids=show_ids,
-                max_depth=max_depth,
-                max_children=max_children,
-            ),
-        ]
-
-        if include_execution_tree:
-            execution_text = ResultQuery.execution_tree(
-                result,
-                show_ids=show_ids,
-                max_depth=max_depth,
-                max_children=max_children,
-            ).strip()
-            if execution_text:
-                sections.extend(["Execution", execution_text])
-
-        if include_perf:
-            perf_text = ResultRepr.perf_table(
-                result,
-                show_ids=show_ids,
-                max_depth=max_depth,
-                max_children=max_children,
-            ).strip()
-            if perf_text:
-                sections.extend(["Performance", perf_text])
-
-        if include_trace:
-            trace_text = result.report_trace_timeline(show_ids=show_ids).strip()
-            if trace_text:
-                sections.extend(["Trace Timeline", trace_text])
-
-        if include_cache:
-            cache_text = ResultRepr.cache_section(result).strip()
-            if cache_text:
-                sections.extend(["Cache", cache_text])
-
-        if include_errors and (result.errors or ResultQuery.find_error_nodes(result)):
-            error_section: list[str] = []
-            error_nodes = ResultQuery.find_error_nodes(result)
-
-            if error_nodes:
-                error_section.append("nodes:")
-                for node in error_nodes:
-                    phase = node.error.phase if node.error is not None else None
-                    phase_suffix = f" phase={phase}" if phase else ""
-                    label = ResultQuery.node_label(
-                        node,
-                        show_ids=show_ids,
-                        show_ref=True,
-                        show_kind=True,
-                    )
-                    error_section.append(f"- {label}{phase_suffix}")
-
-            if result.errors:
-                if error_section:
-                    error_section.append("")
-                    error_section.append("messages:")
-                for err in result.errors:
-                    phase_suffix = f" (phase={err.phase})" if err.phase else ""
-                    error_section.append(f"- {err.error_type}: {err.message}{phase_suffix}")
-
-            sections.extend(["Errors", "\n".join(error_section)])
-
-        return "\n\n".join(section for section in sections if section)

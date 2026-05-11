@@ -515,6 +515,63 @@ class EvalEngine:
 
         raise RuntimeError("run failed before any result node was registered")
 
+    def _build_provenance(
+        self,
+        node: CalculatorBase[Any, Any],
+        ctx: ExecutionContext,
+        started: float,
+        finished: float,
+    ) -> ProvenanceInfo:
+        root_signature = node.to_signature()
+        return ProvenanceInfo(
+            calculator_signature=root_signature.cache_key(),
+            calculator_signature_text=root_signature.to_json(),
+            calculator_signature_hash=root_signature.short_hash(),
+            sim_signature=ctx.sim_signature,
+            started_at=started,
+            finished_at=finished,
+        )
+
+    def _collect_reports(
+        self,
+        ctx: ExecutionContext,
+        root: ResultNode,
+        run_label: str,
+    ) -> dict[str, str]:
+        return {
+            "perf": ctx.perf.report_text(ctx.node_registry, title=run_label),
+            "cache": ctx.cache.report_text(),
+            "observer": render_observer_report(ctx.access_observations.values()),
+            "trace_timeline": ctx.trace.render_timeline(),
+            "trace_tree": ctx.trace.render_tree(ctx.node_registry, root.node_id),
+        }
+
+    def _collect_diagnostics(
+        self,
+        ctx: ExecutionContext,
+        named: dict[str, ResultNode],
+    ) -> dict[str, Any]:
+        named_values = {
+            name: ctx.runtime_store[node_result.node_id].public_value
+            for name, node_result in named.items()
+            if node_result.node_id in ctx.runtime_store
+        }
+        return {
+            "trace_events": list(ctx.trace.events),
+            "cache_events": list(ctx.cache.events),
+            "observations": {
+                node_id: observation.as_dict()
+                for node_id, observation in ctx.access_observations.items()
+            },
+            "observer_events": [
+                event.as_dict()
+                for observation in ctx.access_observations.values()
+                for event in observation.events
+            ],
+            "log_events": list(ctx.log_events),
+            "named_values": named_values,
+        }
+
     def _assemble_result(
         self,
         *,
@@ -525,32 +582,17 @@ class EvalEngine:
         started: float,
     ) -> Result[TPublic]:
         finished = time.perf_counter()
-        root_signature = node.to_signature()
-        provenance = ProvenanceInfo(
-            calculator_signature=root_signature.cache_key(),
-            calculator_signature_text=root_signature.to_json(),
-            calculator_signature_hash=root_signature.short_hash(),
-            sim_signature=ctx.sim_signature,
-            started_at=started,
-            finished_at=finished,
-        )
+
+        provenance = self._build_provenance(node, ctx, started, finished)
 
         named = {
             name: ctx.node_registry[node_id]
             for name, node_id in ctx.named_registry.items()
             if node_id in ctx.node_registry
         }
-        named_values = {
-            name: ctx.runtime_store[node_result.node_id].public_value
-            for name, node_result in named.items()
-            if node_result.node_id in ctx.runtime_store
-        }
 
-        perf_report = ctx.perf.report_text(ctx.node_registry, title=run_label)
-        cache_report = ctx.cache.report_text()
-        trace_timeline = ctx.trace.render_timeline()
-        trace_tree = ctx.trace.render_tree(ctx.node_registry, root.node_id)
-        observer_report = render_observer_report(ctx.access_observations.values())
+        reports = self._collect_reports(ctx, root, run_label)
+        diagnostics = self._collect_diagnostics(ctx, named)
 
         perf_summary = ctx.perf.summary(ctx.node_registry, cache_hit_count=ctx.cache.hit_count)
         cache_summary = ctx.cache.summary()
@@ -572,36 +614,12 @@ class EvalEngine:
             perf_summary=perf_summary,
             warnings=list(ctx.warnings),
             errors=list(ctx.errors),
-            reports={
-                "perf": perf_report,
-                "cache": cache_report,
-                "observer": observer_report,
-                "trace_timeline": trace_timeline,
-                "trace_tree": trace_tree,
-            },
-            diagnostics={
-                "trace_events": list(ctx.trace.events),
-                "cache_events": list(ctx.cache.events),
-                "observations": {
-                    node_id: observation.as_dict()
-                    for node_id, observation in ctx.access_observations.items()
-                },
-                "observer_events": [
-                    event.as_dict()
-                    for observation in ctx.access_observations.values()
-                    for event in observation.events
-                ],
-                "log_events": list(ctx.log_events),
-                "named_values": named_values,
-            },
+            reports=reports,
+            diagnostics=diagnostics,
         )
         execution_tree_report = result.report_execution_tree()
 
-        root.artifacts["perf_report"] = perf_report
-        root.artifacts["cache_report"] = cache_report
-        root.artifacts["trace_timeline"] = trace_timeline
-        root.artifacts["trace_tree"] = trace_tree
-        root.artifacts["observer_report"] = observer_report
+        root.artifacts.update(reports)
         root.artifacts["execution_tree_report"] = execution_tree_report
         root.artifacts["log_events"] = list(ctx.log_events)
         result.reports["execution_tree"] = execution_tree_report
