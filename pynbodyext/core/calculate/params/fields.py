@@ -154,7 +154,6 @@ class Param(Generic[T]):
         cls,
         default: DynamicParam[T],
         *,
-        dynamic: Literal[True] = True,
         field_name: str | None = None,
         target_units: Any | None = None,
         optional_units: bool = True,
@@ -167,31 +166,9 @@ class Param(Generic[T]):
     def __new__(
         cls,
         *,
-        dynamic: Literal[True] = True,
         field_name: str | None = None,
         target_units: Any | None = None,
         optional_units: bool = True,
-        signature: bool = True,
-        init: bool = True,
-        kw_only: bool = False,
-    ) -> Any: ...
-
-    @overload
-    def __new__(
-        cls,
-        default: T,
-        *,
-        dynamic: Literal[False],
-        signature: bool = True,
-        init: bool = True,
-        kw_only: bool = False,
-    ) -> Any: ...
-
-    @overload
-    def __new__(
-        cls,
-        *,
-        dynamic: Literal[False],
         signature: bool = True,
         init: bool = True,
         kw_only: bool = False,
@@ -201,7 +178,6 @@ class Param(Generic[T]):
         cls,
         default: Any = MISSING,
         *,
-        dynamic: bool = True,
         field_name: str | None = None,
         target_units: Any | None = None,
         optional_units: bool = True,
@@ -209,16 +185,59 @@ class Param(Generic[T]):
         init: bool = True,
         kw_only: bool = False,
     ) -> Any:
-        kind: Literal["static", "dynamic"] = "dynamic" if dynamic else "static"
         spec = ParamSpec(
             name="",
-            kind=kind,
+            kind="dynamic",
             field_name=field_name,
             target_units=target_units,
             optional_units=optional_units,
             signature=signature,
         )
 
+        kwargs: dict[str, Any] = {
+            "metadata": _merge_metadata(spec),
+            "init": init,
+            "kw_only": kw_only,
+        }
+        if default is not MISSING:
+            kwargs["default"] = default
+        return field(**kwargs)
+
+    # ── static() classmethod ─────────────────────────────────────────────────
+
+    @overload
+    @classmethod
+    def static(
+        cls,
+        default: T,
+        *,
+        signature: bool = True,
+        init: bool = True,
+        kw_only: bool = False,
+    ) -> T: ...
+
+    @overload
+    @classmethod
+    def static(
+        cls,
+        *,
+        signature: bool = True,
+        init: bool = True,
+        kw_only: bool = False,
+    ) -> Any: ...
+
+    @classmethod
+    def static(
+        cls,
+        default: Any = MISSING,
+        *,
+        signature: bool = True,
+        init: bool = True,
+        kw_only: bool = False,
+    ) -> Any:
+        """Create a static (non-dynamic) dataclass field specifier.
+        """
+        spec = ParamSpec(name="", kind="static", signature=signature)
         kwargs: dict[str, Any] = {
             "metadata": _merge_metadata(spec),
             "init": init,
