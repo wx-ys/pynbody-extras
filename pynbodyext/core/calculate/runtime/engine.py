@@ -213,6 +213,153 @@ class EvalEngine:
             started=started,
         )
 
+    # ------------------------------------------------------------------
+    # Batch / light-weight execution path
+    # ------------------------------------------------------------------
+
+    def run_light(
+        self,
+        node: CalculatorBase[TRaw, TPublic],
+        sim: Any,
+        options: RunOptions,
+        *,
+        _precomputed_node_sig: tuple[Any, ...] | None = None,
+        _precomputed_structured_sig: Any | None = None,
+    ) -> TPublic:
+        """Run *node* on *sim* and return only the public value, with minimal overhead.
+
+        Compared with :meth:`run`, this method:
+
+        - uses an empty ``sim_signature`` and ``run_id`` to avoid ``uuid.uuid4()``
+          and ``make_sim_signature`` overhead,
+        - skips ``_estimate_total_nodes``, ``on_run_start``, and ``on_run_end``,
+        - uses :meth:`_evaluate_light` which avoids calling ``node.to_signature()``
+          when pre-computed values are supplied,
+        - skips ``_assemble_result`` and all report/diagnostics collection.
+
+        Intended for tight loops (e.g. per-bin evaluation) where the same node
+        is applied to many sub-snapshots.  Use :meth:`CalculatorBase.batch` to
+        obtain a caller that pre-computes the node signature once.
+        """
+        ctx = ExecutionContext(
+            sim=sim,
+            sim_signature=(),
+            run_id="",
+            options=options,
+            engine=self,
+        )
+        work = NodeInput(sim_raw=sim, sim_current=sim)
+        try:
+            root = self._evaluate_light(
+                node,
+                ctx,
+                work,
+                node_sig=_precomputed_node_sig if _precomputed_node_sig is not None else node.signature(),
+                structured_sig=_precomputed_structured_sig,
+            )
+        except Exception:
+            if options.errors == ErrorPolicy.RAISE:
+                raise
+            return None  # type: ignore[return-value]
+        store = ctx.runtime_store.get(root.node_id)
+        if store is None:
+            return None  # type: ignore[return-value]
+        return store.public_value
+
+    def _evaluate_light(
+        self,
+        node: CalculatorBase[TRaw, TPublic],
+        ctx: ExecutionContext,
+        work: NodeInput,
+        *,
+        node_sig: tuple[Any, ...],
+        structured_sig: Any | None,
+    ) -> ResultNode:
+        """Like :meth:`evaluate` but uses pre-computed signatures.
+
+        Skips ``node.to_signature()`` / ``node.signature()`` calls (saves ~2
+        serialisation round-trips per invocation).  Also uses
+        :meth:`_execute_node_body_light` which bypasses ``node_scope``
+        (skips per-node progress events and log-event appends).
+
+        Dependencies of *node* (e.g. child nodes for ``BoundCalculator``) are
+        still evaluated through the normal :meth:`evaluate` path so that
+        filters and transforms work correctly.
+        """
+        cache_key = (ctx.sim_signature, work.cache_token, node_sig)
+        stack_key = (id(node), work.cache_token)
+
+        if stack_key in ctx._evaluation_stack:
+            raise CycleError(f"Cycle detected while evaluating {node.log_label!r}")
+
+        # Cache check (only when cache is enabled in options)
+        if ctx.cache.enabled:
+            cached_runtime = ctx.cache.get(cache_key)
+            if cached_runtime is not None:
+                return ctx.node_registry[cached_runtime.node_id]
+
+        # Build a ResultNode using the pre-computed or lightly-computed signature
+        sig_tuple = node_sig
+        if structured_sig is not None:
+            display_sig = structured_sig.cache_key()
+        else:
+            display_sig = sig_tuple
+
+        node_result = ResultNode(
+            node_id=ctx.new_node_id(),
+            kind=node.kind,
+            signature=display_sig,
+            name=node.name,
+            display_name=node.log_label,
+            calculator_type=node.__class__.__name__,
+            calculator_class_path=self._class_path(node),
+            semantic_calculator_class_path=None,
+            record_policy=node.record_policy or ctx.options.default_record_policy,
+        )
+        ctx.register_node(node_result)
+
+        ctx._evaluation_stack.append(stack_key)
+        try:
+            state = self._execute_node_body_light(node, ctx, node_result, work)
+        except _NodeExecutionFailure as failure:
+            raise failure.cause from None
+        finally:
+            ctx._evaluation_stack.pop()
+
+        ctx.register_runtime_value(node_result.node_id, state.raw_value, state.public_value)
+        node_result.status = NodeStatus.OK
+        return node_result
+
+    def _execute_node_body_light(
+        self,
+        node: CalculatorBase[T, Any],
+        ctx: ExecutionContext,
+        node_result: ResultNode,
+        work: NodeInput,
+    ) -> _NodeExecutionState:
+        """Like :meth:`_execute_node_body` but without progress events or log entries.
+
+        Pushes *node_result* onto the node stack so that ``ctx.phase()`` inside
+        ``node.execute()`` still has a valid current node.  Skips
+        ``ctx.node_scope`` (which emits ``on_node_start``/``on_node_end`` and
+        two ``ctx.log`` calls) and ``ctx.observe_node_access`` (which is
+        irrelevant when ``options.observe=False``).
+        """
+        state = _NodeExecutionState()
+        ctx._node_stack.append(node_result)
+        try:
+            state.raw_value = node.execute(ctx, work)
+            state.raw_value = node.materialize(ctx, state.raw_value)
+            state.public_value = node.public_value(state.raw_value)
+            state.public_value = node.materialize_public(ctx, state.public_value)
+        except Exception as exc:
+            raise _NodeExecutionFailure(exc, state) from exc
+        finally:
+            ctx._node_stack.pop()
+        return state
+
+    # ------------------------------------------------------------------
+
     def evaluate(
         self,
         node: CalculatorBase[TRaw, TPublic],
