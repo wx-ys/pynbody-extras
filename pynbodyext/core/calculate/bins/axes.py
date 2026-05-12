@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, overload
 
 import numpy as np
+from pynbody import units as pynbody_units
 from pynbody.array import SimArray
 
 if TYPE_CHECKING:
@@ -13,7 +14,7 @@ if TYPE_CHECKING:
 
 
 ArrayLike = Any
-BinAlgorithm = Callable[[np.ndarray, int, float, float, Mapping[str, Any]], ArrayLike]
+BinAlgorithm = Callable[[np.ndarray, int, float, float], ArrayLike]
 AxisPropertyFunc = Callable[["BinAxis"], Any]
 BinDerivedCondition = Callable[[Any], bool]
 BinDerivedFunc = Callable[[Any], Any]
@@ -45,6 +46,28 @@ def _finite_minmax(values: Any) -> tuple[float, float]:
     return float(np.min(finite)), float(np.max(finite))
 
 
+def _coerce_bound_value(value: Any, reference_values: Any, sim: Any) -> float:
+    """Convert a bound value (possibly a unit string or UnitBase) to a float.
+
+    When *reference_values* carries pynbody units and *sim* supplies a
+    conversion context, unit strings such as ``"13.8 Gyr"`` are converted
+    to the same units as the axis values before being returned as a float.
+    """
+    if isinstance(value, str):
+        value = pynbody_units.Unit(value)
+    if isinstance(value, pynbody_units.UnitBase):
+        if hasattr(reference_values, "units"):
+            context = sim.conversion_context() if hasattr(sim, "conversion_context") else {}
+            return float(value.in_units(reference_values.units, **context))
+        return float(SimArray(1.0).in_units(value))
+    if isinstance(value, SimArray):
+        if hasattr(reference_values, "units"):
+            context = sim.conversion_context() if hasattr(sim, "conversion_context") else {}
+            return float(value.in_units(reference_values.units, **context))
+        return float(value)
+    return float(value)
+
+
 def _coerce_edges_like(edges: Any, source: Any) -> Any:
     if isinstance(source, SimArray) and not isinstance(edges, SimArray):
         out = SimArray(edges)
@@ -54,17 +77,17 @@ def _coerce_edges_like(edges: Any, source: Any) -> Any:
     return edges
 
 
-def _linear_edges(values: np.ndarray, nbins: int, vmin: float, vmax: float, kwargs: Mapping[str, Any]) -> np.ndarray:
+def _linear_edges(values: np.ndarray, nbins: int, vmin: float, vmax: float) -> np.ndarray:
     return np.linspace(vmin, vmax, nbins + 1)
 
 
-def _log_edges(values: np.ndarray, nbins: int, vmin: float, vmax: float, kwargs: Mapping[str, Any]) -> np.ndarray:
+def _log_edges(values: np.ndarray, nbins: int, vmin: float, vmax: float) -> np.ndarray:
     if vmin <= 0 or vmax <= 0:
         raise ValueError("log bin mode requires positive vmin and vmax.")
     return np.logspace(np.log10(vmin), np.log10(vmax), nbins + 1)
 
 
-def _equaln_edges(values: np.ndarray, nbins: int, vmin: float, vmax: float, kwargs: Mapping[str, Any]) -> np.ndarray:
+def _equaln_edges(values: np.ndarray, nbins: int, vmin: float, vmax: float) -> np.ndarray:
     finite = np.asarray(values)[np.isfinite(values)]
     finite = finite[(finite >= vmin) & (finite <= vmax)]
     if finite.size == 0:
@@ -390,7 +413,7 @@ def materialize_axis(spec: Any, sim: Any, ctx: ExecutionContext | None = None, i
             raise ValueError("edges cannot be mixed with vmin/vmax/nbins.")
         if spec.lows is not None or spec.highs is not None:
             raise ValueError("edges cannot be mixed with lows/highs.")
-        edges = _as_1d_array(spec.edges, name="edges")
+        edges = _as_1d_array(resolve_runtime_value(spec.edges, sim, ctx, input), name="edges")
         if edges.shape[0] < 2:
             raise ValueError("edges must contain at least two values.")
         if not np.all(np.diff(np.asarray(edges)) > 0):
@@ -403,8 +426,8 @@ def materialize_axis(spec: Any, sim: Any, ctx: ExecutionContext | None = None, i
             raise ValueError("lows/highs cannot be mixed with vmin/vmax/nbins.")
         if spec.lows is None or spec.highs is None:
             raise ValueError("lows and highs must be provided together.")
-        lows = _coerce_edges_like(_as_1d_array(spec.lows, name="lows"), values)
-        highs = _coerce_edges_like(_as_1d_array(spec.highs, name="highs"), values)
+        lows = _coerce_edges_like(_as_1d_array(resolve_runtime_value(spec.lows, sim, ctx, input), name="lows"), values)
+        highs = _coerce_edges_like(_as_1d_array(resolve_runtime_value(spec.highs, sim, ctx, input), name="highs"), values)
         return BinAxis(alias=alias, prop=spec.prop, mins=lows, maxs=highs, include_rightmost=spec.include_rightmost, units=spec.units), values
 
     nbins = resolve_runtime_value(spec.nbins, sim, ctx, input)
@@ -417,20 +440,20 @@ def materialize_axis(spec: Any, sim: Any, ctx: ExecutionContext | None = None, i
     inferred_min, inferred_max = _finite_minmax(arr)
     vmin = resolve_runtime_value(spec.vmin, sim, ctx, input)
     vmax = resolve_runtime_value(spec.vmax, sim, ctx, input)
-    vmin = inferred_min if vmin is None else float(vmin)
-    vmax = inferred_max if vmax is None else float(vmax)
+    vmin = inferred_min if vmin is None else _coerce_bound_value(vmin, values, sim)
+    vmax = inferred_max if vmax is None else _coerce_bound_value(vmax, values, sim)
     if vmin >= vmax:
         raise ValueError("vmin must be smaller than vmax.")
 
     mode = spec.mode
     if callable(mode):
-        edges = mode(arr, nbins, vmin, vmax, spec.mode_kwargs)
+        edges = mode(arr, nbins, vmin, vmax)
     else:
         try:
             algorithm = BIN_ALGORITHMS[str(mode)]
         except KeyError as exc:
             raise KeyError(f"Unknown bin mode {mode!r}.") from exc
-        edges = algorithm(np.asarray(arr), nbins, vmin, vmax, spec.mode_kwargs)
+        edges = algorithm(np.asarray(arr), nbins, vmin, vmax)
 
     edges = _coerce_edges_like(_as_1d_array(edges, name="edges"), values)
     if len(edges) != nbins + 1:

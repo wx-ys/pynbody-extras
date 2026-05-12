@@ -1,23 +1,48 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
 from pynbodyext.core.calculate.nodes.base import CalculatorBase
+from pynbodyext.core.calculate.params.fields import Param, declarative_dependencies
 
 from .axes import BinAxis, materialize_axis, register_axis_property, register_bin_derived, resolve_axis_values
 from .result import BinNDResult, SubBinNDResult
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
+    from collections.abc import Callable, Iterable
 
     from pynbodyext.core.calculate.runtime.context import ExecutionContext
     from pynbodyext.core.calculate.runtime.input import NodeInput
 
 
+@CalculatorBase.dataclass
 class Bin1D(CalculatorBase[BinNDResult, BinNDResult]):
+    prop: Param[Any]
+    vmin: Param[float | None] = Param(default=None)
+    vmax: Param[float | None] = Param(default=None)
+    nbins: Param[int | None] = Param(default=None)
+    mode: str = Param.static(default="linear", kw_only=True)
+    edges: Param[Any] = Param(default=None, kw_only=True)
+    lows: Param[Any] = Param(default=None, kw_only=True)
+    highs: Param[Any] = Param(default=None, kw_only=True)
+    alias: str | None = Param.static(default=None, kw_only=True)
+    include_rightmost: bool = Param.static(default=True, kw_only=True)
+    out_of_range: str = Param.static(default="drop", kw_only=True)
+    units: Any | None = Param.static(default=None, kw_only=True)
+    active: tuple[Any, ...] = Param.static(default=(), kw_only=True)
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.active, tuple):
+            self.active = tuple(self.active or ())  # type: ignore[unreachable]
+
+    def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:
+        deps = declarative_dependencies(self)
+        for key in self.active:
+            if isinstance(key, CalculatorBase):
+                deps.append(key)
+        return deps
 
     @staticmethod
     def axis_property(*args: Any, **kwargs: Any) -> Callable[[Any], Bin1D]:
@@ -27,40 +52,6 @@ class Bin1D(CalculatorBase[BinNDResult, BinNDResult]):
     def derived(*args: Any, **kwargs: Any) -> Callable[[Any], Bin1D]:
         return register_bin_derived(*args, **kwargs)
 
-    def __init__(
-        self,
-        prop: Any,
-        vmin: Any = None,
-        vmax: Any = None,
-        nbins: Any = None,
-        *,
-        mode: str = "linear",
-        edges: Any = None,
-        lows: Any = None,
-        highs: Any = None,
-        alias: str | None = None,
-        include_rightmost: bool = True,
-        out_of_range: str = "drop",
-        units: Any | None = None,
-        active: Iterable[Any] | None = None,
-        **mode_kwargs: Any,
-    ) -> None:
-        super().__init__()
-        self.prop = prop
-        self.vmin = vmin
-        self.vmax = vmax
-        self.nbins = nbins
-        self.mode = mode
-        self.edges = edges
-        self.lows = lows
-        self.highs = highs
-        self.alias = alias
-        self.include_rightmost = include_rightmost
-        self.out_of_range = out_of_range
-        self.units = units
-        self.mode_kwargs = dict(mode_kwargs)
-        self.active_keys = tuple(active or ())
-
     def __matmul__(self, other: Bin1D | BinND) -> BinND:
         if isinstance(other, BinND):
             return BinND((self, *other.axes_specs))
@@ -68,109 +59,56 @@ class Bin1D(CalculatorBase[BinNDResult, BinNDResult]):
             return BinND((self, other))
         return NotImplemented
 
-    def active(self, keys: Iterable[Any]) -> Bin1D:
-        clone = self._copy()
-        clone.active_keys = tuple(keys)
-        return clone
-
-    def _copy(self) -> Bin1D:
-        return Bin1D(
-            self.prop,
-            vmin=self.vmin,
-            vmax=self.vmax,
-            nbins=self.nbins,
-            mode=self.mode,
-            edges=self.edges,
-            lows=self.lows,
-            highs=self.highs,
-            alias=self.alias,
-            include_rightmost=self.include_rightmost,
-            out_of_range=self.out_of_range,
-            units=self.units,
-            active=self.active_keys,
-            **self.mode_kwargs,
-        )
-
-    def signature_payload(self) -> Mapping[str, Any]:
-        return {
-            "prop": self.prop,
-            "vmin": self.vmin,
-            "vmax": self.vmax,
-            "nbins": self.nbins,
-            "mode": self.mode,
-            "edges": self.edges,
-            "lows": self.lows,
-            "highs": self.highs,
-            "alias": self.alias,
-            "include_rightmost": self.include_rightmost,
-            "out_of_range": self.out_of_range,
-            "units": self.units,
-            "mode_kwargs": self.mode_kwargs,
-            "active": self.active_keys,
-        }
-
-    def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:
-        deps: list[CalculatorBase[Any, Any]] = []
-        for value in (self.prop, self.vmin, self.vmax, self.nbins):
-            if isinstance(value, CalculatorBase):
-                deps.append(value)
-        for key in self.active_keys:
-            if isinstance(key, CalculatorBase):
-                deps.append(key)
-        return deps
+    def with_active(self, keys: Iterable[Any]) -> Bin1D:
+        return cast("Bin1D", self._clone(active=tuple(keys)))
 
     def execute(self, ctx: ExecutionContext, input: NodeInput) -> BinNDResult:
-        return BinND((self,), active=self.active_keys).execute(ctx, input)
+        return BinND((self,), active=self.active).execute(ctx, input)
 
     def public_value(self, value: BinNDResult) -> BinNDResult:
         return value
 
 
+@CalculatorBase.dataclass
 class BinND(CalculatorBase[BinNDResult, BinNDResult]):
-    def __init__(self, axes: Iterable[Bin1D], *, active: Iterable[Any] | None = None) -> None:
-        super().__init__()
-        axes_specs = tuple(axes)
-        if not axes_specs:
+    axes_specs: tuple[Bin1D, ...]
+    active: tuple[Any, ...] = Param.static(default=(), kw_only=True)
+
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.axes_specs, tuple):
+            self.axes_specs = tuple(self.axes_specs)    # type: ignore[unreachable]
+        if not self.axes_specs:
             raise ValueError("BinND requires at least one axis.")
-        self.axes_specs = axes_specs
-        inherited_active: list[Any] = []
-        for axis in axes_specs:
-            inherited_active.extend(axis.active_keys)
-        self.active_keys = tuple(active if active is not None else inherited_active)
+        if not self.active:
+            inherited: list[Any] = []
+            for axis in self.axes_specs:
+                inherited.extend(axis.active)
+            self.active = tuple(inherited)
 
     def __matmul__(self, other: Bin1D | BinND) -> BinND:
         if isinstance(other, BinND):
-            return BinND((*self.axes_specs, *other.axes_specs), active=self.active_keys + other.active_keys)
+            return BinND((*self.axes_specs, *other.axes_specs), active=self.active + other.active)
         if isinstance(other, Bin1D):
-            return BinND((*self.axes_specs, other), active=self.active_keys + other.active_keys)
+            return BinND((*self.axes_specs, other), active=self.active + other.active)
         return NotImplemented
 
-    def active(self, keys: Iterable[Any]) -> BinND:
-        return BinND(self.axes_specs, active=tuple(keys))
-
-    def signature_payload(self) -> Mapping[str, Any]:
-        return {"axes": self.axes_specs, "active": self.active_keys}
+    def with_active(self, keys: Iterable[Any]) -> BinND:
+        return cast("BinND", self._clone(active=tuple(keys)))
 
     def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:
         deps: list[CalculatorBase[Any, Any]] = []
         for axis in self.axes_specs:
-            deps.extend(axis.declared_dependencies())
-        for key in self.active_keys:
+            deps.append(axis)
+        for key in self.active:
             if isinstance(key, CalculatorBase):
                 deps.append(key)
-        deduped: list[CalculatorBase[Any, Any]] = []
-        seen: set[int] = set()
-        for dep in deps:
-            if id(dep) in seen:
-                continue
-            seen.add(id(dep))
-            deduped.append(dep)
-        return deduped
+        return deps
 
     def execute(self, ctx: ExecutionContext, input: NodeInput) -> BinNDResult:
         sim = input.active_sim
         result = self._materialize_result(sim, ctx=ctx, input=input, source_sim=input.sim_raw, scope_signature=input.cache_token)
-        for key in self.active_keys:
+        for key in self.active:
             if isinstance(key, str):
                 result[key]
             elif isinstance(key, CalculatorBase) or callable(key):
