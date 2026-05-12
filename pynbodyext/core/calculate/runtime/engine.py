@@ -85,6 +85,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
@@ -102,6 +103,8 @@ from .options import RunOptions
 from .progress import NodeProgressEvent, RunProgressEvent
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from pynbodyext.core.calculate.nodes.base import CalculatorBase
 
 T = TypeVar("T")
@@ -128,6 +131,67 @@ class _NodeExecutionFailure(Exception):
         super().__init__(str(cause))
         self.cause = cause
         self.state = state
+
+
+class _DummyNodeResult:
+    """Minimal node placeholder used by _MinimalBatchContext."""
+
+    __slots__ = ("phases",)
+
+    def __init__(self) -> None:
+        self.phases: list[Any] = []
+
+
+_DUMMY_NODE_RESULT = _DummyNodeResult()
+
+
+class _MinimalBatchContext:
+    """Ultra-minimal execution context for per-batch evaluation.
+
+    Used by :meth:`EvalEngine._run_minimal` for :class:`CalculatorBase` nodes
+    that have **no** child :class:`CalculatorBase` dependencies — i.e. no
+    nested calculators in ``Param`` fields and no filter/transform wrappers.
+
+    Eliminates the overhead of :class:`RuntimeCache`, :class:`TraceCollector`,
+    :class:`PerfCollector`, :class:`ResultNode`, ``log_events``, and
+    ``node_registry`` allocation that occurs in the full
+    :class:`ExecutionContext` path.  Compared with :class:`ExecutionContext`,
+    this class creates **zero** sub-objects beyond itself.
+    """
+
+    __slots__ = (
+        "sim",
+        "sim_signature",
+        "options",
+        "engine",
+        "mutation_generation",
+        "_node_stack",
+        "_evaluation_stack",
+    )
+
+    def __init__(self, sim: Any, options: RunOptions, engine: EvalEngine) -> None:
+        self.sim = sim
+        self.sim_signature: tuple[()] = ()
+        self.options = options
+        self.engine = engine
+        self.mutation_generation = 0
+        self._node_stack: list[Any] = [_DUMMY_NODE_RESULT]
+        self._evaluation_stack: list[Any] = []
+
+    @property
+    def current_node(self) -> Any:
+        return self._node_stack[-1] if self._node_stack else None
+
+    @contextmanager
+    def phase(self, node: Any, phase_name: str) -> Generator[None, None, None]:
+        yield
+
+    def log(self, level: str, message: str, *, node_id: str | None = None, phase: str | None = None) -> None:
+        pass
+
+    @contextmanager
+    def observe_node_access(self, node_result: Any, node: Any) -> Generator[None, None, None]:
+        yield None
 
 
 class EvalEngine:
@@ -237,10 +301,21 @@ class EvalEngine:
           when pre-computed values are supplied,
         - skips ``_assemble_result`` and all report/diagnostics collection.
 
+        For nodes with **no** child :class:`CalculatorBase` dependencies
+        (no nested calculators in ``Param`` fields, no filter/transform wrappers),
+        dispatches to :meth:`_run_minimal` which avoids creating
+        :class:`ExecutionContext`, :class:`ResultNode`, and all collector
+        objects entirely.
+
         Intended for tight loops (e.g. per-bin evaluation) where the same node
         is applied to many sub-snapshots.  Use :meth:`CalculatorBase.batch` to
         obtain a caller that pre-computes the node signature once.
         """
+        # Ultra-minimal path: no child CalculatorBase dependencies
+        if not node.dependencies():
+            return self._run_minimal(node, sim, options)
+
+        # Full light path: BoundCalculator, nested-calculator Param deps, etc.
         ctx = ExecutionContext(
             sim=sim,
             sim_signature=(),
@@ -265,6 +340,33 @@ class EvalEngine:
         if store is None:
             return None  # type: ignore[return-value]
         return store.public_value
+
+    def _run_minimal(
+        self,
+        node: CalculatorBase[TRaw, TPublic],
+        sim: Any,
+        options: RunOptions,
+    ) -> TPublic:
+        """Absolute minimal execution path for nodes with no child CalculatorBase dependencies.
+
+        Uses :class:`_MinimalBatchContext` instead of :class:`ExecutionContext` to avoid
+        allocating :class:`RuntimeCache`, :class:`TraceCollector`, :class:`PerfCollector`,
+        :class:`ResultNode`, ``log_events``, ``node_registry``, and ``runtime_store``
+        on every invocation.
+
+        Only called by :meth:`run_light` when ``node.dependencies()`` is empty.
+        """
+        ctx = _MinimalBatchContext(sim, options, self)
+        work = NodeInput(sim_raw=sim, sim_current=sim)
+        try:
+            raw = node.execute(ctx, work)  # type: ignore[arg-type]
+            raw = node.materialize(ctx, raw)  # type: ignore[arg-type]
+            public = node.public_value(raw)
+            return node.materialize_public(ctx, public)  # type: ignore[arg-type]
+        except Exception:
+            if options.errors == ErrorPolicy.RAISE:
+                raise
+            return None  # type: ignore[return-value]
 
     def _evaluate_light(
         self,

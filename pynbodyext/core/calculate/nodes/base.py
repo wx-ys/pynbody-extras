@@ -158,6 +158,7 @@ if TYPE_CHECKING:
     from pynbodyext.core.calculate.result.result import Result
     from pynbodyext.core.calculate.result.signature import CalculatorSignature
     from pynbodyext.core.calculate.runtime.context import ExecutionContext
+    from pynbodyext.core.calculate.runtime.engine import EvalEngine
     from pynbodyext.core.calculate.runtime.progress import ProgressSink, ProgressVerbosity
     from pynbodyext.util._type import SingleElementArray, UnitLike
 
@@ -1180,7 +1181,7 @@ class _BatchCaller(Generic[TPublic]):
     def __init__(
         self,
         node: CalculatorBase[Any, TPublic],
-        engine: Any,  # EvalEngine (avoid circular import at class definition time)
+        engine: EvalEngine,
         options: RunOptions,
         node_sig: tuple[Any, ...],
         structured_sig: Any,
