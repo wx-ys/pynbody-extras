@@ -291,6 +291,7 @@ def _tree_render_children(
         lines.append(f"{prefix}└─ {_tree_hidden_label(hidden_children)}")
 
     return lines
+@dataclass_transform(field_specifiers=(Param,))
 class CalculatorBase(Generic[TRaw, TPublic], ABC):
     """Abstract base class for executable calculator nodes.
 
