@@ -16,7 +16,7 @@ from pynbodyext.core.calculate.runtime.options import RunOptions
 
 from .accessors import BinParticlesAccessor
 from .arrays import BinsArray
-from .axes import BIN_DERIVED_PROPERTIES, BinDerivedSpec, axis_matches
+from .axes import BIN_DERIVED_PROPERTIES, BinAxisAccessor, BinDerivedSpec, axis_matches
 from .plot import BinPlotMixin
 from .selectors import is_bool_array, is_int_sequence
 from .statistics import BinNDStatAccessor, apply_pipeline, get_statistic, parse_pipeline_key
@@ -105,16 +105,16 @@ class BinNDResult(BinPlotMixin):
     ) -> None:
         self.sim = sim
         self.source_sim = source_sim
-        self.axes = axes
+        self._axes = axes
         self.shape_bins = tuple(axis.nbins for axis in axes)
         self.ndim = len(axes)
-        self.bin_data = bin_data
-        self.bin_indptr = bin_indptr
-        self.particle_bin = particle_bin
-        self.valid_mask = valid_mask
-        self.calculator = calculator
-        self.scope_signature = scope_signature
-        self.parent = parent
+        self._bin_data = bin_data
+        self._bin_indptr = bin_indptr
+        self._particle_bin = particle_bin
+        self._valid_mask = valid_mask
+        self._calculator = calculator
+        self._scope_signature = scope_signature
+        self._parent = parent
         self._cache: dict[Any, BinsArray] = {}
         self._engine = BinsResultEngine()
         self._multi_index_cache: np.ndarray | None = None
@@ -125,11 +125,11 @@ class BinNDResult(BinPlotMixin):
 
     @property
     def root(self) -> BinNDResult:
-        return self if self.parent is None else self.parent.root
+        return self if self._parent is None else self._parent.root
 
     @property
     def is_root(self) -> bool:
-        return self.parent is None
+        return self._parent is None
 
     @property
     def nbins(self) -> int:
@@ -141,7 +141,7 @@ class BinNDResult(BinPlotMixin):
 
     @property
     def unassigned_count(self) -> int:
-        return int(np.count_nonzero(~self.valid_mask))
+        return int(np.count_nonzero(~self._valid_mask))
 
     @property
     def count(self) -> BinsArray:
@@ -162,6 +162,28 @@ class BinNDResult(BinPlotMixin):
         return BinParticlesAccessor(self)
 
     @property
+    def axes(self) -> tuple[BinAxis, ...]:
+        """The bin axes (tuple). For individual lookups prefer ``bins.axis``."""
+        return self._axes
+
+    @property
+    def valid_mask(self) -> np.ndarray:
+        """Boolean mask marking particles that were successfully assigned to a bin."""
+        return self._valid_mask
+
+    @property
+    def axis(self) -> BinAxisAccessor:
+        """Accessor for individual axes.
+
+        Examples
+        --------
+        >>> bins.axis.r          # axis with alias "r"
+        >>> bins.axis["r"]       # same
+        >>> bins.axis[0]         # first axis
+        """
+        return BinAxisAccessor(self._axes)
+
+    @property
     def bin_indices(self) -> _CSRBinsView:
         """Backward-compatible view over bin→particle indices (CSR format).
 
@@ -169,7 +191,7 @@ class BinNDResult(BinPlotMixin):
         performance-critical code: ``bin_data[bin_indptr[i]:bin_indptr[i+1]]``
         avoids creating a new Python object per access.
         """
-        return _CSRBinsView(self.bin_data, self.bin_indptr)
+        return _CSRBinsView(self._bin_data, self._bin_indptr)
 
     @property
     def num_cached_arr(self) -> int:
@@ -190,40 +212,32 @@ class BinNDResult(BinPlotMixin):
     @property
     def edges(self) -> Any:
         self._require_1d("edges")
-        return self.axes[0].edges
+        return self._axes[0].edges
 
     @property
     def mins(self) -> Any:
         self._require_1d("mins")
-        return self.axes[0].mins
+        return self._axes[0].mins
 
     @property
     def maxs(self) -> Any:
         self._require_1d("maxs")
-        return self.axes[0].maxs
+        return self._axes[0].maxs
 
     @property
     def centers(self) -> Any:
         self._require_1d("centers")
-        return self.axes[0].centers
+        return self._axes[0].centers
 
     @property
     def widths(self) -> Any:
         self._require_1d("widths")
-        return self.axes[0].widths
+        return self._axes[0].widths
 
     def _require_1d(self, name: str) -> None:
         if self.ndim != 1:
-            raise AttributeError(f"{name} is ambiguous for ND bins; use bins.axis(alias).{name}.")
+            raise AttributeError(f"{name} is ambiguous for ND bins; use bins.axis[alias].{name}.")
 
-
-    def axis(self, key: int | str) -> BinAxis:
-        if isinstance(key, (int, np.integer)):
-            return self.axes[int(key)]
-        for axis in self.axes:
-            if axis.alias == key:
-                return axis
-        raise KeyError(f"Unknown bin axis {key!r}.")
 
     def families(self) -> Any:
         return self.sim.families()
@@ -287,7 +301,7 @@ class BinNDResult(BinPlotMixin):
         return sub
 
     def spawn(self, subset: Any) -> SubBinNDResult:
-        return self.calculator._spawn_result(self.root, subset)
+        return self._calculator._spawn_result(self.root, subset)
 
     def _subset_cache_key(self, subset: Any) -> Any:
         root_sim = self.root.sim
@@ -350,7 +364,7 @@ class BinNDResult(BinPlotMixin):
     def __getattr__(self, name: str) -> Any:
         if name in {"center", "width", "min", "max", "edges"} and self.ndim == 1:
             # Convenience shortcuts for 1D results – delegate to the axis object
-            return getattr(self.axes[0], {"center": "centers", "width": "widths", "min": "mins", "max": "maxs", "edges": "edges"}[name])
+            return getattr(self._axes[0], {"center": "centers", "width": "widths", "min": "mins", "max": "maxs", "edges": "edges"}[name])
         try:
             sub = getattr(self.sim, name)
         except AttributeError as exc:
@@ -446,7 +460,7 @@ class BinNDResult(BinPlotMixin):
         return self._compute_derived(spec)
 
     def find_axis(self, aliases: set[str]) -> Any:
-        for axis in self.axes:
+        for axis in self._axes:
             if axis_matches(axis, aliases):
                 return axis
         raise KeyError(f"No axis matching {sorted(aliases)!r}.")
@@ -481,12 +495,12 @@ class BinNDResult(BinPlotMixin):
             weights = weight
 
         # --- fast vectorised path ---
-        valid_mask = self.valid_mask
+        valid_mask = self._valid_mask
         if valid_mask.any():
             v_valid = np.asarray(values[valid_mask], dtype=float)
             v_valid = apply_pipeline(v_valid, transforms)
             w_valid = None if weights is None else np.asarray(weights[valid_mask], dtype=float)
-            bins_valid = self.particle_bin[valid_mask]
+            bins_valid = self._particle_bin[valid_mask]
             vec = terminal_stat.vectorized_call(v_valid, bins_valid, w_valid, self.nbins)
         else:
             vec = None
@@ -497,10 +511,10 @@ class BinNDResult(BinPlotMixin):
             # --- per-bin Python loop fallback ---
             out = np.full(self.nbins, np.nan, dtype=float)
             for index in range(self.nbins):
-                start, stop = int(self.bin_indptr[index]), int(self.bin_indptr[index + 1])
+                start, stop = int(self._bin_indptr[index]), int(self._bin_indptr[index + 1])
                 if start == stop:
                     continue
-                particle_indices = self.bin_data[start:stop]
+                particle_indices = self._bin_data[start:stop]
                 sub = np.asarray(values[particle_indices], dtype=float)
                 sub = apply_pipeline(sub, transforms)
                 sub_weights = None if weights is None else np.asarray(weights[particle_indices], dtype=float)
@@ -579,7 +593,7 @@ class BinNDResult(BinPlotMixin):
             # CalculatorBase is not valid here – must be a plain callable
             if isinstance(query, CalculatorBase):
                 raise TypeError("vectorized=True requires a plain callable, not a CalculatorBase.")
-            raw = query(self.sim, self.particle_bin)  # type: ignore[call-arg]  # pyright: ignore[reportCallIssue,reportArgumentType]
+            raw = query(self.sim, self._particle_bin)  # type: ignore[call-arg]  # pyright: ignore[reportCallIssue,reportArgumentType]
             values = np.asarray(raw, dtype=float)
             if values.shape != (self.nbins,):
                 raise TypeError(
@@ -592,10 +606,10 @@ class BinNDResult(BinPlotMixin):
                 _batch_opts = _BATCH_RUN_OPTIONS
                 with query.batch(_batch_opts) as run_one:
                     for index in range(self.nbins):
-                        start, stop = int(self.bin_indptr[index]), int(self.bin_indptr[index + 1])
+                        start, stop = int(self._bin_indptr[index]), int(self._bin_indptr[index + 1])
                         if start == stop:
                             continue
-                        sub = self.sim[self.bin_data[start:stop]]
+                        sub = self.sim[self._bin_data[start:stop]]
                         arr = np.asarray(run_one(sub))
                         if arr.ndim != 0:
                             raise TypeError("Callable or CalculatorBase bin query must return a scalar in phase 1.")
@@ -603,10 +617,10 @@ class BinNDResult(BinPlotMixin):
             else:
                 # Plain callable
                 for index in range(self.nbins):
-                    start, stop = int(self.bin_indptr[index]), int(self.bin_indptr[index + 1])
+                    start, stop = int(self._bin_indptr[index]), int(self._bin_indptr[index + 1])
                     if start == stop:
                         continue
-                    sub = self.sim[self.bin_data[start:stop]]
+                    sub = self.sim[self._bin_data[start:stop]]
                     arr = np.asarray(query(sub))
                     if arr.ndim != 0:
                         raise TypeError("Callable or CalculatorBase bin query must return a scalar in phase 1.")
@@ -665,7 +679,7 @@ class BinNDResult(BinPlotMixin):
 
     def __repr__(self) -> str:
         parent_flag = "root" if self.is_root else "sub"
-        aliases = ",".join(axis.alias for axis in self.axes)
+        aliases = ",".join(axis.alias for axis in self._axes)
         return f"<{type(self).__name__} type={parent_flag} ndim={self.ndim} shape={self.shape_bins} axes={aliases} nsubs={self.nsubs} ncache={self.total_cached_arr}>"
 
 
@@ -686,10 +700,10 @@ def _has_family(name: str) -> Callable[[Any], bool]:
 
 @BinNDResult.derived("count", scope="particles")
 def _count(bins: BinNDResult) -> np.ndarray:
-    valid_mask = bins.valid_mask
+    valid_mask = bins._valid_mask
     if not valid_mask.any():
         return np.zeros(bins.nbins, dtype=int)
-    return np.bincount(bins.particle_bin[valid_mask], minlength=bins.nbins).astype(int)
+    return np.bincount(bins._particle_bin[valid_mask], minlength=bins.nbins).astype(int)
 
 
 @BinNDResult.derived("density", condition=lambda bins: BIN_DERIVED_PROPERTIES["volume"].is_available(bins))

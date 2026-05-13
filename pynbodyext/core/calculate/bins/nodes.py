@@ -198,7 +198,7 @@ class BinND(CalculatorBase[BinNDResult, BinNDResult]):
             parent.axes,
             values,
             source_sim=parent.source_sim,
-            scope_signature=parent.scope_signature,
+            scope_signature=parent._scope_signature,
             parent=parent.root,
         )
         if not isinstance(result, SubBinNDResult):

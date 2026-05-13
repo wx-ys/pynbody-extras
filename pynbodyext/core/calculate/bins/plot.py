@@ -11,7 +11,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from .arrays import BinsArray
-    from .axes import BinAxis
+    from .axes import BinAxis, BinAxisAccessor
 
 
 @runtime_checkable
@@ -26,8 +26,8 @@ class _BinQueryable(Protocol):
     axes: tuple[BinAxis, ...]
     shape_bins: tuple[int, ...]
     ndim: int
+    axis: BinAxisAccessor
 
-    def axis(self, key: int | str) -> BinAxis: ...
     def __getitem__(self, key: str) -> BinsArray: ...
 
 
@@ -61,7 +61,7 @@ class BinPlotMixin:
         if ax is None:
             _, ax = plt.subplots()
 
-        x_axis = self.axis(x)
+        x_axis = self.axis[x]
         x_values = np.asarray(x_axis.centers)
         y_arr = np.asarray(self[y]).ravel()
 

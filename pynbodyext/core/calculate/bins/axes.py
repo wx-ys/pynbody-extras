@@ -196,6 +196,55 @@ def axis_matches(axis: BinAxis, names: set[str]) -> bool:
     return axis.alias in names or (isinstance(axis.prop, str) and axis.prop in names)
 
 
+class BinAxisAccessor:
+    """Accessor returned by ``bins.axis`` for convenient axis lookup.
+
+    Supports attribute access by alias, string subscript, and integer subscript::
+
+        bins.axis.r          # axis with alias "r"
+        bins.axis["r"]       # same
+        bins.axis[0]         # first axis
+        list(bins.axis)      # iterate over all axes
+    """
+
+    def __init__(self, axes: tuple[BinAxis, ...]) -> None:
+        self._axes = axes
+
+    def __getitem__(self, key: int | str) -> BinAxis:
+        if isinstance(key, (int, np.integer)):
+            return self._axes[int(key)]
+        for ax in self._axes:
+            if ax.alias == key:
+                return ax
+        raise KeyError(f"No bin axis {key!r}.")
+
+    def __getattr__(self, name: str) -> BinAxis:
+        # Avoid recursing on internal dunder/private names
+        if name.startswith("_"):
+            raise AttributeError(name)
+        for ax in self._axes:
+            if ax.alias == name:
+                return ax
+        raise AttributeError(f"No bin axis {name!r}.")
+
+    def __iter__(self):
+        return iter(self._axes)
+
+    def __len__(self) -> int:
+        return len(self._axes)
+
+    def __repr__(self) -> str:
+        aliases = ", ".join(ax.alias for ax in self._axes)
+        return f"<BinAxisAccessor [{aliases}]>"
+    def __dir__(self) -> list[str]:
+        # Include axis aliases in dir() for better auto-completion in interactive environments
+        return [ax.alias for ax in self._axes] + list(super().__dir__())
+
+    def _ipython_key_completions_(self) -> list[str]:
+        return [ax.alias for ax in self._axes]
+
+
+
 def has_axis(names: set[str]) -> BinDerivedCondition:
     return lambda bins: any(axis_matches(axis, names) for axis in bins.axes)
 
