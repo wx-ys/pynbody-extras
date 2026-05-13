@@ -37,11 +37,23 @@ class BinsArray(SimArray):
         provenance: dict[str, Any] | None = None,
     ) -> BinsArray:
         shape_bins = tuple(bins.shape_bins)
-        # Reshape flat values to ND grid shape
+        # Reshape flat values to ND grid shape.
+        # Arrays of shape (nbins, *extra) are reshaped to (*shape_bins, *extra)
+        # so that per-bin 2-D results (e.g. multi_index, cell_widths) work correctly.
         arr = np.asarray(values)
         if arr.shape != shape_bins:
-            arr = arr.reshape(shape_bins)
+            nbins = int(np.prod(shape_bins))
+            if arr.ndim > 1 and arr.shape[0] == nbins:
+                arr = arr.reshape((*shape_bins, *arr.shape[1:]))
+            else:
+                arr = arr.reshape(shape_bins)
         obj = super().__new__(cls, arr)
+        # Preserve units and sim from the source array so that BinsArray
+        # retains unit-tracking when wrapping a SimArray/IndexedSimArray.
+        if hasattr(values, "units") and values.units is not None:
+            obj.units = values.units
+        if hasattr(values, "sim") and values.sim is not None:
+            obj.sim = values.sim
         obj._bins = bins
         obj._name = name
         obj._field = field

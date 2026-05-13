@@ -436,8 +436,11 @@ class BinNDResult(BinPlotMixin):
     def _compute_derived(self, spec: BinDerivedSpec) -> BinsArray:
         values = spec.func(self)
         result = values if isinstance(values, BinsArray) else self._wrap(values, name=spec.name)
-        if result.size != self.nbins:
-            raise ValueError(f"Derived query {spec.name!r} must return one value per bin.")
+        if result.shape[:self.ndim] != self.shape_bins:
+            raise ValueError(
+                f"Derived query {spec.name!r} returned shape {result.shape!r}; "
+                f"leading dimensions must match the bin grid {self.shape_bins!r}."
+            )
         return result
 
     def _get_bin_derived_spec(self, key: str) -> BinDerivedSpec | None:

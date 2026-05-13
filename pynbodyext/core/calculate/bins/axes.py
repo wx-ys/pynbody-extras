@@ -290,13 +290,71 @@ class BinAxis:
 
     @property
     def is_continuous(self) -> bool:
-        return bool(self.nbins == 1 or np.all(np.asarray(self.maxs[:-1]) == np.asarray(self.mins[1:])))
+        return bool(self.nbins == 1 or np.all(self.maxs[:-1] == self.mins[1:]))
 
     @property
     def edges(self) -> Any:
         if self.is_continuous:
-            return np.concatenate((np.asarray(self.mins[:1]), np.asarray(self.maxs)))
+            return np.concatenate((self.mins[:1], self.maxs))
         return np.column_stack((np.asarray(self.mins), np.asarray(self.maxs)))
+
+    @property
+    def annulus_area(self) -> np.ndarray:
+        """Per-bin annulus area ``π(max² − min²)`` regardless of axis alias."""
+        return np.pi * (self.maxs** 2 - self.mins ** 2)
+
+    @property
+    def shell_volume(self) -> np.ndarray:
+        """Per-bin spherical shell volume ``4/3 π(max³ − min³)`` regardless of axis alias."""
+        return (4.0 / 3.0) * np.pi * (self.maxs ** 3 - self.mins ** 3)
+
+    @property
+    def measure(self) -> np.ndarray:
+        """Physical measure per bin — auto-detected from the axis alias / prop.
+
+        - ``rxy`` / ``R`` → annulus area ``π(max² − min²)``
+        - ``r`` → spherical shell volume ``4/3π(max³ − min³)``
+        - anything else → bin width ``max − min``
+
+        Use :attr:`annulus_area` or :attr:`shell_volume` to force a specific
+        formula regardless of alias.
+        """
+        alias = self.alias
+        prop_str = self.prop if isinstance(self.prop, str) else ""
+        if alias in {"rxy", "R"} or prop_str in {"rxy", "R"}:
+            return self.annulus_area
+        if alias == "r" or prop_str == "r":
+            return self.shell_volume
+        return self.widths
+
+    @classmethod
+    def register_derived(
+        cls,
+        name: str,
+        func: BinDerivedFunc | None = None,
+        *,
+        condition: BinDerivedCondition | None = None,
+        scope: str = "geometry",
+        overwrite: bool = False,
+    ) -> BinDerivedFunc | Callable[[BinDerivedFunc], BinDerivedFunc]:
+        """Register a derived property on :class:`BinNDResult`.
+
+        Class-level alias for :func:`register_bin_derived`.  Decorated
+        functions receive the ``BinNDResult`` instance as their first argument::
+
+            @BinAxis.register_derived("my_prop")
+            def _(bins):
+                return np.asarray(bins["mass.sum"]) / bins.nbins
+        """
+        return register_bin_derived(name, func, condition=condition, scope=scope, overwrite=overwrite)
+
+    def __getattr__(self, name: str) -> Any:
+        # Fallback for dynamically registered axis properties (AXIS_PROPERTIES registry).
+        # Only called when normal attribute lookup (fields, @property, methods) fails.
+        prop_func = AXIS_PROPERTIES.get(name)
+        if prop_func is not None:
+            return prop_func(self)
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
 
     def assign(self, values: Any) -> tuple[np.ndarray, np.ndarray]:
         arr = np.asarray(values)
@@ -378,41 +436,52 @@ def _bin_cell_widths(bins: Any) -> np.ndarray:
 
 @register_bin_derived("cell_volume")
 def _bin_cell_volume(bins: Any) -> np.ndarray:
-    return np.prod(np.asarray(bins._resolve_query("cell_widths")), axis=1)
+    return np.prod(np.asarray(bins._resolve_query("cell_widths")), axis=-1)
 
 
-@register_bin_derived("area", condition=has_axis({"rxy", "R", "r"}))
-def _bin_annulus_area(bins: Any) -> np.ndarray:
+@register_bin_derived("area")
+def _bin_area(bins: Any) -> np.ndarray:
     axis = bins.find_axis({"rxy", "R", "r"})
-    values = np.pi * (np.asarray(axis.maxs) ** 2 - np.asarray(axis.mins) ** 2)
+    values = np.asarray(axis.annulus_area)
     if bins.ndim > 1:
         axis_index = bins.axes.index(axis)
         values = values[bins.multi_index_array()[:, axis_index]]
     return values
 
 
-def _volume_available(bins: Any) -> bool:
-    return bins.ndim != 1 or has_axis({"r"})(bins)
-
-
-@register_bin_derived("volume", condition=_volume_available)
+@register_bin_derived("volume")
 def _bin_volume(bins: Any) -> np.ndarray:
     if bins.ndim == 1:
         axis = bins.find_axis({"r"})
-        return 4.0 / 3.0 * np.pi * (np.asarray(axis.maxs) ** 3 - np.asarray(axis.mins) ** 3)
+        return np.asarray(axis.shell_volume)
     return np.asarray(bins._resolve_query("cell_volume"))
 
 
-@register_bin_derived("cylindrical_volume", condition=has_axes({"rxy", "R", "r"}, {"z"}))
+@register_bin_derived("cylindrical_volume")
 def _bin_cylindrical_volume(bins: Any) -> np.ndarray:
     r_axis = bins.find_axis({"rxy", "R", "r"})
     z_axis = bins.find_axis({"z"})
     multi = bins.multi_index_array()
     r_index = bins.axes.index(r_axis)
     z_index = bins.axes.index(z_axis)
-    area = np.pi * (np.asarray(r_axis.maxs) ** 2 - np.asarray(r_axis.mins) ** 2)
-    z_width = np.asarray(z_axis.widths)
-    return area[multi[:, r_index]] * z_width[multi[:, z_index]]
+    return np.asarray(r_axis.annulus_area)[multi[:, r_index]] * np.asarray(z_axis.widths)[multi[:, z_index]]
+
+
+@register_bin_derived("measure")
+def _bin_measure(bins: Any) -> np.ndarray:
+    """Per-bin physical measure — product of each axis's :attr:`BinAxis.measure`.
+
+    For a 1-D radial grid this is the shell volume; for a 1-D projected grid
+    the annulus area; for a generic ND grid the product of per-axis measures.
+    """
+    axes = bins.axes
+    if len(axes) == 1:
+        return axes[0].measure
+    multi = bins.multi_index_array()
+    result = SimArray(np.ones(bins.nbins, dtype=float),units="1")
+    for i, axis in enumerate(axes):
+        result *= axis.measure[multi[:, i]]
+    return result
 
 
 
