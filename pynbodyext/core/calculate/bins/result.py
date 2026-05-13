@@ -149,6 +149,16 @@ class BinNDResult(BinPlotMixin):
 
     @property
     def particles_at_bin(self) -> BinParticlesAccessor:
+        """Accessor for retrieving the particles in each bin.
+
+        Examples
+        --------
+        >>> bins.particles_at_bin[0]  # particles in the first bin
+        >>> bins.particles_at_bin[1:5]  # particles in bins 1 through 4
+        >>> bins.particles_at_bin[1,3,5] # particles in bins 1, 3, and 5
+        >>> bins.particles_at_bin[:, 0]  # particles in the first bin along the second axis (for 2D or higher)
+
+        """
         return BinParticlesAccessor(self)
 
     @property
@@ -206,6 +216,7 @@ class BinNDResult(BinPlotMixin):
         if self.ndim != 1:
             raise AttributeError(f"{name} is ambiguous for ND bins; use bins.axis(alias).{name}.")
 
+
     def axis(self, key: int | str) -> BinAxis:
         if isinstance(key, (int, np.integer)):
             return self.axes[int(key)]
@@ -219,7 +230,20 @@ class BinNDResult(BinPlotMixin):
 
     @property
     def stat(self) -> BinNDStatAccessor:
-        """Accessor for pipeline statistic queries, e.g. ``bins.stat["mass.sum"]``."""
+        """Accessor for pipeline statistic queries.
+
+        Examples
+        --------
+        >>> bins.stat["mass.sum"]  # per-bin mass sum
+        >>> bins.stat["vz.abs.mean"]  # per-bin mean of |vz|
+        >>> bins.stat.keys()  # example keys for all registered statistics
+
+        you can also specify a weight field for weighted statistics using the @ syntax:
+        >>> bins.stat["age.median@mass"]  # per-bin mass-weighted median of age
+        >>> bins.stat["age.p33@mass"]  # per-bin mass-weighted 33rd percentile of age
+        >>> bins.stat["vz.abs.mean@mass"]  # per-bin mass-weighted mean of |vz|
+
+        """
         return BinNDStatAccessor(self)
 
     def keys(self) -> list[str]:
@@ -233,12 +257,10 @@ class BinNDResult(BinPlotMixin):
             if len(cache_key) == 2 and isinstance(cache_key[1], str):
                 keys.add(cache_key[1])
             # ("stat", field, transforms, stat_key, weight) — pipeline stat results
-            elif len(cache_key) >= 4 and cache_key[0] == "stat":
-                _, field, transforms, stat_key = cache_key[:4]
-                if transforms:
-                    keys.add(f"{field}.{'.'.join(transforms)}.{stat_key}")
-                else:
-                    keys.add(f"{field}.{stat_key}")
+            elif len(cache_key) >= 5 and cache_key[0] == "stat":
+                _, field, transforms, stat_key, weight_key = cache_key[:5]
+                base = f"{field}.{'.'.join(transforms)}.{stat_key}" if transforms else f"{field}.{stat_key}"
+                keys.add(f"{base}@{weight_key}" if isinstance(weight_key, str) else base)
         return sorted(keys)
 
     def property_keys(self) -> list[str]:
@@ -358,8 +380,8 @@ class BinNDResult(BinPlotMixin):
         # cache entry regardless of call order.
         parsed = parse_pipeline_key(key)
         if parsed is not None:
-            field, transforms, terminal_stat = parsed
-            result = self._stat_pipeline(field, transforms, terminal_stat, query_key=key)
+            field, transforms, terminal_stat, weight_field = parsed
+            result = self._stat_pipeline(field, transforms, terminal_stat, weight=weight_field, query_key=key)
             self._engine.record("query", key=key, scope=scope)
             return result
 

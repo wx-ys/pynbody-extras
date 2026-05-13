@@ -8,8 +8,20 @@ from .selectors import normalize_flat_bin_selector, normalize_nd_bin_selector
 
 
 class BinParticlesAccessor:
+    """Provides access to the particles in each bin via ``bins.particles_at_bin[...]``.
+
+    You can select bins using integer indices, slices, or boolean arrays, just like with NumPy arrays.  For example:
+
+    >>> bins.particles_at_bin[0]  # particles in the first bin
+    >>> bins.particles_at_bin[1:5]  # particles in bins 1
+    >>> bins.particles_at_bin[:, 0]  # particles in the first bin along the second axis (for 2D or higher)
+
+    """
     def __init__(self, bins: Any) -> None:
         self._bins = bins
+
+    def __repr__(self) -> str:
+        return f"<BinParticlesAccessor for {self._bins}>"
 
     def __getitem__(self, selector: Any) -> Any:
         if isinstance(selector, str):

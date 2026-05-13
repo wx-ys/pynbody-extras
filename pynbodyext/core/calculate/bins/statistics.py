@@ -34,9 +34,14 @@ from __future__ import annotations
 import re
 import warnings
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from .arrays import BinsArray
+    from .result import BinNDResult
+
 
 StatisticFunc = Callable[[Any, Any | None], float]
 
@@ -52,12 +57,10 @@ __all__ = [
     # built-in statistics
     "Mean",
     "Sum",
-    "SumWeighted",
     "Percentile",
     "Median",
     "RMS",
     "Dispersion",
-    "Abs",
 ]
 
 _REGISTRY: list[type[BinStatisticBase]] = []
@@ -200,18 +203,31 @@ def _known_transform_token(token: str) -> bool:
     return token in _PIPELINE_TRANSFORMS
 
 
-def parse_pipeline_key(key: str) -> tuple[str, list[str], BinStatisticBase] | None:
-    """Parse a dot-notation query into ``(field, transforms, terminal_stat)``.
+def parse_pipeline_key(key: str) -> tuple[str, list[str], BinStatisticBase, str | None] | None:
+    """Parse a dot-notation query into ``(field, transforms, terminal_stat, weight_field)``.
 
-    ``"vz.abs.mean"`` → field=``"vz"``, transforms=``["abs"]``, stat=``Mean``
-    ``"mass.sum"``    → field=``"mass"``, transforms=``[]``, stat=``Sum``
+    ``"vz.abs.mean"``     → ``("vz", ["abs"], Mean, None)``
+    ``"mass.sum"``        → ``("mass", [], Sum, None)``
+    ``"age.mean@mass"``   → ``("age", [], Mean, "mass")``   # mass-weighted mean
+
+    The optional ``@weight_field`` suffix specifies the SimSnap field to use as
+    per-particle weights.  Any string that is a valid SimSnap array key is
+    accepted.
 
     Returns ``None`` if the key has no ``"."`` or the suffix is not a
     recognised statistic.
     """
-    if "." not in key:
+    # Split off optional weight suffix: "field.stat@weight_field"
+    weight_field: str | None = None
+    core_key = key
+    if "@" in key:
+        core_key, weight_field = key.rsplit("@", 1)
+        if not weight_field:
+            return None  # bare "@" with no weight field is invalid
+
+    if "." not in core_key:
         return None
-    parts = key.split(".")
+    parts = core_key.split(".")
     if len(parts) < 2:
         return None
 
@@ -227,7 +243,7 @@ def parse_pipeline_key(key: str) -> tuple[str, list[str], BinStatisticBase] | No
         if not _known_transform_token(t):
             return None
 
-    return field, transforms, stat
+    return field, transforms, stat, weight_field
 
 
 def apply_pipeline(arr: np.ndarray, transforms: list[str]) -> np.ndarray:
@@ -323,36 +339,6 @@ class Sum(BinStatisticBase):
     @classmethod
     def valid(cls, key: str) -> Sum | None:
         return cls(key) if key.lower() == "sum" else None
-
-
-class SumWeighted(BinStatisticBase):
-    """Weighted sum (weight × value)."""
-
-    example_name = "sum_w"
-
-    def __call__(self, arr: np.ndarray, weight: np.ndarray | None) -> float:
-        if len(arr) == 0:
-            return float("nan")
-        a = _as_float(arr)
-        if weight is None:
-            return float(np.sum(a))
-        return float(np.sum(a * _as_float(weight)))
-
-    def vectorized_call(
-        self, values: np.ndarray, bins: np.ndarray, weights: np.ndarray | None, nbins: int
-    ) -> np.ndarray:
-        v = values.astype(float, copy=False)
-        if weights is None:
-            counts, sums = _bincount_nan(bins, v, nbins)
-            return np.where(counts > 0, sums, np.nan)
-        w = weights.astype(float, copy=False)
-        counts = np.bincount(bins, minlength=nbins).astype(np.intp)
-        vw_sums = np.bincount(bins, weights=v * w, minlength=nbins)
-        return np.where(counts > 0, vw_sums, np.nan)
-
-    @classmethod
-    def valid(cls, key: str) -> SumWeighted | None:
-        return cls(key) if key.lower() == "sum_w" else None
 
 
 class Percentile(BinStatisticBase):
@@ -473,28 +459,6 @@ class Dispersion(BinStatisticBase):
         return cls(key) if key.lower() in {"disp", "dispersion"} else None
 
 
-class Abs(BinStatisticBase):
-    """Standalone statistic: mean of absolute values.
-
-    In pipeline queries (e.g. ``"vz.abs.mean"``) ``abs`` is handled by
-    :func:`apply_pipeline` as an element-wise transform, not as a terminal
-    statistic.  This class only handles the standalone key ``"abs"``.
-    """
-
-    example_name = "abs"
-
-    def __init__(self, key: str, substat: BinStatisticBase | None = None) -> None:
-        super().__init__(key)
-        self._substat = substat or Mean("mean")
-
-    def __call__(self, arr: np.ndarray, weight: np.ndarray | None) -> float:
-        return self._substat(np.abs(arr), weight)
-
-    @classmethod
-    def valid(cls, key: str) -> Abs | None:
-        return cls(key, Mean("mean")) if key.lower() == "abs" else None
-
-
 # ---------------------------------------------------------------------------
 # BinNDStatAccessor
 # ---------------------------------------------------------------------------
@@ -503,21 +467,24 @@ class Abs(BinStatisticBase):
 class BinNDStatAccessor:
     """Accessor returned by ``bins.stat`` that dispatches string pipeline keys.
 
-    Usage::
-
-        bins.stat["mass.sum"]     # equivalent to bins["mass.sum"]
-        bins.stat["vz.abs.mean"]  # pipeline query
-        bins.stat.keys()          # example keys for all registered statistics
+    For extended documentation and examples of supported query syntax, see
+    :class:`BinStatisticBase` and :func:`parse_pipeline_key`.
     """
 
-    def __init__(self, owner: Any) -> None:
+    def __init__(self, owner: BinNDResult) -> None:
         self._owner = owner
 
-    def __getitem__(self, key: str) -> Any:
+    def __repr__(self) -> str:
+        return f"<BinNDStatAccessor for {self._owner}>"
+
+    def __getitem__(self, key: str) -> BinsArray:
         return self._owner._resolve_query(key)
 
     def keys(self) -> list[str]:
         return [cls.example_name for cls in _REGISTRY if cls.example_name is not None]
+
+    def transform_keys(self) -> list[str]:
+        return sorted(_PIPELINE_TRANSFORMS.keys())
 
     def _ipython_key_completions_(self) -> list[str]:
         return self.keys()
@@ -552,7 +519,7 @@ def parse_stat_key(key: str) -> tuple[str, str] | None:
     result = parse_pipeline_key(key)
     if result is None:
         return None
-    field, transforms, stat = result
-    if transforms:
-        return None  # old API didn't support pipeline transforms
+    field, transforms, stat, weight_field = result
+    if transforms or weight_field:
+        return None  # old API didn't support pipeline transforms or weights
     return field, stat.key
