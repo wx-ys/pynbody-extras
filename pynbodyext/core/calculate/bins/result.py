@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 from collections import defaultdict
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from pynbody.array import IndexedSimArray, SimArray
+from pynbody.filt import Filter
 from pynbody.snapshot import SimSnap
 
 from pynbodyext.core.calculate.nodes.base import CalculatorBase
@@ -14,6 +15,7 @@ from pynbodyext.core.calculate.runtime.options import RunOptions
 from .accessors import BinParticlesAccessor
 from .arrays import BinsArray
 from .axes import BIN_DERIVED_PROPERTIES, BinDerivedSpec, axis_matches
+from .plot import BinPlotMixin
 from .selectors import is_bool_array, is_int_sequence
 from .statistics import BinNDStatAccessor, apply_pipeline, get_statistic, parse_pipeline_key
 
@@ -47,15 +49,29 @@ class BinsResultEngine:
         self.diagnostics.append({"event": event, **payload})
 
 
-@dataclass(frozen=True)
-class ResultDerivedSpec:
-    name: str
-    func: Callable[[Any], Any]
-    scope: str = "derived"
-    condition: Callable[[Any], bool] | None = None
+class _CSRBinsView:
+    """Backward-compatible list-like view over CSR bin→particle storage.
 
-    def is_available(self, bins: Any) -> bool:
-        return True if self.condition is None else bool(self.condition(bins))
+    Allows existing ``for index, particles in enumerate(bins.bin_indices)``
+    patterns to keep working while internal code uses the raw CSR arrays
+    ``bin_data`` / ``bin_indptr`` directly.
+    """
+
+    __slots__ = ("_data", "_indptr")
+
+    def __init__(self, data: np.ndarray, indptr: np.ndarray) -> None:
+        self._data = data
+        self._indptr = indptr
+
+    def __len__(self) -> int:
+        return len(self._indptr) - 1
+
+    def __getitem__(self, i: int) -> np.ndarray:
+        return self._data[self._indptr[i] : self._indptr[i + 1]]
+
+    def __iter__(self):
+        for i in range(len(self)):
+            yield self._data[self._indptr[i] : self._indptr[i + 1]]
 
 
 class _DerivedAccessor:
@@ -65,9 +81,9 @@ class _DerivedAccessor:
         return instance._resolve_query
 
 
-class BinNDResult:
+class BinNDResult(BinPlotMixin):
     _SHARED_SCOPES: ClassVar[set[str]] = {"axis", "geometry"}
-    _derived_property_registry: ClassVar[defaultdict[type, dict[str, ResultDerivedSpec]]] = defaultdict(dict)
+    _derived_property_registry: ClassVar[defaultdict[type, dict[str, BinDerivedSpec]]] = defaultdict(dict)
     derived = _DerivedAccessor()
     derived_property = _DerivedAccessor()
 
@@ -77,7 +93,8 @@ class BinNDResult:
         sim: Any,
         source_sim: Any,
         axes: tuple[BinAxis, ...],
-        bin_indices: list[np.ndarray],
+        bin_data: np.ndarray,
+        bin_indptr: np.ndarray,
         particle_bin: np.ndarray,
         valid_mask: np.ndarray,
         calculator: BinND,
@@ -89,7 +106,8 @@ class BinNDResult:
         self.axes = axes
         self.shape_bins = tuple(axis.nbins for axis in axes)
         self.ndim = len(axes)
-        self.bin_indices = bin_indices
+        self.bin_data = bin_data
+        self.bin_indptr = bin_indptr
         self.particle_bin = particle_bin
         self.valid_mask = valid_mask
         self.calculator = calculator
@@ -97,8 +115,11 @@ class BinNDResult:
         self.parent = parent
         self._cache: dict[Any, BinsArray] = {}
         self._engine = BinsResultEngine()
-        if parent is None:
-            self._subs_cache: dict[tuple[int, ...], SubBinNDResult] = {}
+        self._multi_index_cache: np.ndarray | None = None
+        # Always present so SubBinNDResult satisfies the same invariant as the
+        # root result.  Only the root instance writes into its own _subs_cache;
+        # sub-results delegate to root.get_subresult() and never populate theirs.
+        self._subs_cache: dict[Any, SubBinNDResult] = {}
 
     @property
     def root(self) -> BinNDResult:
@@ -129,18 +150,28 @@ class BinNDResult:
         return BinParticlesAccessor(self)
 
     @property
+    def bin_indices(self) -> _CSRBinsView:
+        """Backward-compatible view over bin→particle indices (CSR format).
+
+        Prefer the raw ``bin_data`` / ``bin_indptr`` arrays for
+        performance-critical code: ``bin_data[bin_indptr[i]:bin_indptr[i+1]]``
+        avoids creating a new Python object per access.
+        """
+        return _CSRBinsView(self.bin_data, self.bin_indptr)
+
+    @property
     def num_cached_arr(self) -> int:
         return len(self._cache)
 
     @property
     def nsubs(self) -> int:
-        return len(getattr(self.root, "_subs_cache", {}))
+        return len(self.root._subs_cache)
 
     @property
     def total_cached_arr(self) -> int:
         root = self.root
         total = root.num_cached_arr
-        for subresult in getattr(root, "_subs_cache", {}).values():
+        for subresult in root._subs_cache.values():
             total += subresult.num_cached_arr
         return total
 
@@ -194,8 +225,18 @@ class BinNDResult:
         keys.update(name for name, spec in BIN_DERIVED_PROPERTIES.items() if spec.is_available(self))
         keys.update(self.property_keys())
         for cache_key in self._cache:
-            if isinstance(cache_key, tuple) and len(cache_key) >= 2 and isinstance(cache_key[1], str):
+            if not isinstance(cache_key, tuple):
+                continue
+            # (scope, "query_string") — geometry / derived results
+            if len(cache_key) == 2 and isinstance(cache_key[1], str):
                 keys.add(cache_key[1])
+            # ("stat", field, transforms, stat_key, weight) — pipeline stat results
+            elif len(cache_key) >= 4 and cache_key[0] == "stat":
+                _, field, transforms, stat_key = cache_key[:4]
+                if transforms:
+                    keys.add(f"{field}.{'.'.join(transforms)}.{stat_key}")
+                else:
+                    keys.add(f"{field}.{stat_key}")
         return sorted(keys)
 
     def property_keys(self) -> list[str]:
@@ -224,16 +265,18 @@ class BinNDResult:
     def spawn(self, subset: Any) -> SubBinNDResult:
         return self.calculator._spawn_result(self.root, subset)
 
-    def _subset_cache_key(self, subset: Any) -> tuple[int, ...]:
+    def _subset_cache_key(self, subset: Any) -> Any:
         root_sim = self.root.sim
         if subset is root_sim:
-            return tuple(range(len(root_sim)))
+            return "__root__"
         if hasattr(subset, "get_index_list"):
             try:
-                indices = subset.get_index_list(root_sim)
+                indices = np.asarray(subset.get_index_list(root_sim), dtype=np.int64)
             except Exception as exc:
                 raise TypeError("SimSnap subset cannot be mapped to the root BinNDResult sim.") from exc
-            return tuple(int(index) for index in np.asarray(indices, dtype=int))
+            # Hash bytes to keep the dict key O(1) in memory; SHA-1 collision risk is negligible.
+            digest = hashlib.sha1(indices.tobytes()).hexdigest()
+            return ("indices", int(indices.shape[0]), digest)
         raise TypeError("SubBinNDResult requires a SimSnap subset that can be mapped to the root sim.")
 
     def __getitem__(self, key: Any) -> SubBinNDResult | BinsArray:
@@ -241,6 +284,13 @@ class BinNDResult:
             # Axis properties like "r.center" must be accessed via bins.axis("r").center
             # String queries only handle: geometry/derived properties and pipeline stat queries
             return self._resolve_query(key)
+        if isinstance(key, Filter):
+            # Sub-bin selection via a Filter: bins[BandPass("age", "2 Gyr", "5 Gyr")]
+            sub = self.sim[key]
+            if _is_sim_like(sub):
+                return self.get_subresult(sub)
+            raise TypeError("Filter selector did not produce a SimSnap subset.")
+
         if isinstance(key, CalculatorBase) or (callable(key) and not isinstance(key, (str, bytes))):
             return self.apply(key)
         if isinstance(key, tuple) or isinstance(key, (int, np.integer, slice)) or is_int_sequence(key):
@@ -286,6 +336,18 @@ class BinNDResult:
         if not self.is_root and scope in self._SHARED_SCOPES:
             return self.root._resolve_query(key)
 
+        # Pipeline stat queries ("mass.sum", "vz.abs.mean", …) are delegated
+        # directly to _stat_pipeline, which owns the authoritative cache entry
+        # keyed on (stat, field, transforms, stat_name, weight).  This ensures
+        # bins["mass.sum"] and stat_explicit("mass", "sum") always share one
+        # cache entry regardless of call order.
+        parsed = parse_pipeline_key(key)
+        if parsed is not None:
+            field, transforms, terminal_stat = parsed
+            result = self._stat_pipeline(field, transforms, terminal_stat, query_key=key)
+            self._engine.record("query", key=key, scope=scope)
+            return result
+
         cache_key = (scope, key)
         if cache_key in self._cache:
             return self._cache[cache_key]
@@ -298,24 +360,19 @@ class BinNDResult:
     def _wrap(self, values: Any, *, name: str, field: str | None = None, mode: str | None = None) -> BinsArray:
         return BinsArray(self, values, name=name, field=field, mode=mode)
 
-    def _compute_query(self, key: str, *, scope: str) -> BinsArray:  # noqa: PLR0911
+    def _compute_query(self, key: str, *, scope: str) -> BinsArray:
         if key in BIN_DERIVED_PROPERTIES:
             return self._geometry_property(key)
         spec = self._get_derived_spec(key)
         if spec is not None:
-            return self._compute_registered_derived(spec)
-        # Dot-notation pipeline query: "field.transform*.stat"
-        parsed = parse_pipeline_key(key)
-        if parsed is not None:
-            field, transforms, terminal_stat = parsed
-            return self._stat_pipeline(field, transforms, terminal_stat, query_key=key)
+            return self._compute_derived(spec)
         raise KeyError(
             f"Unknown BinND query {key!r}. "
             "Use 'field.stat' syntax (e.g. 'mass.sum') for particle statistics. "
             "For axis properties use bins.axis('r').center."
         )
 
-    def _get_derived_spec(self, key: str) -> ResultDerivedSpec | None:
+    def _get_derived_spec(self, key: str) -> BinDerivedSpec | None:
         registry = type(self)._derived_property_registry
         for cls in type(self).mro():
             bucket = registry.get(cls)
@@ -325,14 +382,11 @@ class BinNDResult:
                     return spec
         return None
 
-    def _compute_registered_derived(self, spec: ResultDerivedSpec) -> BinsArray:
+    def _compute_derived(self, spec: BinDerivedSpec) -> BinsArray:
         values = spec.func(self)
-        if isinstance(values, BinsArray):
-            result = values
-        else:
-            result = self._wrap(values, name=spec.name)
+        result = values if isinstance(values, BinsArray) else self._wrap(values, name=spec.name)
         if result.size != self.nbins:
-            raise ValueError(f"Derived BinND query {spec.name!r} must return one value per bin.")
+            raise ValueError(f"Derived query {spec.name!r} must return one value per bin.")
         return result
 
     def _get_bin_derived_spec(self, key: str) -> BinDerivedSpec | None:
@@ -341,29 +395,24 @@ class BinNDResult:
             return None
         return spec
 
-    def _compute_bin_derived(self, spec: BinDerivedSpec) -> BinsArray:
-        values = spec.func(self)
-        result = values if isinstance(values, BinsArray) else self._wrap(values, name=spec.name)
-        if result.size != self.nbins:
-            raise ValueError(f"Bin derived query {spec.name!r} must return one value per bin.")
-        return result
-
     def multi_index_array(self) -> np.ndarray:
-        return np.column_stack(np.unravel_index(np.arange(self.nbins), self.shape_bins, order="C"))
+        if self._multi_index_cache is None:
+            self._multi_index_cache = np.column_stack(
+                np.unravel_index(np.arange(self.nbins), self.shape_bins, order="C")
+            )
+        return self._multi_index_cache
 
-    def _geometry_property(self, key: str) -> BinsArray:  # noqa: PLR0911
+    def _geometry_property(self, key: str) -> BinsArray:
         spec = self._get_bin_derived_spec(key)
         if spec is None:
             raise KeyError(f"Unknown or unavailable bin derived query {key!r}.")
-        return self._compute_bin_derived(spec)
+        return self._compute_derived(spec)
 
     def find_axis(self, aliases: set[str]) -> Any:
         for axis in self.axes:
             if axis_matches(axis, aliases):
                 return axis
         raise KeyError(f"No axis matching {sorted(aliases)!r}.")
-
-    _find_axis = find_axis
 
     def _stat_pipeline(
         self,
@@ -394,14 +443,31 @@ class BinNDResult:
         elif weight is not None:
             weights = weight
 
-        out = np.full(self.nbins, np.nan, dtype=float)
-        for index, particle_indices in enumerate(self.bin_indices):
-            if len(particle_indices) == 0:
-                continue
-            sub = np.asarray(values[particle_indices], dtype=float)
-            sub = apply_pipeline(sub, transforms)
-            sub_weights = None if weights is None else np.asarray(weights[particle_indices], dtype=float)
-            out[index] = terminal_stat(sub, sub_weights)
+        # --- fast vectorised path ---
+        valid_mask = self.valid_mask
+        if valid_mask.any():
+            v_valid = np.asarray(values[valid_mask], dtype=float)
+            v_valid = apply_pipeline(v_valid, transforms)
+            w_valid = None if weights is None else np.asarray(weights[valid_mask], dtype=float)
+            bins_valid = self.particle_bin[valid_mask]
+            vec = terminal_stat.vectorized_call(v_valid, bins_valid, w_valid, self.nbins)
+        else:
+            vec = None
+
+        if vec is not None:
+            out = vec
+        else:
+            # --- per-bin Python loop fallback ---
+            out = np.full(self.nbins, np.nan, dtype=float)
+            for index in range(self.nbins):
+                start, stop = int(self.bin_indptr[index]), int(self.bin_indptr[index + 1])
+                if start == stop:
+                    continue
+                particle_indices = self.bin_data[start:stop]
+                sub = np.asarray(values[particle_indices], dtype=float)
+                sub = apply_pipeline(sub, transforms)
+                sub_weights = None if weights is None else np.asarray(weights[particle_indices], dtype=float)
+                out[index] = terminal_stat(sub, sub_weights)
 
         name = query_key or (f"{field}.{'.' .join(transforms)}.{stat_key_str}" if transforms else f"{field}.{stat_key_str}")
         result: BinsArray = self._wrap(out, name=name, field=field, mode=stat_key_str)
@@ -488,20 +554,22 @@ class BinNDResult:
                 # Fast path 2: full CalculatorBase → reuse one EvalEngine, skip Result assembly
                 _batch_opts = _BATCH_RUN_OPTIONS
                 with query.batch(_batch_opts) as run_one:
-                    for index, particle_indices in enumerate(self.bin_indices):
-                        if len(particle_indices) == 0:
+                    for index in range(self.nbins):
+                        start, stop = int(self.bin_indptr[index]), int(self.bin_indptr[index + 1])
+                        if start == stop:
                             continue
-                        sub = self.sim[particle_indices]
+                        sub = self.sim[self.bin_data[start:stop]]
                         arr = np.asarray(run_one(sub))
                         if arr.ndim != 0:
                             raise TypeError("Callable or CalculatorBase bin query must return a scalar in phase 1.")
                         values[index] = arr.item()
             else:
                 # Plain callable
-                for index, particle_indices in enumerate(self.bin_indices):
-                    if len(particle_indices) == 0:
+                for index in range(self.nbins):
+                    start, stop = int(self.bin_indptr[index]), int(self.bin_indptr[index + 1])
+                    if start == stop:
                         continue
-                    sub = self.sim[particle_indices]
+                    sub = self.sim[self.bin_data[start:stop]]
                     arr = np.asarray(query(sub))
                     if arr.ndim != 0:
                         raise TypeError("Callable or CalculatorBase bin query must return a scalar in phase 1.")
@@ -542,85 +610,21 @@ class BinNDResult:
 
         def decorator(func: Callable[[Any], Any]) -> Callable[[Any], Any]:
             query_name = name or func.__name__
-            bucket = cls._derived_property_registry[cls]
-            if not overwrite and query_name in bucket:
-                raise KeyError(f"BinNDResult derived property {query_name!r} is already registered.")
-            bucket[query_name] = ResultDerivedSpec(name=query_name, func=func, scope=scope, condition=condition)
+            spec = BinDerivedSpec(name=query_name, func=func, scope=scope, condition=condition)
+            if scope == "geometry":
+                if not overwrite and query_name in BIN_DERIVED_PROPERTIES:
+                    raise KeyError(f"BinNDResult derived property {query_name!r} is already registered.")
+                BIN_DERIVED_PROPERTIES[query_name] = spec
+            else:
+                bucket = cls._derived_property_registry[cls]
+                if not overwrite and query_name in bucket:
+                    raise KeyError(f"BinNDResult derived property {query_name!r} is already registered.")
+                bucket[query_name] = spec
             return func
 
         if fn is None:
             return decorator
         return decorator(fn)
-
-    def plot(self, x: str, y: str, ax: Any = None, *, kind: str | None = None, **kwargs: Any) -> Any:
-        """Plot a 1-D or 2-D profile.
-
-        For 1-D results::
-
-            bins.plot("r", "density")       # x = axis centers of "r", y = density
-
-        *x* must name a bin axis alias whose centers are used as the x-coordinate.
-        *y* is any string query accepted by ``bins[...]``.
-
-        Parameters
-        ----------
-        x:
-            Axis alias to use as the x-coordinate (e.g. ``"r"``).  Its bin
-            centers are used.
-        y:
-            String query for the y-data (e.g. ``"density"``, ``"mass.sum"``).
-        ax:
-            Matplotlib axes object.  A new figure/axes is created if ``None``.
-        kind:
-            Plot style: ``"plot"`` (default) or ``"scatter"``.
-        """
-        import matplotlib.pyplot as plt
-
-        if ax is None:
-            _, ax = plt.subplots()
-
-        x_axis = self.axis(x)
-        x_values = np.asarray(x_axis.centers)
-        y_arr = np.asarray(self._resolve_query(y)).ravel()
-
-        plot_kind = "plot" if kind is None else kind
-        if plot_kind == "scatter":
-            return ax.scatter(x_values, y_arr, **kwargs)
-        if plot_kind == "plot":
-            return ax.plot(x_values, y_arr, **kwargs)
-        raise ValueError(f"Unknown plot kind {plot_kind!r}; use 'plot' or 'scatter'.")
-
-    def imshow(self, field: str, ax: Any = None, **kwargs: Any) -> Any:
-        """Show a 2-D bin grid as an image.
-
-        Requires exactly two axes.  The first axis maps to the x-direction and
-        the second to the y-direction::
-
-            bins2d.imshow("mass.sum")
-
-        Parameters
-        ----------
-        field:
-            String query for the field to display.
-        ax:
-            Matplotlib axes object.  A new figure/axes is created if ``None``.
-        """
-        import matplotlib.pyplot as plt
-
-        if self.ndim != 2:
-            raise ValueError("imshow requires exactly 2 bin axes.")
-        if ax is None:
-            _, ax = plt.subplots()
-
-        x_axis, y_axis = self.axes
-        extent = [
-            float(np.asarray(x_axis.mins)[0]),
-            float(np.asarray(x_axis.maxs)[-1]),
-            float(np.asarray(y_axis.mins)[0]),
-            float(np.asarray(y_axis.maxs)[-1]),
-        ]
-        grid = np.asarray(self._resolve_query(field)).reshape(self.shape_bins)
-        return ax.imshow(grid.T, origin="lower", aspect="auto", extent=extent, **kwargs)
 
     def __repr__(self) -> str:
         parent_flag = "root" if self.is_root else "sub"
@@ -645,7 +649,10 @@ def _has_family(name: str) -> Callable[[Any], bool]:
 
 @BinNDResult.derived("count", scope="particles")
 def _count(bins: BinNDResult) -> np.ndarray:
-    return np.asarray([len(index) for index in bins.bin_indices], dtype=int)
+    valid_mask = bins.valid_mask
+    if not valid_mask.any():
+        return np.zeros(bins.nbins, dtype=int)
+    return np.bincount(bins.particle_bin[valid_mask], minlength=bins.nbins).astype(int)
 
 
 @BinNDResult.derived("density", condition=lambda bins: BIN_DERIVED_PROPERTIES["volume"].is_available(bins))

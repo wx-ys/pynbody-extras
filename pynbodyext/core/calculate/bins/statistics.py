@@ -23,7 +23,9 @@ such that the suffix is a recognised statistic token.  The prefix is the field
 name; the remaining intermediate tokens (if any) are treated as a *transform
 pipeline* applied to the raw particle array before the final reduction.
 
-Currently supported pipeline transforms: ``abs`` (takes |x| element-wise).
+Supported pipeline transforms are stored in ``_PIPELINE_TRANSFORMS`` and can be
+extended with :func:`register_pipeline_transform`.  Built-in transforms:
+``abs``, ``log``, ``log10``, ``sqrt``, ``square``.
 
 Empty bin → each statistic returns ``np.nan`` (or 0 for ``count``).
 """
@@ -46,6 +48,7 @@ __all__ = [
     "get_statistic",
     "evaluate_statistic",
     "is_statistic_name",
+    "register_pipeline_transform",
     # built-in statistics
     "Mean",
     "Sum",
@@ -58,6 +61,43 @@ __all__ = [
 ]
 
 _REGISTRY: list[type[BinStatisticBase]] = []
+
+# ---------------------------------------------------------------------------
+# Pipeline transform registry
+# ---------------------------------------------------------------------------
+
+_PIPELINE_TRANSFORMS: dict[str, Callable[[np.ndarray], np.ndarray]] = {
+    "abs": np.abs,
+    "log": np.log,
+    "log10": np.log10,
+    "sqrt": np.sqrt,
+    "square": np.square,
+}
+
+
+def register_pipeline_transform(
+    name: str,
+    func: Callable[[np.ndarray], np.ndarray],
+    *,
+    overwrite: bool = False,
+) -> None:
+    """Register a named element-wise transform for use in pipeline queries.
+
+    After registration, queries like ``"field.{name}.mean"`` apply *func*
+    element-wise to the particle array before the terminal statistic.
+
+    Parameters
+    ----------
+    name:
+        Token string used in dot-notation queries (e.g. ``"log10"``).
+    func:
+        A callable ``(np.ndarray) -> np.ndarray`` applied element-wise.
+    overwrite:
+        If ``False`` (default), raise :exc:`KeyError` if *name* is already registered.
+    """
+    if not overwrite and name in _PIPELINE_TRANSFORMS:
+        raise KeyError(f"Pipeline transform {name!r} is already registered.")
+    _PIPELINE_TRANSFORMS[name] = func
 
 
 # ---------------------------------------------------------------------------
@@ -73,12 +113,18 @@ class BinStatisticBase:
     representative key string (used for autocomplete).
 
     Subclasses auto-register in ``_REGISTRY`` via ``__init_subclass__``.
+    Pass ``abstract=True`` to declare an intermediate base class that should
+    *not* be registered::
+
+        class MyWeightedBase(BinStatisticBase, abstract=True): ...
     """
 
     example_name: str | None = None
 
-    def __init_subclass__(cls, **kwargs: Any) -> None:
+    def __init_subclass__(cls, abstract: bool = False, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
+        if abstract:
+            return
         if getattr(cls, "example_name", None) is None:
             warnings.warn(
                 f"BinStatisticBase subclass {cls.__name__!r} is missing example_name; "
@@ -92,6 +138,36 @@ class BinStatisticBase:
 
     def __call__(self, arr: np.ndarray, weight: np.ndarray | None) -> float:
         raise NotImplementedError
+
+    def vectorized_call(
+        self,
+        values: np.ndarray,
+        bins: np.ndarray,
+        weights: np.ndarray | None,
+        nbins: int,
+    ) -> np.ndarray | None:
+        """Compute statistic over all bins simultaneously without a Python loop.
+
+        Parameters
+        ----------
+        values:
+            Float array for valid (assigned) particles only, with any pipeline
+            transforms already applied.  Shape ``(n_valid,)``.
+        bins:
+            Flat bin index for each valid particle.  All values are ``>= 0``.
+            Shape ``(n_valid,)``.
+        weights:
+            Weight array for valid particles, or ``None``.  Shape ``(n_valid,)``.
+        nbins:
+            Total number of bins.
+
+        Returns
+        -------
+        np.ndarray or None
+            1-D float array of length ``nbins`` (``np.nan`` for empty bins),
+            or ``None`` to fall back to the per-bin Python loop.
+        """
+        return None
 
     @classmethod
     def valid(cls, key: str) -> BinStatisticBase | None:
@@ -121,7 +197,7 @@ def get_statistic(key: str) -> BinStatisticBase | None:
 
 
 def _known_transform_token(token: str) -> bool:
-    return token in {"abs"}
+    return token in _PIPELINE_TRANSFORMS
 
 
 def parse_pipeline_key(key: str) -> tuple[str, list[str], BinStatisticBase] | None:
@@ -158,10 +234,11 @@ def apply_pipeline(arr: np.ndarray, transforms: list[str]) -> np.ndarray:
     """Apply named element-wise transforms to *arr*."""
     out = arr
     for t in transforms:
-        if t == "abs":
-            out = np.abs(out)
-        else:
-            raise KeyError(f"Unknown pipeline transform {t!r}.")
+        fn = _PIPELINE_TRANSFORMS.get(t)
+        if fn is None:
+            raise KeyError(f"Unknown pipeline transform {t!r}. "
+                           f"Known transforms: {sorted(_PIPELINE_TRANSFORMS)}.")
+        out = fn(out)
     return out
 
 
@@ -184,6 +261,13 @@ def _weighted_mean(arr: np.ndarray, weights: np.ndarray | None) -> float:
     return float(np.sum(arr * w) / denom)
 
 
+def _bincount_nan(bins: np.ndarray, values: np.ndarray, nbins: int) -> tuple[np.ndarray, np.ndarray]:
+    """Return (counts, weighted_sums) of length *nbins*; counts dtype is intp."""
+    counts = np.bincount(bins, minlength=nbins).astype(np.intp)
+    sums = np.bincount(bins, weights=values, minlength=nbins)
+    return counts, sums
+
+
 # ---------------------------------------------------------------------------
 # Built-in statistics
 # ---------------------------------------------------------------------------
@@ -199,6 +283,21 @@ class Mean(BinStatisticBase):
             return float("nan")
         return _weighted_mean(_as_float(arr), weight)
 
+    def vectorized_call(
+        self, values: np.ndarray, bins: np.ndarray, weights: np.ndarray | None, nbins: int
+    ) -> np.ndarray:
+        v = values.astype(float, copy=False)
+        if weights is None:
+            counts, sums = _bincount_nan(bins, v, nbins)
+            with np.errstate(invalid="ignore"):
+                return np.where(counts > 0, sums / counts, np.nan)
+        w = weights.astype(float, copy=False)
+        counts = np.bincount(bins, minlength=nbins).astype(np.intp)
+        w_sums = np.bincount(bins, weights=w, minlength=nbins)
+        vw_sums = np.bincount(bins, weights=v * w, minlength=nbins)
+        with np.errstate(invalid="ignore"):
+            return np.where((counts > 0) & (w_sums != 0.0), vw_sums / w_sums, np.nan)
+
     @classmethod
     def valid(cls, key: str) -> Mean | None:
         return cls(key) if key.lower() == "mean" else None
@@ -213,6 +312,13 @@ class Sum(BinStatisticBase):
         if len(arr) == 0:
             return float("nan")
         return float(np.sum(_as_float(arr)))
+
+    def vectorized_call(
+        self, values: np.ndarray, bins: np.ndarray, weights: np.ndarray | None, nbins: int
+    ) -> np.ndarray:
+        v = values.astype(float, copy=False)
+        counts, sums = _bincount_nan(bins, v, nbins)
+        return np.where(counts > 0, sums, np.nan)
 
     @classmethod
     def valid(cls, key: str) -> Sum | None:
@@ -231,6 +337,18 @@ class SumWeighted(BinStatisticBase):
         if weight is None:
             return float(np.sum(a))
         return float(np.sum(a * _as_float(weight)))
+
+    def vectorized_call(
+        self, values: np.ndarray, bins: np.ndarray, weights: np.ndarray | None, nbins: int
+    ) -> np.ndarray:
+        v = values.astype(float, copy=False)
+        if weights is None:
+            counts, sums = _bincount_nan(bins, v, nbins)
+            return np.where(counts > 0, sums, np.nan)
+        w = weights.astype(float, copy=False)
+        counts = np.bincount(bins, minlength=nbins).astype(np.intp)
+        vw_sums = np.bincount(bins, weights=v * w, minlength=nbins)
+        return np.where(counts > 0, vw_sums, np.nan)
 
     @classmethod
     def valid(cls, key: str) -> SumWeighted | None:
@@ -303,6 +421,21 @@ class RMS(BinStatisticBase):
             return float("nan")
         return float(np.sqrt(np.sum(a * a * w) / denom))
 
+    def vectorized_call(
+        self, values: np.ndarray, bins: np.ndarray, weights: np.ndarray | None, nbins: int
+    ) -> np.ndarray:
+        v = values.astype(float, copy=False)
+        if weights is None:
+            counts, sq_sums = _bincount_nan(bins, v * v, nbins)
+            with np.errstate(invalid="ignore"):
+                return np.where(counts > 0, np.sqrt(sq_sums / counts), np.nan)
+        w = weights.astype(float, copy=False)
+        counts = np.bincount(bins, minlength=nbins).astype(np.intp)
+        w_sums = np.bincount(bins, weights=w, minlength=nbins)
+        sq_w_sums = np.bincount(bins, weights=v * v * w, minlength=nbins)
+        with np.errstate(invalid="ignore"):
+            return np.where((counts > 0) & (w_sums != 0.0), np.sqrt(sq_w_sums / w_sums), np.nan)
+
     @classmethod
     def valid(cls, key: str) -> RMS | None:
         return cls(key) if key.lower() == "rms" else None
@@ -323,6 +456,17 @@ class Dispersion(BinStatisticBase):
         if diff < 0 and diff > -1e-12:
             diff = 0.0
         return float(np.sqrt(diff)) if diff >= 0 else float("nan")
+
+    def vectorized_call(
+        self, values: np.ndarray, bins: np.ndarray, weights: np.ndarray | None, nbins: int
+    ) -> np.ndarray:
+        # Var(v) = E[v²] - E[v]² computed fully vectorised via Mean
+        mean_obj = Mean("mean")
+        sq_mean = mean_obj.vectorized_call(values * values, bins, weights, nbins)
+        mean_sq = mean_obj.vectorized_call(values, bins, weights, nbins) ** 2
+        diff = sq_mean - mean_sq
+        diff = np.where(np.abs(diff) < 1e-12, 0.0, diff)
+        return np.where(diff >= 0.0, np.sqrt(diff), np.nan)
 
     @classmethod
     def valid(cls, key: str) -> Dispersion | None:

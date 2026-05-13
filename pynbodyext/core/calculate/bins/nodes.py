@@ -23,7 +23,8 @@ class Bin1D(CalculatorBase[BinNDResult, BinNDResult]):
     vmin: Param[float | None] = Param(default=None)
     vmax: Param[float | None] = Param(default=None)
     nbins: Param[int | None] = Param(default=None)
-    mode: str = Param.static(default="linear", kw_only=True)
+
+    mode: str = Param.static(default="linear", kw_only=False)
     edges: Param[Any] = Param(default=None, kw_only=True)
     lows: Param[Any] = Param(default=None, kw_only=True)
     highs: Param[Any] = Param(default=None, kw_only=True)
@@ -31,11 +32,17 @@ class Bin1D(CalculatorBase[BinNDResult, BinNDResult]):
     include_rightmost: bool = Param.static(default=True, kw_only=True)
     out_of_range: str = Param.static(default="drop", kw_only=True)
     units: Any | None = Param.static(default=None, kw_only=True)
-    active: tuple[Any, ...] = Param.static(default=(), kw_only=True)
 
     def __post_init__(self) -> None:
-        if not isinstance(self.active, tuple):
-            self.active = tuple(self.active or ())  # type: ignore[unreachable]
+        self.active: tuple[Any, ...] = ()
+        self._binnd_wrapper: BinND | None = None
+
+    def _get_binnd(self) -> BinND:
+        """Return a lazily-created single-axis BinND wrapper; built once per Bin1D instance."""
+        if self._binnd_wrapper is None:
+            self._binnd_wrapper = BinND((self,))
+            self._binnd_wrapper.active = self.active
+        return self._binnd_wrapper
 
     def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:
         deps = declarative_dependencies(self)
@@ -60,41 +67,57 @@ class Bin1D(CalculatorBase[BinNDResult, BinNDResult]):
         return NotImplemented
 
     def with_active(self, keys: Iterable[Any]) -> Bin1D:
-        return cast("Bin1D", self._clone(active=tuple(keys)))
+        cl = cast("Bin1D", self._clone())
+        cl.active = tuple(keys)
+        return cl
 
     def execute(self, ctx: ExecutionContext, input: NodeInput) -> BinNDResult:
-        return BinND((self,), active=self.active).execute(ctx, input)
+        return self._get_binnd().execute(ctx, input)
 
     def public_value(self, value: BinNDResult) -> BinNDResult:
         return value
+
+    def with_transformation(self, transform, revert = True):
+        if revert:
+            self.warning(f"Bin1D applies transform {transform} with revert=True; "
+                         "the subsequent binned result will be derived from the original untransformed data. "
+                         "Do you really want this? If so, consider setting revert=False to avoid such behavior.")
+        return super().with_transformation(transform, revert=revert)
 
 
 @CalculatorBase.dataclass
 class BinND(CalculatorBase[BinNDResult, BinNDResult]):
     axes_specs: tuple[Bin1D, ...]
-    active: tuple[Any, ...] = Param.static(default=(), kw_only=True)
-
 
     def __post_init__(self) -> None:
         if not isinstance(self.axes_specs, tuple):
             self.axes_specs = tuple(self.axes_specs)    # type: ignore[unreachable]
         if not self.axes_specs:
             raise ValueError("BinND requires at least one axis.")
-        if not self.active:
-            inherited: list[Any] = []
-            for axis in self.axes_specs:
-                inherited.extend(axis.active)
-            self.active = tuple(inherited)
+        # Inherit active keys from constituent Bin1D specs
+        inherited: list[Any] = []
+        for axis in self.axes_specs:
+            inherited.extend(axis.active)
+        self.active = tuple(inherited)
 
     def __matmul__(self, other: Bin1D | BinND) -> BinND:
         if isinstance(other, BinND):
-            return BinND((*self.axes_specs, *other.axes_specs), active=self.active + other.active)
+            return BinND((*self.axes_specs, *other.axes_specs))
         if isinstance(other, Bin1D):
-            return BinND((*self.axes_specs, other), active=self.active + other.active)
+            return BinND((*self.axes_specs, other))
         return NotImplemented
 
     def with_active(self, keys: Iterable[Any]) -> BinND:
-        return cast("BinND", self._clone(active=tuple(keys)))
+        cl= cast("BinND", self._clone())
+        cl.active = tuple(keys)
+        return cl
+
+    def with_transformation(self, transform, revert = True):
+        if revert:
+            self.warning(f"BinND applies transform {transform} with revert=True; "
+                         "the subsequent binned result will be derived from the original untransformed data. "
+                         "Do you really want this? If so, consider setting revert=False to avoid such behavior.")
+        return super().with_transformation(transform, revert=revert)
 
     def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:
         deps: list[CalculatorBase[Any, Any]] = []
@@ -107,7 +130,8 @@ class BinND(CalculatorBase[BinNDResult, BinNDResult]):
 
     def execute(self, ctx: ExecutionContext, input: NodeInput) -> BinNDResult:
         sim = input.active_sim
-        result = self._materialize_result(sim, ctx=ctx, input=input, source_sim=input.sim_raw, scope_signature=input.cache_token)
+        axes, values = self._resolve_axes(sim, ctx=ctx, input=input)
+        result = self._build_result(sim, axes, values, source_sim=input.sim_raw, scope_signature=input.cache_token)
         for key in self.active:
             if isinstance(key, str):
                 result[key]
@@ -120,39 +144,45 @@ class BinND(CalculatorBase[BinNDResult, BinNDResult]):
     def public_value(self, value: BinNDResult) -> BinNDResult:
         return value
 
-    def _materialize_result(
+    def _resolve_axes(
         self,
         sim: Any,
         *,
         ctx: ExecutionContext | None = None,
         input: NodeInput | None = None,
+    ) -> tuple[tuple[BinAxis, ...], list[Any]]:
+        """Materialize axis specifications against *sim* and return ``(axes, values)``."""
+        materialized_axes: list[BinAxis] = []
+        values: list[Any] = []
+        aliases: set[str] = set()
+        for index, spec in enumerate(self.axes_specs):
+            axis, axis_values = materialize_axis(spec, sim, ctx, input, index=index)
+            if axis.alias in aliases:
+                raise ValueError(f"Duplicate bin axis alias {axis.alias!r}.")
+            aliases.add(axis.alias)
+            materialized_axes.append(axis)
+            values.append(axis_values)
+        return tuple(materialized_axes), values
+
+    def _build_result(
+        self,
+        sim: Any,
+        axes: tuple[BinAxis, ...],
+        values: list[Any],
+        *,
         source_sim: Any | None = None,
         scope_signature: Any = None,
-        axes: tuple[BinAxis, ...] | None = None,
         parent: BinNDResult | None = None,
     ) -> BinNDResult:
-        if axes is None:
-            materialized_axes: list[BinAxis] = []
-            values: list[Any] = []
-            aliases: set[str] = set()
-            for index, spec in enumerate(self.axes_specs):
-                axis, axis_values = materialize_axis(spec, sim, ctx, input, index=index)
-                if axis.alias in aliases:
-                    raise ValueError(f"Duplicate bin axis alias {axis.alias!r}.")
-                aliases.add(axis.alias)
-                materialized_axes.append(axis)
-                values.append(axis_values)
-            axes = tuple(materialized_axes)
-        else:
-            values = [resolve_axis_values(spec.prop, sim, ctx, input) for spec in self.axes_specs]
-
-        bin_indices, particle_bin, valid_mask = self._assign_particles(axes, values, len(sim))
+        """Assign particles and construct a :class:`~.result.BinNDResult`."""
+        bin_data, bin_indptr, particle_bin, valid_mask = self._assign_particles(axes, values, len(sim))
         cls = BinNDResult if parent is None else SubBinNDResult
         return cls(
             sim=sim,
             source_sim=sim if source_sim is None else source_sim,
             axes=axes,
-            bin_indices=bin_indices,
+            bin_data=bin_data,
+            bin_indptr=bin_indptr,
             particle_bin=particle_bin,
             valid_mask=valid_mask,
             calculator=self,
@@ -161,18 +191,26 @@ class BinND(CalculatorBase[BinNDResult, BinNDResult]):
         )
 
     def _spawn_result(self, parent: BinNDResult, subset: Any) -> SubBinNDResult:
-        result = self._materialize_result(
+        """Rebuild particle assignment for *subset* reusing the parent's axes."""
+        values = [resolve_axis_values(spec.prop, subset, None, None) for spec in self.axes_specs]
+        result = self._build_result(
             subset,
+            parent.axes,
+            values,
             source_sim=parent.source_sim,
             scope_signature=parent.scope_signature,
-            axes=parent.axes,
             parent=parent.root,
         )
         if not isinstance(result, SubBinNDResult):
             raise TypeError("spawned BinND result was not a SubBinNDResult")
         return result
 
-    def _assign_particles(self, axes: tuple[BinAxis, ...], values: list[Any], n_particles: int) -> tuple[list[np.ndarray], np.ndarray, np.ndarray]:
+    def _assign_particles(self, axes: tuple[BinAxis, ...], values: list[Any], n_particles: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Return (bin_data, bin_indptr, particle_bin, valid_mask) in CSR format.
+
+        ``bin_data[bin_indptr[i] : bin_indptr[i+1]]`` gives the particle indices
+        assigned to flat bin *i*.
+        """
         axis_bins: list[np.ndarray] = []
         valid_mask = np.ones(n_particles, dtype=bool)
         for axis, axis_values in zip(axes, values, strict=True):
@@ -185,7 +223,12 @@ class BinND(CalculatorBase[BinNDResult, BinNDResult]):
         total_nbins = int(np.prod([axis.nbins for axis in axes], dtype=int))
         particle_bin = np.full(n_particles, -1, dtype=int)
         if not np.any(valid_mask):
-            return [np.asarray([], dtype=int) for _ in range(total_nbins)], particle_bin, valid_mask
+            return (
+                np.empty(0, dtype=int),
+                np.zeros(total_nbins + 1, dtype=int),
+                particle_bin,
+                valid_mask,
+            )
 
         valid_indices = np.nonzero(valid_mask)[0]
         multi = tuple(axis_bin[valid_indices] for axis_bin in axis_bins)
@@ -195,7 +238,6 @@ class BinND(CalculatorBase[BinNDResult, BinNDResult]):
 
         counts = np.bincount(flat, minlength=total_nbins).astype(int)
         order = np.argsort(flat, kind="stable")
-        idx_sorted = valid_indices[order]
-        starts = np.concatenate(([0], np.cumsum(counts)))
-        bin_indices = [idx_sorted[starts[i] : starts[i + 1]] for i in range(total_nbins)]
-        return bin_indices, particle_bin, valid_mask
+        bin_data = valid_indices[order]
+        bin_indptr = np.concatenate(([0], np.cumsum(counts)))
+        return bin_data, bin_indptr, particle_bin, valid_mask

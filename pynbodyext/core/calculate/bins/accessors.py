@@ -22,7 +22,10 @@ class BinParticlesAccessor:
         if flat.size == 0:
             return self._bins.sim[np.asarray([], dtype=int)]
 
-        groups = [self._bins.bin_indices[int(index)] for index in flat]
+        groups = [
+            self._bins.bin_data[self._bins.bin_indptr[int(i)] : self._bins.bin_indptr[int(i) + 1]]
+            for i in flat
+        ]
         indices = np.concatenate(groups) if groups else np.asarray([], dtype=int)
         if indices.size:
             indices = np.unique(indices)

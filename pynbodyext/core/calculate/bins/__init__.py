@@ -12,7 +12,9 @@ from .axes import (
     register_bin_derived,
 )
 from .nodes import Bin1D, BinND
+from .plot import BinPlotMixin
 from .result import BinNDResult, BinsResultEngine, SubBinNDResult
+from .statistics import register_pipeline_transform
 
 __all__ = [
     "BIN_ALGORITHMS",
@@ -21,6 +23,7 @@ __all__ = [
     "register_bin_algorithm",
     "register_axis_property",
     "register_bin_derived",
+    "register_pipeline_transform",
     "has_axis",
     "has_axes",
     "Bin1D",
@@ -31,4 +34,5 @@ __all__ = [
     "BinsArray",
     "BinsResultEngine",
     "BinParticlesAccessor",
+    "BinPlotMixin",
 ]
