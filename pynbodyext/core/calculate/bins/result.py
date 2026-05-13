@@ -6,10 +6,12 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from pynbody.array import IndexedSimArray, SimArray
+from pynbody.family import Family
 from pynbody.filt import Filter
 from pynbody.snapshot import SimSnap
 
 from pynbodyext.core.calculate.nodes.base import CalculatorBase
+from pynbodyext.core.calculate.nodes.filters import FilterBase
 from pynbodyext.core.calculate.runtime.options import RunOptions
 
 from .accessors import BinParticlesAccessor
@@ -252,10 +254,10 @@ class BinNDResult(BinPlotMixin):
     def _ipython_key_completions_(self) -> list[str]:
         return self.all_keys()
 
-    def get_subresult(self, subset: Any) -> SubBinNDResult:
+    def get_subresult(self, subset: Any, *, _cache_key: Any = None) -> SubBinNDResult:
         if not self.is_root:
-            return self.root.get_subresult(subset)
-        key = self._subset_cache_key(subset)
+            return self.root.get_subresult(subset, _cache_key=_cache_key)
+        key = _cache_key if _cache_key is not None else self._subset_cache_key(subset)
         if key in self._subs_cache:
             return self._subs_cache[key]
         sub = self.spawn(subset)
@@ -279,22 +281,24 @@ class BinNDResult(BinPlotMixin):
             return ("indices", int(indices.shape[0]), digest)
         raise TypeError("SubBinNDResult requires a SimSnap subset that can be mapped to the root sim.")
 
-    def __getitem__(self, key: Any) -> SubBinNDResult | BinsArray:
-        if isinstance(key, str):
-            # Axis properties like "r.center" must be accessed via bins.axis("r").center
-            # String queries only handle: geometry/derived properties and pipeline stat queries
-            return self._resolve_query(key)
-        if isinstance(key, Filter):
-            # Sub-bin selection via a Filter: bins[BandPass("age", "2 Gyr", "5 Gyr")]
+    def _subresult_from_sim_key(self, key: Any) -> SubBinNDResult:
+        """Resolve *key* to a SubBinNDResult, choosing a readable cache key where possible."""
+        if isinstance(key, FilterBase):
             sub = self.sim[key]
-            if _is_sim_like(sub):
-                return self.get_subresult(sub)
-            raise TypeError("Filter selector did not produce a SimSnap subset.")
-
-        if isinstance(key, CalculatorBase) or (callable(key) and not isinstance(key, (str, bytes))):
-            return self.apply(key)
-        if isinstance(key, tuple) or isinstance(key, (int, np.integer, slice)) or is_int_sequence(key):
-            raise TypeError("Bin selectors must use bins.particles_at_bin[...], not BinNDResult.__getitem__.")
+            if not _is_sim_like(sub):
+                raise TypeError("FilterBase selector did not produce a SimSnap subset.")
+            return self.get_subresult(sub, _cache_key=("filter", key.to_signature().pretty()))
+        if isinstance(key, Filter):
+            sub = self.sim[key]
+            if not _is_sim_like(sub):
+                raise TypeError("Filter selector did not produce a SimSnap subset.")
+            return self.get_subresult(sub, _cache_key=("pynfilter", repr(key)))
+        if isinstance(key, Family):
+            sub = self.sim[key]
+            if not _is_sim_like(sub):
+                raise TypeError("Family selector did not produce a SimSnap subset.")
+            return self.get_subresult(sub, _cache_key=("family", key.name))
+        # Generic: bool mask, arbitrary sim subscript, …
         if is_bool_array(key):
             mask = np.asarray(key, dtype=bool)
             if len(mask) == len(self.sim):
@@ -309,6 +313,17 @@ class BinNDResult(BinPlotMixin):
         if _is_sim_like(subset):
             return self.get_subresult(subset)
         raise TypeError(f"Selector did not produce a SimSnap subset: {type(subset)!r}.")
+
+    def __getitem__(self, key: Any) -> SubBinNDResult | BinsArray:
+        if isinstance(key, str):
+            # Axis properties like "r.center" must be accessed via bins.axis("r").center
+            # String queries only handle: geometry/derived properties and pipeline stat queries
+            return self._resolve_query(key)
+        if (isinstance(key, CalculatorBase) and not isinstance(key, FilterBase)) or (callable(key) and not isinstance(key, (str, bytes))):
+            return self.apply(key)
+        if isinstance(key, tuple) or isinstance(key, (int, np.integer, slice)) or is_int_sequence(key):
+            raise TypeError("Bin selectors must use bins.particles_at_bin[...], not BinNDResult.__getitem__.")
+        return self._subresult_from_sim_key(key)
 
     def __getattr__(self, name: str) -> Any:
         if name in {"center", "width", "min", "max", "edges"} and self.ndim == 1:
@@ -633,8 +648,8 @@ class BinNDResult(BinPlotMixin):
 
 
 class SubBinNDResult(BinNDResult):
-    def get_subresult(self, subset: Any) -> SubBinNDResult:
-        return self.root.get_subresult(subset)
+    def get_subresult(self, subset: Any, *, _cache_key: Any = None) -> SubBinNDResult:
+        return self.root.get_subresult(subset, _cache_key=_cache_key)
 
 
 def _has_family(name: str) -> Callable[[Any], bool]:
