@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import numpy as np
 
 from pynbodyext.core.calculate.nodes.base import CalculatorBase
 from pynbodyext.core.calculate.params.fields import Param, declarative_dependencies
+from pynbodyext.core.calculate.result.enums import BuiltinKinds, NodeKind
 
 from .axes import AxisPropertyFunc, BinAxis, materialize_axis, resolve_axis_values
 from .result import BinNDResult, SubBinNDResult
@@ -32,6 +33,8 @@ class Bin1D(CalculatorBase[BinNDResult, BinNDResult]):
     include_rightmost: bool = Param.static(default=True, kw_only=True)
     out_of_range: str = Param.static(default="drop", kw_only=True)
     units: Any | None = Param.static(default=None, kw_only=True)
+
+    kind: ClassVar[NodeKind] = BuiltinKinds.BINND
 
     def __post_init__(self) -> None:
         self.active: tuple[Any, ...] = ()

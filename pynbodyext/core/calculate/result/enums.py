@@ -91,7 +91,7 @@ class BuiltinKinds:
     FILTER: Final[NodeKind] = "filter"
     TRANSFORM: Final[NodeKind] = "transform"
     PROPERTY: Final[NodeKind] = "property"
-    PROFILE: Final[NodeKind] = "profile"
+    BINND: Final[NodeKind] = "binnd"
     COMBINED: Final[NodeKind] = "combined"
     OP: Final[NodeKind] = "op"
 
