@@ -97,14 +97,7 @@ class BinPlotMixin:
         if self.ndim != 2:
             raise ValueError("imshow requires exactly 2 bin axes.")
         if ax is None:
-            _, ax = plt.subplots()
+            _, ax = plt.subplots(figsize = kwargs.pop("figsize", (5, 5)))
 
-        x_axis, y_axis = self.axes
-        extent = [
-            float(np.asarray(x_axis.mins)[0]),
-            float(np.asarray(x_axis.maxs)[-1]),
-            float(np.asarray(y_axis.mins)[0]),
-            float(np.asarray(y_axis.maxs)[-1]),
-        ]
         grid = np.asarray(self[field]).reshape(self.shape_bins)
-        return ax.imshow(grid.T, origin="lower", aspect="auto", extent=extent, **kwargs)
+        return ax.imshow(grid.T, origin="lower", aspect="auto", extent=self.axis.extent, **kwargs)

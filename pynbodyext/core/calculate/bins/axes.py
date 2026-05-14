@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, overload
+from typing import TYPE_CHECKING, Any, ClassVar, overload
 
 import numpy as np
 from pynbody import units as pynbody_units
@@ -107,9 +107,6 @@ BIN_ALGORITHMS: dict[str, BinAlgorithm] = {
     "quantile": _equaln_edges,
 }
 
-AXIS_PROPERTIES: dict[str, AxisPropertyFunc] = {}
-BIN_DERIVED_PROPERTIES: dict[str, BinDerivedSpec] = {}
-
 
 @overload
 def register_bin_algorithm(name: str, func: None = None, *, overwrite: bool = False) -> Callable[[BinAlgorithm], BinAlgorithm]: ...
@@ -125,67 +122,6 @@ def register_bin_algorithm(name: str, func: BinAlgorithm | None = None, *, overw
             raise KeyError(f"Bin algorithm {name!r} is already registered.")
         BIN_ALGORITHMS[name] = algorithm
         return algorithm
-
-    if func is None:
-        return decorator
-    return decorator(func)
-
-
-@overload
-def register_axis_property(name: str, func: None = None, *, overwrite: bool = False) -> Callable[[AxisPropertyFunc], AxisPropertyFunc]: ...
-
-
-@overload
-def register_axis_property(name: str, func: AxisPropertyFunc, *, overwrite: bool = False) -> AxisPropertyFunc: ...
-
-
-def register_axis_property(name: str, func: AxisPropertyFunc | None = None, *, overwrite: bool = False) -> AxisPropertyFunc | Callable[[AxisPropertyFunc], AxisPropertyFunc]:
-    def decorator(property_func: AxisPropertyFunc) -> AxisPropertyFunc:
-        if not overwrite and name in AXIS_PROPERTIES:
-            raise KeyError(f"Axis property {name!r} is already registered.")
-        AXIS_PROPERTIES[name] = property_func
-        return property_func
-
-    if func is None:
-        return decorator
-    return decorator(func)
-
-
-@overload
-def register_bin_derived(
-    name: str,
-    func: None = None,
-    *,
-    condition: BinDerivedCondition | None = None,
-    scope: str = "geometry",
-    overwrite: bool = False,
-) -> Callable[[BinDerivedFunc], BinDerivedFunc]: ...
-
-
-@overload
-def register_bin_derived(
-    name: str,
-    func: BinDerivedFunc,
-    *,
-    condition: BinDerivedCondition | None = None,
-    scope: str = "geometry",
-    overwrite: bool = False,
-) -> BinDerivedFunc: ...
-
-
-def register_bin_derived(
-    name: str,
-    func: BinDerivedFunc | None = None,
-    *,
-    condition: BinDerivedCondition | None = None,
-    scope: str = "geometry",
-    overwrite: bool = False,
-) -> BinDerivedFunc | Callable[[BinDerivedFunc], BinDerivedFunc]:
-    def decorator(derived_func: BinDerivedFunc) -> BinDerivedFunc:
-        if not overwrite and name in BIN_DERIVED_PROPERTIES:
-            raise KeyError(f"Bin derived property {name!r} is already registered.")
-        BIN_DERIVED_PROPERTIES[name] = BinDerivedSpec(name=name, func=derived_func, condition=condition, scope=scope)
-        return derived_func
 
     if func is None:
         return decorator
@@ -209,6 +145,13 @@ class BinAxisAccessor:
 
     def __init__(self, axes: tuple[BinAxis, ...]) -> None:
         self._axes = axes
+
+    @property
+    def extent(self) -> list[float]:
+        ex: list[float] = []
+        for axis in self._axes:
+            ex.extend([float(axis.mins[0]), float(axis.maxs[-1])])
+        return ex
 
     def __getitem__(self, key: int | str) -> BinAxis:
         if isinstance(key, (int, np.integer)):
@@ -261,6 +204,61 @@ class BinAxis:
     maxs: Any
     include_rightmost: bool = True
     units: Any | None = None
+
+    _axis_properties: ClassVar[dict[str, AxisPropertyFunc]] = {}
+
+    @overload
+    @classmethod
+    def register_property(cls, name: AxisPropertyFunc, func: None = None, *, overwrite: bool = False) -> AxisPropertyFunc: ...
+    @overload
+    @classmethod
+    def register_property(cls, name: str, func: AxisPropertyFunc, *, overwrite: bool = False) -> AxisPropertyFunc: ...
+    @overload
+    @classmethod
+    def register_property(cls, name: str, func: None = None, *, overwrite: bool = False) -> Callable[[AxisPropertyFunc], AxisPropertyFunc]: ...
+    @classmethod
+    def register_property(
+        cls,
+        name: str | AxisPropertyFunc,
+        func: AxisPropertyFunc | None = None,
+        *,
+        overwrite: bool = False,
+    ) -> AxisPropertyFunc | Callable[[AxisPropertyFunc], AxisPropertyFunc]:
+        """Register a computed axis property accessible via attribute lookup on :class:`BinAxis`.
+
+        Three calling conventions are supported::
+
+            # bare decorator — property name inferred from function name
+            @BinAxis.register_property
+            def my_prop(axis: BinAxis):
+                return axis.centers * 2
+
+            # decorator factory — explicit name
+            @BinAxis.register_property("my_prop")
+            def _(axis: BinAxis):
+                return axis.centers * 2
+
+            # direct call
+            BinAxis.register_property("my_prop", my_func)
+        """
+        # bare @BinAxis.register_property (name is actually the function)
+        if callable(name):
+            actual_func = name
+            actual_name = actual_func.__name__
+            if not overwrite and actual_name in cls._axis_properties:
+                raise KeyError(f"Axis property {actual_name!r} is already registered.")
+            cls._axis_properties[actual_name] = actual_func
+            return actual_func
+
+        def decorator(property_func: AxisPropertyFunc) -> AxisPropertyFunc:
+            if not overwrite and name in cls._axis_properties:
+                raise KeyError(f"Axis property {name!r} is already registered.")
+            cls._axis_properties[name] = property_func
+            return property_func
+
+        if func is None:
+            return decorator
+        return decorator(func)
 
     def __post_init__(self) -> None:
         mins = _as_1d_array(self.mins, name="mins")
@@ -327,31 +325,10 @@ class BinAxis:
             return self.shell_volume
         return self.widths
 
-    @classmethod
-    def register_derived(
-        cls,
-        name: str,
-        func: BinDerivedFunc | None = None,
-        *,
-        condition: BinDerivedCondition | None = None,
-        scope: str = "geometry",
-        overwrite: bool = False,
-    ) -> BinDerivedFunc | Callable[[BinDerivedFunc], BinDerivedFunc]:
-        """Register a derived property on :class:`BinNDResult`.
-
-        Class-level alias for :func:`register_bin_derived`.  Decorated
-        functions receive the ``BinNDResult`` instance as their first argument::
-
-            @BinAxis.register_derived("my_prop")
-            def _(bins):
-                return np.asarray(bins["mass.sum"]) / bins.nbins
-        """
-        return register_bin_derived(name, func, condition=condition, scope=scope, overwrite=overwrite)
-
     def __getattr__(self, name: str) -> Any:
-        # Fallback for dynamically registered axis properties (AXIS_PROPERTIES registry).
+        # Fallback for dynamically registered axis properties.
         # Only called when normal attribute lookup (fields, @property, methods) fails.
-        prop_func = AXIS_PROPERTIES.get(name)
+        prop_func = type(self)._axis_properties.get(name)
         if prop_func is not None:
             return prop_func(self)
         raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
@@ -388,100 +365,22 @@ class BinAxis:
 
         return axis_bin, axis_bin >= 0
 
-
+@BinAxis.register_property("min")
 def _axis_min(axis: BinAxis) -> Any:
-    return axis.mins
+    return axis.mins[0]
 
-
+@BinAxis.register_property("max")
 def _axis_max(axis: BinAxis) -> Any:
-    return axis.maxs
+    return axis.maxs[-1]
 
-
+@BinAxis.register_property("center")
 def _axis_center(axis: BinAxis) -> Any:
-    return axis.centers
+    return 0.5 * (axis.min + axis.max)
 
-
+@BinAxis.register_property("width")
 def _axis_width(axis: BinAxis) -> Any:
-    return axis.widths
+    return axis.max - axis.min
 
-
-def _axis_edges(axis: BinAxis) -> Any:
-    edges = axis.edges
-    return edges[:-1] if np.asarray(edges).ndim == 1 else edges
-
-
-def _axis_is_continuous(axis: BinAxis) -> np.ndarray:
-    return np.full(axis.nbins, axis.is_continuous, dtype=bool)
-
-
-register_axis_property("min", _axis_min)
-register_axis_property("max", _axis_max)
-register_axis_property("center", _axis_center)
-register_axis_property("width", _axis_width)
-register_axis_property("edges", _axis_edges)
-register_axis_property("is_continuous", _axis_is_continuous)
-
-
-@register_bin_derived("multi_index")
-def _bin_multi_index(bins: Any) -> np.ndarray:
-    return bins.multi_index_array()
-
-
-@register_bin_derived("cell_widths")
-def _bin_cell_widths(bins: Any) -> np.ndarray:
-    widths = [np.asarray(axis.widths) for axis in bins.axes]
-    multi = bins.multi_index_array()
-    return np.column_stack([widths[index][multi[:, index]] for index in range(bins.ndim)])
-
-
-@register_bin_derived("cell_volume")
-def _bin_cell_volume(bins: Any) -> np.ndarray:
-    return np.prod(np.asarray(bins._resolve_query("cell_widths")), axis=-1)
-
-
-@register_bin_derived("area")
-def _bin_area(bins: Any) -> np.ndarray:
-    axis = bins.find_axis({"rxy", "R", "r"})
-    values = np.asarray(axis.annulus_area)
-    if bins.ndim > 1:
-        axis_index = bins.axes.index(axis)
-        values = values[bins.multi_index_array()[:, axis_index]]
-    return values
-
-
-@register_bin_derived("volume")
-def _bin_volume(bins: Any) -> np.ndarray:
-    if bins.ndim == 1:
-        axis = bins.find_axis({"r"})
-        return np.asarray(axis.shell_volume)
-    return np.asarray(bins._resolve_query("cell_volume"))
-
-
-@register_bin_derived("cylindrical_volume")
-def _bin_cylindrical_volume(bins: Any) -> np.ndarray:
-    r_axis = bins.find_axis({"rxy", "R", "r"})
-    z_axis = bins.find_axis({"z"})
-    multi = bins.multi_index_array()
-    r_index = bins.axes.index(r_axis)
-    z_index = bins.axes.index(z_axis)
-    return np.asarray(r_axis.annulus_area)[multi[:, r_index]] * np.asarray(z_axis.widths)[multi[:, z_index]]
-
-
-@register_bin_derived("measure")
-def _bin_measure(bins: Any) -> np.ndarray:
-    """Per-bin physical measure — product of each axis's :attr:`BinAxis.measure`.
-
-    For a 1-D radial grid this is the shell volume; for a 1-D projected grid
-    the annulus area; for a generic ND grid the product of per-axis measures.
-    """
-    axes = bins.axes
-    if len(axes) == 1:
-        return axes[0].measure
-    multi = bins.multi_index_array()
-    result = SimArray(np.ones(bins.nbins, dtype=float),units="1")
-    for i, axis in enumerate(axes):
-        result *= axis.measure[multi[:, i]]
-    return result
 
 
 

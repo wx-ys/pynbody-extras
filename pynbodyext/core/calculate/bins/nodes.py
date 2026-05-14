@@ -7,7 +7,7 @@ import numpy as np
 from pynbodyext.core.calculate.nodes.base import CalculatorBase
 from pynbodyext.core.calculate.params.fields import Param, declarative_dependencies
 
-from .axes import BinAxis, materialize_axis, register_axis_property, register_bin_derived, resolve_axis_values
+from .axes import AxisPropertyFunc, BinAxis, materialize_axis, resolve_axis_values
 from .result import BinNDResult, SubBinNDResult
 
 if TYPE_CHECKING:
@@ -52,12 +52,24 @@ class Bin1D(CalculatorBase[BinNDResult, BinNDResult]):
         return deps
 
     @staticmethod
-    def axis_property(*args: Any, **kwargs: Any) -> Callable[[Any], Bin1D]:
-        return register_axis_property(*args, **kwargs)
+    def axis_property(
+        name: str | AxisPropertyFunc,
+        func: AxisPropertyFunc | None = None,
+        *,
+        overwrite: bool = False,
+    ) -> AxisPropertyFunc | Callable[[AxisPropertyFunc], AxisPropertyFunc]:
+        return BinAxis.register_property(cast("Any", name), cast("Any", func), overwrite=overwrite)
 
     @staticmethod
-    def derived(*args: Any, **kwargs: Any) -> Callable[[Any], Bin1D]:
-        return register_bin_derived(*args, **kwargs)
+    def derived(
+        fn: Callable[[Any], Any] | str | None = None,
+        *,
+        name: str | None = None,
+        scope: str = "derived",
+        condition: Callable[[Any], bool] | None = None,
+        overwrite: bool = False,
+    ) -> Callable[[Any], Any] | Callable[[Callable[[Any], Any]], Callable[[Any], Any]]:
+        return BinNDResult.derived(cast("Any", fn), name=cast("Any", name), scope=scope, condition=condition, overwrite=overwrite)
 
     def __matmul__(self, other: Bin1D | BinND) -> BinND:
         if isinstance(other, BinND):

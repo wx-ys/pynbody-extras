@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, overload
 
 import numpy as np
 from pynbody.array import IndexedSimArray, SimArray
@@ -16,7 +16,7 @@ from pynbodyext.core.calculate.runtime.options import RunOptions
 
 from .accessors import BinParticlesAccessor
 from .arrays import BinsArray
-from .axes import BIN_DERIVED_PROPERTIES, BinAxisAccessor, BinDerivedSpec, axis_matches
+from .axes import BinAxisAccessor, BinDerivedCondition, BinDerivedFunc, BinDerivedSpec, axis_matches
 from .plot import BinPlotMixin
 from .selectors import is_bool_array, is_int_sequence
 from .statistics import BinNDStatAccessor, apply_pipeline, get_statistic, parse_pipeline_key
@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
     from .axes import BinAxis
     from .nodes import BinND
+
 
 
 def _is_sim_like(value: Any) -> bool:
@@ -76,18 +77,9 @@ class _CSRBinsView:
             yield self._data[self._indptr[i] : self._indptr[i + 1]]
 
 
-class _DerivedAccessor:
-    def __get__(self, instance: BinNDResult | None, owner: type[BinNDResult]) -> Callable[..., Any]:
-        if instance is None:
-            return owner._register_derived
-        return instance._resolve_query
-
-
 class BinNDResult(BinPlotMixin):
     _SHARED_SCOPES: ClassVar[set[str]] = {"axis", "geometry"}
     _derived_property_registry: ClassVar[defaultdict[type, dict[str, BinDerivedSpec]]] = defaultdict(dict)
-    derived = _DerivedAccessor()
-    derived_property = _DerivedAccessor()
 
     def __init__(
         self,
@@ -262,7 +254,6 @@ class BinNDResult(BinPlotMixin):
 
     def keys(self) -> list[str]:
         keys: set[str] = set()
-        keys.update(name for name, spec in BIN_DERIVED_PROPERTIES.items() if spec.is_available(self))
         keys.update(self.property_keys())
         for cache_key in self._cache:
             if not isinstance(cache_key, tuple):
@@ -350,6 +341,12 @@ class BinNDResult(BinPlotMixin):
             return self.get_subresult(subset)
         raise TypeError(f"Selector did not produce a SimSnap subset: {type(subset)!r}.")
 
+    @overload
+    def __getitem__(self, key: str) -> BinsArray: ...
+    @overload
+    def __getitem__(self, key: FilterBase | Filter | Family) -> SubBinNDResult: ...
+    @overload
+    def __getitem__(self, key: CalculatorBase) -> BinsArray: ...
     def __getitem__(self, key: Any) -> SubBinNDResult | BinsArray:
         if isinstance(key, str):
             # Axis properties like "r.center" must be accessed via bins.axis("r").center
@@ -374,12 +371,9 @@ class BinNDResult(BinPlotMixin):
         raise AttributeError(name)
 
     def _query_scope(self, key: str) -> str:
-        bin_spec = self._get_bin_derived_spec(key)
-        if bin_spec is not None:
-            return bin_spec.scope
-        result_spec = self._get_derived_spec(key)
-        if result_spec is not None:
-            return result_spec.scope
+        spec = self._get_derived_spec(key)
+        if spec is not None:
+            return spec.scope
         return "particles"
 
     def _resolve_query(self, key: str) -> BinsArray:
@@ -412,8 +406,6 @@ class BinNDResult(BinPlotMixin):
         return BinsArray(self, values, name=name, field=field, mode=mode)
 
     def _compute_query(self, key: str, *, scope: str) -> BinsArray:
-        if key in BIN_DERIVED_PROPERTIES:
-            return self._geometry_property(key)
         spec = self._get_derived_spec(key)
         if spec is not None:
             return self._compute_derived(spec)
@@ -443,24 +435,12 @@ class BinNDResult(BinPlotMixin):
             )
         return result
 
-    def _get_bin_derived_spec(self, key: str) -> BinDerivedSpec | None:
-        spec = BIN_DERIVED_PROPERTIES.get(key)
-        if spec is None or not spec.is_available(self):
-            return None
-        return spec
-
     def multi_index_array(self) -> np.ndarray:
         if self._multi_index_cache is None:
             self._multi_index_cache = np.column_stack(
                 np.unravel_index(np.arange(self.nbins), self.shape_bins, order="C")
             )
         return self._multi_index_cache
-
-    def _geometry_property(self, key: str) -> BinsArray:
-        spec = self._get_bin_derived_spec(key)
-        if spec is None:
-            raise KeyError(f"Unknown or unavailable bin derived query {key!r}.")
-        return self._compute_derived(spec)
 
     def find_axis(self, aliases: set[str]) -> Any:
         for axis in self._axes:
@@ -649,31 +629,35 @@ class BinNDResult(BinPlotMixin):
     def query_report(self) -> list[dict[str, Any]]:
         return list(self._engine.diagnostics)
 
+    @overload
     @classmethod
-    def _register_derived(
+    def derived(cls, fn: BinDerivedFunc, *, name: None = None, scope: str = "derived", condition: BinDerivedCondition | None = None, overwrite: bool = False) -> BinDerivedFunc: ...
+    @overload
+    @classmethod
+    def derived(cls, fn: str, *, name: None = None, scope: str = "derived", condition: BinDerivedCondition | None = None, overwrite: bool = False) -> Callable[[BinDerivedFunc], BinDerivedFunc]: ...
+    @overload
+    @classmethod
+    def derived(cls, fn: None = None, *, name: str | None = None, scope: str = "derived", condition: BinDerivedCondition | None = None, overwrite: bool = False) -> Callable[[BinDerivedFunc], BinDerivedFunc]: ...
+    @classmethod
+    def derived(
         cls,
-        fn: Callable[[Any], Any] | str | None = None,
+        fn: BinDerivedFunc | str | None = None,
         *,
         name: str | None = None,
         scope: str = "derived",
-        condition: Callable[[Any], bool] | None = None,
+        condition: BinDerivedCondition | None = None,
         overwrite: bool = False,
-    ) -> Callable[[Any], Any]:
+    ) -> Any:
         if isinstance(fn, str):
-            return cls._register_derived(name=fn, scope=scope, condition=condition, overwrite=overwrite)
+            return cls.derived(name=fn, scope=scope, condition=condition, overwrite=overwrite)
 
-        def decorator(func: Callable[[Any], Any]) -> Callable[[Any], Any]:
+        def decorator(func: BinDerivedFunc) -> BinDerivedFunc:
             query_name = name or func.__name__
             spec = BinDerivedSpec(name=query_name, func=func, scope=scope, condition=condition)
-            if scope == "geometry":
-                if not overwrite and query_name in BIN_DERIVED_PROPERTIES:
-                    raise KeyError(f"BinNDResult derived property {query_name!r} is already registered.")
-                BIN_DERIVED_PROPERTIES[query_name] = spec
-            else:
-                bucket = cls._derived_property_registry[cls]
-                if not overwrite and query_name in bucket:
-                    raise KeyError(f"BinNDResult derived property {query_name!r} is already registered.")
-                bucket[query_name] = spec
+            bucket = cls._derived_property_registry[cls]
+            if not overwrite and query_name in bucket:
+                raise KeyError(f"BinNDResult derived property {query_name!r} is already registered.")
+            bucket[query_name] = spec
             return func
 
         if fn is None:
@@ -700,6 +684,22 @@ def _has_family(name: str) -> Callable[[Any], bool]:
 
     return condition
 
+@BinNDResult.derived("measure", scope="geometry")
+def _bin_measure(bins: BinNDResult) -> np.ndarray:
+    """Per-bin physical measure — product of each axis's :attr:`BinAxis.measure`.
+
+    For a 1-D radial grid this is the shell volume; for a 1-D projected grid
+    the annulus area; for a generic ND grid the product of per-axis measures.
+    """
+    axes = bins.axes
+    if len(axes) == 1:
+        return axes[0].measure
+    multi = bins.multi_index_array()
+    result = SimArray(np.ones(bins.nbins, dtype=float), units="1")
+    for i, axis in enumerate(axes):
+        result *= axis.measure[multi[:, i]]
+    return result
+
 
 @BinNDResult.derived("count", scope="particles")
 def _count(bins: BinNDResult) -> np.ndarray:
@@ -709,25 +709,29 @@ def _count(bins: BinNDResult) -> np.ndarray:
     return np.bincount(bins._particle_bin[valid_mask], minlength=bins.nbins).astype(int)
 
 
-@BinNDResult.derived("density", condition=lambda bins: BIN_DERIVED_PROPERTIES["volume"].is_available(bins))
+
+
+
+
+@BinNDResult.derived("density")
 def _density(bins: BinNDResult) -> np.ndarray:
-    return np.asarray(bins._resolve_query("mass.sum") / bins._resolve_query("volume"))
+    return np.asarray(bins["mass.sum"] / bins["volume"])
 
 
-@BinNDResult.derived("surface_density", condition=lambda bins: BIN_DERIVED_PROPERTIES["area"].is_available(bins))
+@BinNDResult.derived("surface_density")
 def _surface_density(bins: BinNDResult) -> np.ndarray:
-    return np.asarray(bins._resolve_query("mass.sum") / bins._resolve_query("area"))
+    return np.asarray(bins["mass.sum"] / bins["area"])
 
 
 @BinNDResult.derived("enclosed_mass")
 def _enclosed_mass(bins: BinNDResult) -> np.ndarray:
-    return np.cumsum(np.asarray(bins._resolve_query("mass.sum")))
+    return np.cumsum(bins["mass.sum"])
 
 
 @BinNDResult.derived("gas_fraction", condition=_has_family("gas"))
 def gas_fraction(bins: BinNDResult) -> np.ndarray:
     gas_mass_sum = bins.gas["mass.sum"]
-    total_mass_sum = bins._resolve_query("mass.sum")
+    total_mass_sum = bins["mass.sum"]
     numerator = np.nan_to_num(np.asarray(gas_mass_sum), nan=0.0)
     denominator = np.asarray(total_mass_sum)
     values = np.full(bins.nbins, np.nan, dtype=float)
