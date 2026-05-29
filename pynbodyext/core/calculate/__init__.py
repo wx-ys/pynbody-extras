@@ -175,6 +175,18 @@ When writing new calculators, prefer the style already used in
 fields where needed, and the narrowest role-specific hook.
 """
 
+from .bins import (
+    Bin1D,
+    BinAxis,
+    BinND,
+    BinNDResult,
+    BinParticlesAccessor,
+    BinsArray,
+    SubBinNDResult,
+    has_axes,
+    has_axis,
+    register_bin_algorithm,
+)
 from .diagnostics.observer import AccessEvent, AccessObservation
 from .diagnostics.perf import PerfCollector
 from .diagnostics.trace import TraceCollector, TraceEvent
@@ -223,6 +235,16 @@ from .runtime.scopes import Scope, ScopeSpec, TransformScope
 
 __all__ = [
     "CalculatorBase",
+    "Bin1D",
+    "BinND",
+    "BinAxis",
+    "BinNDResult",
+    "SubBinNDResult",
+    "BinsArray",
+    "BinParticlesAccessor",
+    "register_bin_algorithm",
+    "has_axis",
+    "has_axes",
     "RuntimeCalculatorBase",
     "BoundCalculator",
     "CombinedCalculator",

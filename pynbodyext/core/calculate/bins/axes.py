@@ -367,11 +367,11 @@ class BinAxis:
 
 @BinAxis.register_property("min")
 def _axis_min(axis: BinAxis) -> Any:
-    return axis.mins[0]
+    return axis.mins[0:1]
 
 @BinAxis.register_property("max")
 def _axis_max(axis: BinAxis) -> Any:
-    return axis.maxs[-1]
+    return axis.maxs[-1:]
 
 @BinAxis.register_property("center")
 def _axis_center(axis: BinAxis) -> Any:

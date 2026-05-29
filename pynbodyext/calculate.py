@@ -152,6 +152,7 @@ already used in :mod:`pynbodyext.properties`, :mod:`pynbodyext.filters`, and
 """
 
 from .core.calculate import (
+    Bin1D,
     CalculatorBase,
     FilterBase,
     Param,
@@ -163,6 +164,7 @@ from .core.calculate import (
 
 __all__ = [
     "CalculatorBase",
+    "Bin1D",
     "RuntimeCalculatorBase",
     "PropertyBase",
     "FilterBase",
