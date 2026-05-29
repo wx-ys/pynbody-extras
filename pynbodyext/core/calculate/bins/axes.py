@@ -2,16 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, overload
+from typing import Any, ClassVar, overload
 
 import numpy as np
-from pynbody import units as pynbody_units
-from pynbody.array import SimArray
-
-if TYPE_CHECKING:
-    from pynbodyext.core.calculate.runtime.context import ExecutionContext
-    from pynbodyext.core.calculate.runtime.input import NodeInput
-
 
 ArrayLike = Any
 BinAlgorithm = Callable[[np.ndarray, int, float, float], ArrayLike]
@@ -37,44 +30,6 @@ def _as_1d_array(value: Any, *, name: str) -> np.ndarray:
         raise ValueError(f"{name} must be one-dimensional.")
     return arr
 
-
-def _finite_minmax(values: Any) -> tuple[float, float]:
-    arr = np.asarray(values)
-    finite = arr[np.isfinite(arr)]
-    if finite.size == 0:
-        raise ValueError("Cannot infer bin range from an array with no finite values.")
-    return float(np.min(finite)), float(np.max(finite))
-
-
-def _coerce_bound_value(value: Any, reference_values: Any, sim: Any) -> float:
-    """Convert a bound value (possibly a unit string or UnitBase) to a float.
-
-    When *reference_values* carries pynbody units and *sim* supplies a
-    conversion context, unit strings such as ``"13.8 Gyr"`` are converted
-    to the same units as the axis values before being returned as a float.
-    """
-    if isinstance(value, str):
-        value = pynbody_units.Unit(value)
-    if isinstance(value, pynbody_units.UnitBase):
-        if hasattr(reference_values, "units"):
-            context = sim.conversion_context() if hasattr(sim, "conversion_context") else {}
-            return float(value.in_units(reference_values.units, **context))
-        return float(SimArray(1.0).in_units(value))
-    if isinstance(value, SimArray):
-        if hasattr(reference_values, "units"):
-            context = sim.conversion_context() if hasattr(sim, "conversion_context") else {}
-            return float(value.in_units(reference_values.units, **context))
-        return float(value)
-    return float(value)
-
-
-def _coerce_edges_like(edges: Any, source: Any) -> Any:
-    if isinstance(source, SimArray) and not isinstance(edges, SimArray):
-        out = SimArray(edges)
-        out.units = source.units
-        out.sim = source.sim
-        return out
-    return edges
 
 
 def _linear_edges(values: np.ndarray, nbins: int, vmin: float, vmax: float) -> np.ndarray:
@@ -382,99 +337,3 @@ def _axis_width(axis: BinAxis) -> Any:
     return axis.max - axis.min
 
 
-
-
-def infer_alias(prop: Any, alias: str | None, index: int = 0) -> str:
-    if alias is not None:
-        return alias
-    if isinstance(prop, str):
-        return prop
-    return f"dim{index}"
-
-
-def resolve_axis_values(prop: Any, sim: Any, ctx: ExecutionContext | None = None, input: NodeInput | None = None) -> Any:
-    from pynbodyext.core.calculate.nodes.base import CalculatorBase
-
-    if isinstance(prop, str):
-        return sim[prop]
-    if isinstance(prop, CalculatorBase):
-        if ctx is None or input is None:
-            return prop(sim)
-        return ctx.public_value(prop, input)
-    if callable(prop):
-        return prop(sim)
-    raise TypeError("Bin1D prop must be a string, callable, or CalculatorBase.")
-
-
-def resolve_runtime_value(value: Any, sim: Any, ctx: ExecutionContext | None, input: NodeInput | None) -> Any:
-    from pynbodyext.core.calculate.nodes.base import CalculatorBase
-
-    if isinstance(value, CalculatorBase):
-        if ctx is None or input is None:
-            return value(sim)
-        return ctx.public_value(value, input)
-    if callable(value) and not isinstance(value, (str, bytes)):
-        return value(sim)
-    return value
-
-
-def materialize_axis(spec: Any, sim: Any, ctx: ExecutionContext | None = None, input: NodeInput | None = None, *, index: int = 0) -> tuple[BinAxis, Any]:
-    values = resolve_axis_values(spec.prop, sim, ctx, input)
-    arr = _as_1d_array(values, name=f"axis {index} prop")
-    if len(arr) != len(sim):
-        raise ValueError(f"axis {infer_alias(spec.prop, spec.alias, index)!r} prop length must match active sim length.")
-
-    alias = infer_alias(spec.prop, spec.alias, index)
-    if spec.edges is not None:
-        if any(value is not None for value in (spec.vmin, spec.vmax, spec.nbins)):
-            raise ValueError("edges cannot be mixed with vmin/vmax/nbins.")
-        if spec.lows is not None or spec.highs is not None:
-            raise ValueError("edges cannot be mixed with lows/highs.")
-        edges = _as_1d_array(resolve_runtime_value(spec.edges, sim, ctx, input), name="edges")
-        if edges.shape[0] < 2:
-            raise ValueError("edges must contain at least two values.")
-        if not np.all(np.diff(np.asarray(edges)) > 0):
-            raise ValueError("edges must be strictly increasing.")
-        edges = _coerce_edges_like(edges, values)
-        return BinAxis(alias=alias, prop=spec.prop, mins=edges[:-1], maxs=edges[1:], include_rightmost=spec.include_rightmost, units=spec.units), values
-
-    if spec.lows is not None or spec.highs is not None:
-        if any(value is not None for value in (spec.vmin, spec.vmax, spec.nbins)):
-            raise ValueError("lows/highs cannot be mixed with vmin/vmax/nbins.")
-        if spec.lows is None or spec.highs is None:
-            raise ValueError("lows and highs must be provided together.")
-        lows = _coerce_edges_like(_as_1d_array(resolve_runtime_value(spec.lows, sim, ctx, input), name="lows"), values)
-        highs = _coerce_edges_like(_as_1d_array(resolve_runtime_value(spec.highs, sim, ctx, input), name="highs"), values)
-        return BinAxis(alias=alias, prop=spec.prop, mins=lows, maxs=highs, include_rightmost=spec.include_rightmost, units=spec.units), values
-
-    nbins = resolve_runtime_value(spec.nbins, sim, ctx, input)
-    if nbins is None:
-        raise ValueError("nbins is required when edges or lows/highs are not provided.")
-    nbins = int(nbins)
-    if nbins <= 0:
-        raise ValueError("nbins must be positive.")
-
-    inferred_min, inferred_max = _finite_minmax(arr)
-    vmin = resolve_runtime_value(spec.vmin, sim, ctx, input)
-    vmax = resolve_runtime_value(spec.vmax, sim, ctx, input)
-    vmin = inferred_min if vmin is None else _coerce_bound_value(vmin, values, sim)
-    vmax = inferred_max if vmax is None else _coerce_bound_value(vmax, values, sim)
-    if vmin >= vmax:
-        raise ValueError("vmin must be smaller than vmax.")
-
-    mode = spec.mode
-    if callable(mode):
-        edges = mode(arr, nbins, vmin, vmax)
-    else:
-        try:
-            algorithm = BIN_ALGORITHMS[str(mode)]
-        except KeyError as exc:
-            raise KeyError(f"Unknown bin mode {mode!r}.") from exc
-        edges = algorithm(np.asarray(arr), nbins, vmin, vmax)
-
-    edges = _coerce_edges_like(_as_1d_array(edges, name="edges"), values)
-    if len(edges) != nbins + 1:
-        raise ValueError("bin algorithm must return nbins + 1 edges.")
-    if not np.all(np.diff(np.asarray(edges)) > 0):
-        raise ValueError("bin edges must be strictly increasing.")
-    return BinAxis(alias=alias, prop=spec.prop, mins=edges[:-1], maxs=edges[1:], include_rightmost=spec.include_rightmost, units=spec.units), values

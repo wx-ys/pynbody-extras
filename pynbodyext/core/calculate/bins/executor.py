@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .axes import BinAxis, materialize_axis, resolve_axis_values
+from .axis_materializer import AxisMaterializer
 from .result import BinNDResult, SubBinNDResult
 
 if TYPE_CHECKING:
@@ -34,6 +34,7 @@ class BinParticleAssignment:
 class BinExecutor:
     def __init__(self, calculator: BinND) -> None:
         self._calculator = calculator
+        self._axis_materializer = AxisMaterializer()
 
     def execute(self, ctx: ExecutionContext, input: NodeInput) -> BinNDResult:
         sim = input.active_sim
@@ -66,7 +67,7 @@ class BinExecutor:
         aliases: set[str] = set()
 
         for index, spec in enumerate(self._calculator.axes_specs):
-            axis, axis_values = materialize_axis(spec, sim, ctx, input, index=index)
+            axis, axis_values = self._axis_materializer.materialize(spec, sim, ctx=ctx, input=input, index=index)
             if axis.alias in aliases:
                 raise ValueError(f"Duplicate bin axis alias {axis.alias!r}.")
             aliases.add(axis.alias)
@@ -105,7 +106,7 @@ class BinExecutor:
 
     def spawn_result(self, parent: BinNDResult, subset: Any) -> SubBinNDResult:
         values = tuple(
-            resolve_axis_values(spec.prop, subset, None, None)
+            self._axis_materializer._resolve_source(spec, subset).values
             for spec in self._calculator.axes_specs
         )
         result = self.build_result(

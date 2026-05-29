@@ -114,9 +114,9 @@ class Bin1D(_BinNodeBase):
     nbins: Param[int | None] = Param(default=None)
 
     mode: str = Param.static(default="linear", kw_only=False)
-    edges: Param[Any] = Param(default=None, kw_only=True)
-    lows: Param[Any] = Param(default=None, kw_only=True)
-    highs: Param[Any] = Param(default=None, kw_only=True)
+    edges: Param[Any | None] = Param(default=None, kw_only=True)
+    lows: Param[Any | None] = Param(default=None, kw_only=True)
+    highs: Param[Any | None] = Param(default=None, kw_only=True)
     alias: str | None = Param.static(default=None, kw_only=True)
     include_rightmost: bool = Param.static(default=True, kw_only=True)
     out_of_range: str = Param.static(default="drop", kw_only=True)
