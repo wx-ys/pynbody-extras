@@ -8,7 +8,13 @@ from pynbodyext.core.calculate.nodes.base import CalculatorBase
 from pynbodyext.core.calculate.params.fields import Param, declarative_dependencies
 from pynbodyext.core.calculate.result.enums import BuiltinKinds, NodeKind
 
-from .axes import AxisPropertyFunc, BinAxis, materialize_axis, resolve_axis_values
+from .axes import (
+    AxisPropertyFunc,
+    BinAxis,
+    materialize_axis,
+    register_bin_algorithm,
+    resolve_axis_values,
+)
 from .result import BinNDResult, SubBinNDResult
 
 if TYPE_CHECKING:
@@ -55,7 +61,16 @@ class Bin1D(CalculatorBase[BinNDResult, BinNDResult]):
         return deps
 
     @staticmethod
-    def axis_property(
+    def register_bin_algorithm(
+        name: str,
+        func: Any = None,
+        *,
+        overwrite: bool = False,
+    ) -> Any:
+        return register_bin_algorithm(name, func, overwrite=overwrite)
+
+    @staticmethod
+    def register_axis_property(
         name: str | AxisPropertyFunc,
         func: AxisPropertyFunc | None = None,
         *,
@@ -64,7 +79,7 @@ class Bin1D(CalculatorBase[BinNDResult, BinNDResult]):
         return BinAxis.register_property(cast("Any", name), cast("Any", func), overwrite=overwrite)
 
     @staticmethod
-    def derived(
+    def register_derived(
         fn: Callable[[Any], Any] | str | None = None,
         *,
         name: str | None = None,
@@ -73,6 +88,8 @@ class Bin1D(CalculatorBase[BinNDResult, BinNDResult]):
         overwrite: bool = False,
     ) -> Callable[[Any], Any] | Callable[[Callable[[Any], Any]], Callable[[Any], Any]]:
         return BinNDResult.derived(cast("Any", fn), name=cast("Any", name), scope=scope, condition=condition, overwrite=overwrite)
+
+    derived = register_derived
 
     def __matmul__(self, other: Bin1D | BinND) -> BinND:
         if isinstance(other, BinND):
