@@ -54,7 +54,7 @@ class BinSubresultStore:
 
     def spawn(self, subset: Any) -> SubBinNDResult:
         owner = self._owner
-        return owner._calculator._spawn_result(owner.root, subset)
+        return owner._calculator._executor().spawn_result(owner.root, subset)
 
     def subset_cache_key(self, subset: Any) -> Any:
         root_sim = self._owner.root.sim
