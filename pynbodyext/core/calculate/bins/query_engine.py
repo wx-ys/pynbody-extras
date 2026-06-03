@@ -26,6 +26,9 @@ _BATCH_RUN_OPTIONS: RunOptions = RunOptions(
     observe=False,
 )
 
+# Density suffix pattern — only .density (dot notation)
+_DENSITY_SUFFIX: str = ".density"
+
 
 class BinQueryEngine:
     def __init__(self, owner: BinNDResult, diagnostics: Any) -> None:
@@ -80,6 +83,13 @@ class BinQueryEngine:
             self._diagnostics.record("query", key=key, scope=scope)
             return result
 
+        # Intercept density-suffix queries ("mass.density", "mass.sum.density", …)
+        # Bare "density" is treated as "mass.density".
+        # Only .density (dot notation) is recognised — no underscore aliases.
+        density_base = self._strip_density_suffix(key)
+        if density_base is not None or key == "density":
+            return self._resolve_density(key, density_base if density_base is not None else key)
+
         cache_key = (scope, key)
         if cache_key in self._cache:
             return self._cache[cache_key]
@@ -98,6 +108,102 @@ class BinQueryEngine:
         mode: str | None = None,
     ) -> BinsArray:
         return BinsArray(self._owner, values, name=name, field=field, mode=mode)
+
+    # ------------------------------------------------------------------
+    # Density-suffix resolution ("mass.density" → canonical "mass.sum.density")
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _canonical_density_key(base_field: str) -> str:
+        """Normalize *base_field* to the canonical density key ``{field}.sum.density``.
+
+        ``"mass"`` → ``"mass.sum.density"``
+        ``"mass.sum"`` → ``"mass.sum.density"``
+        ``"vz"`` → ``"vz.sum.density"``
+        """
+        if base_field.endswith(".sum"):
+            return f"{base_field}.density"
+        return f"{base_field}.sum.density"
+
+    @staticmethod
+    def _strip_density_suffix(key: str) -> str | None:
+        """If *key* ends with ``.density``, return the base field (stripped suffix).
+
+        Returns ``None`` if the suffix does not match.
+        Only the dot-notation ``.density`` is recognised (no underscore alias).
+        """
+        if key.endswith(_DENSITY_SUFFIX) and len(key) > len(_DENSITY_SUFFIX):
+            base = key[: -len(_DENSITY_SUFFIX)]
+            if base and not base.endswith("."):
+                return base
+        return None
+
+    def _resolve_density(self, key: str, base_field: str) -> BinsArray:
+        """Resolve a ``"<field>.density"`` query via the canonical form.
+
+        All density queries normalise to ``{field}.sum.density`` so that
+        ``bins["density"]``, ``bins["mass.density"]``, and
+        ``bins["mass.sum.density"]`` share a single cache entry.
+        """
+        owner = self._owner
+
+        # Handle bare "density" — default field is "mass"
+        if base_field == "density":
+            base_field = "mass"
+
+        canonical_key = self._canonical_density_key(base_field)
+        cache_key = ("derived", canonical_key)
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        # Determine the numerator: for "count" use the derived property
+        # directly (count is already per-bin); for any other field compute
+        # "<field>.sum".
+        if base_field == "count":
+            numerator = owner._resolve_query("count")
+        elif base_field.endswith(".sum"):
+            # Already has a stat suffix — don't double-wrap
+            numerator = owner._resolve_query(base_field)
+        else:
+            numerator = owner._resolve_query(f"{base_field}.sum")
+
+        denominator = owner._resolve_query("measure")
+
+        # Divide BinsArray objects directly to preserve units
+        with np.errstate(divide="ignore", invalid="ignore"):
+            result_arr = numerator / denominator
+
+        result = self.wrap(result_arr, name=canonical_key, field=base_field, mode="density")
+        self._cache[cache_key] = result
+        self._diagnostics.record("query", key=key, scope="derived")
+        return result
+
+    def invalidate_measure_dependent_cache(self) -> tuple[int, list[str]]:
+        """Clear all cached entries that depend on the axis measure.
+
+        This includes density-related entries (all whose canonical name
+        ends with ``.density``) and the ``"measure"`` geometry entry
+        itself.  Returns ``(count, cleared_names)``.
+        """
+        keys_to_clear: list[tuple] = []
+        cleared_names: list[str] = []
+        for k in self._cache:
+            if not isinstance(k, tuple) or len(k) != 2:
+                continue
+            scope, name = k[0], k[1]
+            if not isinstance(name, str):
+                continue
+            # Density entries: ("derived", "*density")
+            if scope == "derived" and name.endswith(_DENSITY_SUFFIX):
+                keys_to_clear.append(k)
+                cleared_names.append(name)
+            # Measure entry: ("geometry", "measure") — the root geometry cache
+            elif scope == "geometry" and name == "measure":
+                keys_to_clear.append(k)
+                cleared_names.append(name)
+        for k in keys_to_clear:
+            del self._cache[k]
+        return len(keys_to_clear), cleared_names
 
     def compute_query(self, key: str, *, scope: str) -> BinsArray:
         spec = type(self._owner)._extensions.get_derived_spec(self._owner, key)

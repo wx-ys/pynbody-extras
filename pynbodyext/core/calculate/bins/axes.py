@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, ClassVar, overload
@@ -83,6 +85,24 @@ def register_bin_algorithm(name: str, func: BinAlgorithm | None = None, *, overw
     return decorator(func)
 
 
+# --- Axis physical measure registry ---
+# Maps axis alias to callable (BinAxis) -> np.ndarray
+_AXIS_MEASURE_REGISTRY: dict[str, Callable[[BinAxis], np.ndarray]] = {}
+
+# Maps named measure types to callables, decoupled from alias
+_AXIS_MEASURE_TYPE_REGISTRY: dict[str, Callable[[BinAxis], np.ndarray]] = {
+    "spherical_shell": lambda axis: axis.shell_volume,
+    "annulus": lambda axis: axis.annulus_area,
+    "linear": lambda axis: axis.widths,
+}
+
+# Weak set of BinNDResult instances that should be notified when the global
+# axis measure registry changes.  Each subscriber must expose a method
+#  _on_axis_measure_change(alias: str, type_name: str) -> int
+# that invalidates cached entries and returns the number cleared.
+_measure_change_subscribers: weakref.WeakSet = weakref.WeakSet()
+
+
 def axis_matches(axis: BinAxis, names: set[str]) -> bool:
     return axis.alias in names or (isinstance(axis.prop, str) and axis.prop in names)
 
@@ -98,8 +118,9 @@ class BinAxisAccessor:
         list(bins.axis)      # iterate over all axes
     """
 
-    def __init__(self, axes: tuple[BinAxis, ...]) -> None:
+    def __init__(self, axes: tuple[BinAxis, ...], owner: Any = None) -> None:
         self._axes = axes
+        self._owner = owner  # BinNDResult that owns this accessor
 
     @property
     def extent(self) -> list[float]:
@@ -124,6 +145,30 @@ class BinAxisAccessor:
             if ax.alias == name:
                 return ax
         raise AttributeError(f"No bin axis {name!r}.")
+
+    def set_axis_measure_type(self, alias: str, type_name: str) -> None:
+        """Per-instance override: assign *type_name* to *alias*.
+
+        Only affects the owning :class:`BinNDResult` instance — its cached
+        density entries are invalidated; no other instance is touched.
+
+        Equivalent to calling :meth:`BinNDResult.set_axis_measure_type`
+        directly.
+
+        Parameters
+        ----------
+        alias:
+            The axis alias (or prop name) to assign the measure type to.
+        type_name:
+            A measure type name previously registered via
+            :meth:`BinAxis.register_measure_type`.  Built-in types include
+            ``"spherical_shell"``, ``"annulus"``, and ``"linear"``.
+        """
+        if self._owner is None:
+            raise RuntimeError(
+                "BinAxisAccessor.set_axis_measure_type requires an owning BinNDResult."
+            )
+        self._owner.set_axis_measure_type(alias, type_name)
 
     def __iter__(self):
         return iter(self._axes)
@@ -263,22 +308,126 @@ class BinAxis:
 
     @property
     def measure(self) -> np.ndarray:
-        """Physical measure per bin — auto-detected from the axis alias / prop.
+        """Physical measure per bin — registry lookup with hardcoded fallback.
 
-        - ``rxy`` / ``R`` → annulus area ``π(max² − min²)``
-        - ``r`` → spherical shell volume ``4/3π(max³ − min³)``
-        - anything else → bin width ``max − min``
+        Resolution order:
+
+        1. :data:`_AXIS_MEASURE_REGISTRY` by ``.alias``
+        2. Same registry by string ``.prop``
+        3. Hardcoded legacy: ``rxy``/``R`` → annulus area, ``r`` → shell volume
+        4. Default: bin width ``max − min``
 
         Use :attr:`annulus_area` or :attr:`shell_volume` to force a specific
         formula regardless of alias.
         """
         alias = self.alias
         prop_str = self.prop if isinstance(self.prop, str) else ""
+
+        # 1. Registered function for this alias
+        if alias in _AXIS_MEASURE_REGISTRY:
+            return _AXIS_MEASURE_REGISTRY[alias](self)
+
+        # 2. Registered function for this prop string
+        if prop_str and prop_str in _AXIS_MEASURE_REGISTRY:
+            return _AXIS_MEASURE_REGISTRY[prop_str](self)
+
+        # 3. Hardcoded legacy fallback
         if alias in {"rxy", "R"} or prop_str in {"rxy", "R"}:
             return self.annulus_area
         if alias == "r" or prop_str == "r":
             return self.shell_volume
+
+        # 4. Default: linear
         return self.widths
+
+    # ------------------------------------------------------------------
+    # Axis measure registry classmethods
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def register_axis_measure(
+        cls,
+        alias: str,
+        func: Callable[[BinAxis], np.ndarray],
+        *,
+        overwrite: bool = False,
+    ) -> None:
+        """Register a physical measure function for a specific axis alias.
+
+        After registration, :attr:`measure` will call *func* for any axis
+        whose ``.alias`` or string ``.prop`` matches *alias*.
+
+        Parameters
+        ----------
+        alias:
+            The axis alias (or prop name) to associate with this measure.
+        func:
+            A callable ``(BinAxis) -> np.ndarray`` returning per-bin measure.
+        overwrite:
+            If ``False`` (default), raise :exc:`KeyError` if *alias* is
+            already registered.
+        """
+        if not overwrite and alias in _AXIS_MEASURE_REGISTRY:
+            raise KeyError(f"Axis measure for alias {alias!r} is already registered.")
+        _AXIS_MEASURE_REGISTRY[alias] = func
+
+    @classmethod
+    def register_measure_type(
+        cls,
+        name: str,
+        func: Callable[[BinAxis], np.ndarray],
+        *,
+        overwrite: bool = False,
+    ) -> None:
+        """Register a named physical measure type (global).
+
+        Measure types can be assigned to axis aliases via
+        :meth:`BinNDResult.set_axis_measure_type` (per-instance) or
+        :meth:`BinAxis.set_axis_measure_type` (global).  Built-in types:
+        ``"spherical_shell"``, ``"annulus"``, ``"linear"``.
+
+        When *overwrite* is ``True`` and *func* differs from the
+        currently registered function, all live :class:`BinNDResult`
+        instances are notified so they can invalidate cached density
+        entries that depend on the old measure.
+
+        Parameters
+        ----------
+        name:
+            Name for the measure type.
+        func:
+            A callable ``(BinAxis) -> np.ndarray`` returning per-bin measure.
+        overwrite:
+            If ``False`` (default), raise :exc:`KeyError` if *name* is
+            already registered.
+        """
+        if not overwrite and name in _AXIS_MEASURE_TYPE_REGISTRY:
+            raise KeyError(f"Measure type {name!r} is already registered.")
+
+        old_func = _AXIS_MEASURE_TYPE_REGISTRY.get(name)
+        _AXIS_MEASURE_TYPE_REGISTRY[name] = func
+
+        # Notify subscribers if the function actually changed
+        if overwrite and old_func is not None and old_func is not func:
+            total_cleared = 0
+            all_cleared: list[str] = []
+            for subscriber in list(_measure_change_subscribers):
+                try:
+                    n, names = subscriber._on_axis_measure_change(name, name)
+                except Exception:
+                    continue
+                total_cleared += n
+                all_cleared.extend(names)
+            if total_cleared > 0:
+                unique = sorted(set(all_cleared))
+                _logger = logging.getLogger("pynbody")
+                _logger.warning(
+                    "Measure type %r redefined (overwrite=True). "
+                    "Cleared %d cached entr%s: %s.",
+                    name, total_cleared,
+                    "y" if total_cleared == 1 else "ies",
+                    ", ".join(unique),
+                )
 
     def __getattr__(self, name: str) -> Any:
         # Fallback for dynamically registered axis properties.

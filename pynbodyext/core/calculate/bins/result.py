@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, ClassVar, overload
 
 import numpy as np
-from pynbody.array import SimArray
 from pynbody.family import get_family
 from pynbody.snapshot import SimSnap
 
@@ -26,9 +25,9 @@ if TYPE_CHECKING:
     from pynbody.filt import Filter
 
     from .arrays import BinsArray
-    from .axes import BinAxis
     from .nodes import BinND
 
+from .axes import BinAxis  # runtime import for set_axis_measure_type
 
 
 def _is_sim_like(value: Any) -> bool:
@@ -101,9 +100,21 @@ class BinNDResult(BinPlotMixin):
 
         self._multi_index_cache: np.ndarray | None = None
 
+        # Per-instance axis measure overrides.  Keys are axis aliases; values
+        # are measure type *names* (str) that resolve through the global
+        # _AXIS_MEASURE_TYPE_REGISTRY.  When set, these take precedence over
+        # the global _AXIS_MEASURE_REGISTRY for this instance.
+        self._axis_measure_overrides: dict[str, str] = {}
+
         self._diagnostics = BinsResultEngine()
         self._query_engine = BinQueryEngine(self, self._diagnostics)
         self._subresults = BinSubresultStore(self)
+
+        # Subscribe to global measure-type redefinitions (e.g.
+        # BinAxis.register_measure_type(..., overwrite=True)) so that
+        # cached density entries are invalidated when a named type changes.
+        from .axes import _measure_change_subscribers
+        _measure_change_subscribers.add(self)
 
 
     @property
@@ -163,8 +174,25 @@ class BinNDResult(BinPlotMixin):
         >>> bins.axis.r          # axis with alias "r"
         >>> bins.axis["r"]       # same
         >>> bins.axis[0]         # first axis
+        >>> bins.axis.set_axis_measure_type("r", "annulus")  # per-instance override
         """
-        return BinAxisAccessor(self._axes)
+        return BinAxisAccessor(self._axes, owner=self)
+
+    def _resolve_axis_measure(self, axis: BinAxis) -> np.ndarray:
+        """Return the effective per-bin measure for *axis*.
+
+        Checks this instance's local ``_axis_measure_overrides`` first
+        (keyed by ``axis.alias``; values are type names resolved via the
+        global ``_AXIS_MEASURE_TYPE_REGISTRY``), then falls back to the
+        global :attr:`BinAxis.measure` property.
+        """
+        type_name = self._axis_measure_overrides.get(axis.alias)
+        if type_name is not None:
+            from .axes import _AXIS_MEASURE_TYPE_REGISTRY as _types
+            func = _types.get(type_name)
+            if func is not None:
+                return func(axis)
+        return axis.measure
 
     @property
     def bin_indices(self) -> _CSRBinsView:
@@ -405,6 +433,79 @@ class BinNDResult(BinPlotMixin):
     def query_report(self) -> list[dict[str, Any]]:
         return self._query_engine.query_report()
 
+    # ------------------------------------------------------------------
+    # Axis measure type configuration
+    # ------------------------------------------------------------------
+
+    def set_axis_measure_type(self, alias: str, type_name: str | None) -> None:
+        """Assign a registered measure type to an axis *alias* — **per-instance**.
+
+        Only affects this :class:`BinNDResult` and its subresults.  Other
+        instances are **not** affected.  Cached density entries that depend
+        on the axis measure are invalidated for this instance only.
+
+        Pass ``type_name=None`` to remove a previously set per-instance
+        override, reverting to the global behaviour for *alias*.
+
+        For a **global** change use :meth:`BinAxis.register_measure_type`
+        with ``overwrite=True``.
+
+        Parameters
+        ----------
+        alias:
+            The axis alias (or prop name) to assign the measure type to.
+        type_name:
+            A measure type name previously registered via
+            :meth:`BinAxis.register_measure_type`.  Built-in types include
+            ``"spherical_shell"``, ``"annulus"``, and ``"linear"``.
+            Pass ``None`` to clear a previously set override.
+        """
+        from .axes import _AXIS_MEASURE_TYPE_REGISTRY as _types
+
+        if type_name is None:
+            if alias not in self._axis_measure_overrides:
+                return
+            del self._axis_measure_overrides[alias]
+        else:
+            if type_name not in _types:
+                raise KeyError(
+                    f"Unknown measure type {type_name!r}. "
+                    f"Known types: {sorted(_types)}."
+                )
+            old_type = self._axis_measure_overrides.get(alias)
+            if old_type == type_name:
+                return  # no change — nothing to do
+            self._axis_measure_overrides[alias] = type_name
+
+        # Invalidate measure-dependent cache entries on this instance + subresults
+        n, names = self._query_engine.invalidate_measure_dependent_cache()
+        for sub in self._subresults.values():
+            sn, snames = sub._query_engine.invalidate_measure_dependent_cache()
+            n += sn
+            names.extend(snames)
+
+        if n > 0:
+            unique = sorted(set(names))
+            entr = "y" if n == 1 else "ies"
+            self._calculator.warning(
+                f"Per-instance measure type for axis {alias!r} changed to "
+                f"{type_name!r}. Cleared {n} cached entr{entr}: "
+                f"{', '.join(unique)}."
+            )
+
+    def _on_axis_measure_change(self, alias: str, type_name: str) -> tuple[int, list[str]]:
+        """Called by the global subscriber mechanism when a measure type is redefined.
+
+        Invalidates measure-dependent cache entries on this instance and all
+        subresults.  Returns ``(count, cleared_names)``.
+        """
+        n, names = self._query_engine.invalidate_measure_dependent_cache()
+        for sub in self._subresults.values():
+            sn, snames = sub._query_engine.invalidate_measure_dependent_cache()
+            n += sn
+            names.extend(snames)
+        return n, names
+
     @classmethod
     def register_transform(
         cls,
@@ -467,18 +568,23 @@ def _has_family(name: str) -> Callable[[Any], bool]:
 
 @BinNDResult.derived("measure", scope="geometry")
 def _bin_measure(bins: BinNDResult) -> np.ndarray:
-    """Per-bin physical measure — product of each axis's :attr:`BinAxis.measure`.
+    """Per-bin physical measure — product of each axis's effective measure.
+
+    Respects any per-instance overrides set via
+    :meth:`BinNDResult.set_axis_measure_type`.
 
     For a 1-D radial grid this is the shell volume; for a 1-D projected grid
     the annulus area; for a generic ND grid the product of per-axis measures.
     """
     axes = bins.axes
     if len(axes) == 1:
-        return axes[0].measure
+        return bins._resolve_axis_measure(axes[0])
     multi = bins.multi_index_array()
-    result = SimArray(np.ones(bins.nbins, dtype=float), units="1")
-    for i, axis in enumerate(axes):
-        result *= axis.measure[multi[:, i]]
+    # Start from the first axis so that units are inherited correctly
+    # (e.g. kpc for a linear axis, kpc^2 for an annulus, kpc^3 for a shell).
+    result = bins._resolve_axis_measure(axes[0])[multi[:, 0]].copy()
+    for i in range(1, len(axes)):
+        result *= bins._resolve_axis_measure(axes[i])[multi[:, i]]
     return result
 
 
@@ -494,14 +600,26 @@ def _count(bins: BinNDResult) -> np.ndarray:
 
 
 
-@BinNDResult.derived("density")
+@BinNDResult.derived("density", overwrite=True)
 def _density(bins: BinNDResult) -> np.ndarray:
-    return np.asarray(bins["mass.sum"] / bins["volume"])
+    """Per-bin mass density: total mass divided by physical measure.
+
+    Equivalent to ``bins["mass.sum.density"]`` and ``bins["mass.density"]``
+    — all three share the same cache entry under the canonical key
+    ``"mass.sum.density"``.
+
+    For a 1-D radial profile this is the volumetric mass density
+    (mass / shell_volume).  For a 1-D projected profile this is the
+    surface mass density (mass / annulus_area).
+    """
+    return bins["mass.sum.density"]
 
 
-@BinNDResult.derived("surface_density")
-def _surface_density(bins: BinNDResult) -> np.ndarray:
-    return np.asarray(bins["mass.sum"] / bins["area"])
+@BinNDResult.derived("number_density", overwrite=False)
+def _number_density(bins: BinNDResult) -> np.ndarray:
+    """Per-bin number density: particle count divided by physical measure."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return bins["count"] / bins["measure"]
 
 
 @BinNDResult.derived("enclosed_mass")
@@ -513,8 +631,8 @@ def _enclosed_mass(bins: BinNDResult) -> np.ndarray:
 def gas_fraction(bins: BinNDResult) -> np.ndarray:
     gas_mass_sum = bins.gas["mass.sum"]
     total_mass_sum = bins["mass.sum"]
-    numerator = np.nan_to_num(np.asarray(gas_mass_sum), nan=0.0)
-    denominator = np.asarray(total_mass_sum)
+    numerator = np.nan_to_num(np.asarray(gas_mass_sum).ravel(), nan=0.0)
+    denominator = np.asarray(total_mass_sum).ravel()
     values = np.full(bins.nbins, np.nan, dtype=float)
     valid = np.isfinite(denominator) & (denominator != 0)
     with np.errstate(divide="ignore", invalid="ignore"):
