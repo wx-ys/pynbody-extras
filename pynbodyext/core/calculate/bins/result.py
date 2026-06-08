@@ -25,9 +25,8 @@ if TYPE_CHECKING:
     from pynbody.filt import Filter
 
     from .arrays import BinsArray
+    from .axes import BinAxis
     from .nodes import BinND
-
-from .axes import BinAxis  # runtime import for set_axis_measure_type
 
 
 def _is_sim_like(value: Any) -> bool:
