@@ -5,6 +5,20 @@ The existing runtime signature remains optimized for in-run cache keys, while
 ``CalculatorSignature`` stores enough structured data to reconstruct supported
 calculator objects in the current Python environment.
 
+Storage pattern
+---------------
+For persisting calculators alongside results, use the two-field pattern::
+
+    sig = calculator_to_signature(calc)
+    key  = sig.pretty()       # human-readable, searchable
+    data = sig.to_json()      # full signature for reconstruction
+
+    # ... later ...
+    calc = calculator_from_signature(data)
+
+The convenience functions :func:`calculator_pack` and :func:`calculator_unpack`
+streamline this workflow.
+
 Classes
 -------
 _Encoder
@@ -40,6 +54,8 @@ __all__ = [
     "CalculatorSignature",
     "calculator_from_signature",
     "calculator_to_signature",
+    "calculator_pack",
+    "calculator_unpack",
     "calculator_pretty_init_args",
 ]
 
@@ -849,3 +865,72 @@ def calculator_pretty_init_args(
 
     from .render import _tree_dataclass_args
     return _tree_dataclass_args({"class": _class_path(calculator), "init": init_payload})
+
+
+# ---------------------------------------------------------------------------
+# Storage helpers (two-field pattern)
+# ---------------------------------------------------------------------------
+
+
+def calculator_pack(
+    calculator: Any,
+    *,
+    inline_array_bytes: int = DEFAULT_INLINE_ARRAY_BYTES,
+) -> tuple[str, str]:
+    """Pack a calculator into a ``(pretty_key, signature_json)`` pair for storage.
+
+    This is the recommended persistence pattern:
+
+    - *pretty_key* — a compact, human-readable string suitable for display,
+      search, and manual inspection (see :meth:`CalculatorSignature.pretty`).
+    - *signature_json* — the full, lossless JSON representation that can be
+      passed to :func:`calculator_unpack` or :func:`calculator_from_signature`
+      to reconstruct the original calculator.
+
+    Parameters
+    ----------
+    calculator : CalculatorBase
+        The calculator to pack for storage.
+    inline_array_bytes : int, optional
+        Maximum array size in bytes to inline in the signature payload.
+
+    Returns
+    -------
+    tuple[str, str]
+        ``(pretty_key, signature_json)``.
+    """
+    sig = calculator_to_signature(calculator, inline_array_bytes=inline_array_bytes)
+    return sig.pretty(), sig.to_json()
+
+
+def calculator_unpack(
+    signature_json: str,
+    *,
+    pretty_key: str | None = None,
+) -> Any:
+    """Reconstruct a calculator from its stored signature JSON.
+
+    This is a thin wrapper around :func:`calculator_from_signature` that
+    accepts the *signature_json* field produced by :func:`calculator_pack`.
+
+    Parameters
+    ----------
+    signature_json : str
+        A JSON string previously returned by :func:`calculator_pack`.
+    pretty_key : str, optional
+        The corresponding human-readable key.  Not used for reconstruction;
+        accepted only for API symmetry / self-documenting call sites.
+
+    Returns
+    -------
+    Any
+        The reconstructed calculator object.
+
+    Raises
+    ------
+    ValueError
+        If the signature is not constructible.
+    TypeError
+        If *signature_json* is not a valid signature JSON string.
+    """
+    return calculator_from_signature(signature_json)

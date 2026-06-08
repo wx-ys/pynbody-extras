@@ -28,6 +28,8 @@ __all__ = [
     "CalculatorSignature",
     "calculator_from_signature",
     "calculator_to_signature",
+    "calculator_pack",
+    "calculator_unpack",
     "ResultQuery",
     "ResultRepr",
 ]
@@ -66,7 +68,13 @@ def __getattr__(name: str) -> Any:
         from . import result
 
         return getattr(result, name)
-    if name in {"CalculatorSignature", "calculator_from_signature", "calculator_to_signature"}:
+    if name in {
+        "CalculatorSignature",
+        "calculator_from_signature",
+        "calculator_to_signature",
+        "calculator_pack",
+        "calculator_unpack",
+    }:
         from . import signature
 
         return getattr(signature, name)
