@@ -156,6 +156,8 @@ cpp/
 - Delete `crates/` (gravity, pynbodyext-rust, sph, src, target).
 - Delete `Cargo.toml`, `Cargo.lock`.
 - Purge `setuptools-rust`/`maturin` from setup.py, pyproject.toml.
+- `.pre-commit-config.yaml` — remove the six `cargo fmt/clippy/test` hooks for
+  `crates/gravity` and `crates/pynbodyext-rust` (lines 20–61).
 - Update `.gitignore` (drop cargo/`target` entries if present), `asv.conf.json`,
   `scripts/`, `docs/`, `benchmarks/` references to `_rust`/cargo/maturin.
 - Rename `_rust` → `_native` and `GRAVITY_RUST_AVAILABLE` →
