@@ -1,4 +1,4 @@
-use gravity::{direct, Octree, Tree3D};
+use gravity::{direct, Octree};
 
 fn gen_points(seed: u64, n: usize) -> Vec<[f64; 3]> {
     use rand::{rngs::StdRng, Rng, SeedableRng};

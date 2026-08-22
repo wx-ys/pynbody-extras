@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use gravity::kernel::KernelKind;
-use gravity::{direct, Octree as CoreOctree, Tree3D};
+use gravity::{direct, Octree as CoreOctree};
 
 #[inline]
 fn timing_enabled() -> bool {
@@ -291,11 +291,11 @@ impl Octree {
         release_gil(py, || {
             if threads == 0 {
                 // Use global Rayon thread pool (default parallelism).
-                <CoreOctree as Tree3D>::compute_accelerations(&self.inner, theta, out);
+                self.inner.compute_accelerations(theta, out);
             } else {
                 // Use a dedicated pool with exactly `threads` workers.
                 with_thread_pool(threads, || {
-                    <CoreOctree as Tree3D>::compute_accelerations(&self.inner, theta, out);
+                    self.inner.compute_accelerations(theta, out);
                 });
             }
         });
@@ -334,10 +334,10 @@ impl Octree {
 
         release_gil(py, || {
             if threads == 0 {
-                <CoreOctree as Tree3D>::compute_potentials(&self.inner, theta, &mut out);
+                self.inner.compute_potentials(theta, &mut out);
             } else {
                 with_thread_pool(threads, || {
-                    <CoreOctree as Tree3D>::compute_potentials(&self.inner, theta, &mut out);
+                    self.inner.compute_potentials(theta, &mut out);
                 });
             }
         });
@@ -381,10 +381,10 @@ impl Octree {
         };
         release_gil(py, || {
             if threads == 0 {
-                <CoreOctree as Tree3D>::accelerations_at_points(&self.inner, &pts, theta, out);
+                self.inner.accelerations_at_points(&pts, theta, out);
             } else {
                 with_thread_pool(threads, || {
-                    <CoreOctree as Tree3D>::accelerations_at_points(&self.inner, &pts, theta, out);
+                    self.inner.accelerations_at_points(&pts, theta, out);
                 });
             }
         });
@@ -427,15 +427,10 @@ impl Octree {
 
         release_gil(py, || {
             if threads == 0 {
-                <CoreOctree as Tree3D>::potentials_at_points(&self.inner, &pts, theta, &mut out);
+                self.inner.potentials_at_points(&pts, theta, &mut out);
             } else {
                 with_thread_pool(threads, || {
-                    <CoreOctree as Tree3D>::potentials_at_points(
-                        &self.inner,
-                        &pts,
-                        theta,
-                        &mut out,
-                    );
+                    self.inner.potentials_at_points(&pts, theta, &mut out);
                 });
             }
         });
