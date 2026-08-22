@@ -56,6 +56,13 @@ typecheck:
 test:
 	pytest
 
+.PHONY: cpp-test
+cpp-test:
+	g++ -std=c++17 -O2 -fopenmp -Icpp -o /tmp/pynbodyext_cpp_test \
+		cpp/gravity/tests/test_core.cpp \
+		$(wildcard cpp/gravity/*.cpp cpp/gravity/multipole/*.cpp) \
+		-lm && /tmp/pynbodyext_cpp_test
+
 
 .PHONY: bench-check bench-setup bench bench-v bench-continuous
 bench-check:
