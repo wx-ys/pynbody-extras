@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <vector>
+#include <algorithm>
 #include <optional>
 #include "gravity/vec3.hpp"
 #include "gravity/common.hpp"
@@ -19,6 +20,11 @@ static int failures = 0;
 #define CHECK_NEAR(a, b, tol) \
     do { double _a = (a), _b = (b); if (std::fabs(_a - _b) > (tol)) { \
         std::fprintf(stderr, "FAIL %s:%d: |%g - %g| > %g\n", __FILE__, __LINE__, _a, _b, (double)(tol)); ++failures; } } while (0)
+
+// The array-layout comparison in test_translate_vs_direct relies on MultipoleMoment
+// being exactly 56 contiguous doubles in field order.
+static_assert(sizeof(gravity::MultipoleMoment) == 56 * sizeof(double),
+              "MultipoleMoment must be 56 contiguous doubles");
 
 static void test_vec3() {
     gravity::Vec3 a(1.0, 2.0, 3.0), b(4.0, 5.0, 6.0);
@@ -180,6 +186,84 @@ static void test_traversal() {
     for (size_t i = 0; i < n; ++i) CHECK_NEAR(pot_t[i], pot_d[i], 1e-10);
 }
 
+static void test_translate_vs_direct() {
+    using namespace gravity;
+    unsigned s = 999u;
+    auto rnd = [&s]() { s = s*1664525u + 1013904223u; return (double)(s >> 8) / 16777216.0; };
+    std::vector<Vec3> pos(200);
+    for (auto& p : pos) p = Vec3(rnd(), rnd(), rnd());
+    std::vector<double> mass(200);
+    for (auto& m : mass) m = rnd();
+    std::vector<size_t> idx(200);
+    for (size_t i = 0; i < 200; ++i) idx[i] = i;
+    Vec3 B(0.3, 0.4, 0.5), A(0.8, -0.2, 0.1);
+    MultipoleMoment aboutB = MultipoleMoment::from_points(pos, mass.data(), idx, B, 5);
+    MultipoleMoment translated = translate_multipole(aboutB, A - B, 5);
+    MultipoleMoment aboutA = MultipoleMoment::from_points(pos, mass.data(), idx, A, 5);
+    // MultipoleMoment holds exactly 56 doubles in field order, so compare the
+    // layout as arrays (see the static_assert at namespace scope).
+    const double* t = &translated.m000;
+    const double* a = &aboutA.m000;
+    for (int i = 0; i < 56; ++i) CHECK_NEAR(t[i], a[i], 1e-10);
+}
+
+static void test_single_node_far_field() {
+    using namespace gravity;
+    // 4000 particles in [-0.1,0.1]^3, masses in [0.1, 1.0]; 400 targets at r in [20,30].
+    unsigned s = 7u;
+    auto rnd = [&s]() { s = s*1664525u + 1013904223u; return (double)(s >> 8) / 16777216.0; };
+    const size_t n = 4000;
+    std::vector<Vec3> pos(n);
+    std::vector<double> mass(n);
+    for (size_t i = 0; i < n; ++i) pos[i] = Vec3(-0.1 + 0.2*rnd(), -0.1 + 0.2*rnd(), -0.1 + 0.2*rnd());
+    for (size_t i = 0; i < n; ++i) mass[i] = 0.1 + 0.9*rnd();
+    // True mass-weighted COM.
+    Vec3 com(0,0,0); double mtot = 0.0;
+    for (size_t i = 0; i < n; ++i) { com = com + pos[i]*mass[i]; mtot += mass[i]; }
+    com.x /= mtot; com.y /= mtot; com.z /= mtot;
+    std::vector<size_t> idx(n);
+    for (size_t i = 0; i < n; ++i) idx[i] = i;
+    MultipoleMoment m = MultipoleMoment::from_points(pos, mass.data(), idx, com, 5);
+
+    auto direct_potential = [&](const Vec3& target) {
+        double phi = 0.0;
+        for (size_t i = 0; i < n; ++i) {
+            Vec3 dvec = pos[i] - target;
+            double r2 = norm2(dvec);
+            if (r2 == 0.0) continue;
+            phi += -mass[i] / std::sqrt(r2);
+        }
+        return phi;
+    };
+
+    std::vector<double> err_per_order[6];
+    for (int q = 0; q < 400; ++q) {
+        // random direction on the unit sphere
+        Vec3 dir;
+        do { dir = Vec3(2.0*rnd()-1.0, 2.0*rnd()-1.0, 2.0*rnd()-1.0); } while (norm2(dir) < 1e-6 || norm2(dir) > 1.0);
+        double norm = std::sqrt(norm2(dir));
+        double r = 20.0 + 10.0*rnd();
+        Vec3 target = com + Vec3(dir.x/norm*r, dir.y/norm*r, dir.z/norm*r);
+
+        double phi_direct = direct_potential(target);
+        Vec3 dvec = com - target;   // source-minus-target, matching the treewalk
+        PotentialDerivatives d = PotentialDerivatives::new_derivatives(dvec.x, dvec.y, dvec.z, 0.0, 5);
+        for (int order = 0; order <= 5; ++order) {
+            double phi_mp = gravity_potential_multipole(m, d, (unsigned char)order);
+            double err = phi_direct != 0.0 ? std::fabs(phi_mp - phi_direct) / std::fabs(phi_direct)
+                                           : std::fabs(phi_mp - phi_direct);
+            err_per_order[order].push_back(err);
+        }
+    }
+    // p90 of relative error per order must be < 1e-2 (matches the Rust assertion).
+    for (int order = 0; order <= 5; ++order) {
+        auto& errs = err_per_order[order];
+        std::sort(errs.begin(), errs.end());
+        size_t k = std::min((size_t)(errs.size() * 0.9), errs.size() - 1);
+        CHECK(errs[k] < 1e-2);
+    }
+}
+
 int main() {
     test_vec3();
     test_common();
@@ -190,6 +274,8 @@ int main() {
     test_direct();
     test_octree();
     test_traversal();
+    test_translate_vs_direct();
+    test_single_node_far_field();
     if (failures) { std::printf("%d FAILURE(S)\n", failures); return 1; }
     std::printf("ALL PASS\n");
     return 0;
