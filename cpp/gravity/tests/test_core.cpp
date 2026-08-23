@@ -30,6 +30,7 @@ static void test_common() {
     CHECK_NEAR(ir3, 0.125, 1e-12);
     CHECK(gravity::R2_TINY > 0.0);
     CHECK(gravity::NO_INDEX == std::numeric_limits<size_t>::max());
+    CHECK(!gravity::timing_enabled()); // GRAVITY_TIMING unset in the test environment
 }
 
 int main() {
