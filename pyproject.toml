@@ -40,7 +40,7 @@ Github = "https://github.com/GalaxySimAnalytics/pynbody-extras"
 [build-system]
 requires = [
     "setuptools>=61",
-    "setuptools-rust>=1.9",
+    "pybind11>=2.12",
     "wheel",
 ]
 build-backend = "setuptools.build_meta"
@@ -58,15 +58,6 @@ version = {attr = "pynbodyext.__version__"}
 
 
 # ======================================================================================
-# Maturin configuration (Rust bindings)
-# ======================================================================================
-[tool.maturin]
-manifest-path = "crates/pynbodyext-rust/Cargo.toml"
-module-name = "pynbodyext._rust"
-python-packages = ["pynbodyext"]
-
-
-# ======================================================================================
 # Optional dependencies
 # ======================================================================================
 [project.optional-dependencies]
@@ -78,7 +69,7 @@ dev = [
     "mypy>=1.17",
     "ruff>=0.11",
     "pytest>=7.4",
-    "maturin>=1.10",
+    "pybind11>=2.12",
 ]
 
 bench = [
