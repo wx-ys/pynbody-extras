@@ -5,6 +5,7 @@
 #include <optional>
 #include "gravity/vec3.hpp"
 #include "gravity/common.hpp"
+#include "gravity/kernel.hpp"
 
 static int failures = 0;
 #define CHECK(cond) \
@@ -33,9 +34,23 @@ static void test_common() {
     CHECK(!gravity::timing_enabled()); // GRAVITY_TIMING unset in the test environment
 }
 
+static void test_kernel() {
+    using namespace gravity;
+    CHECK_NEAR(kernel_potential_per_unit_mass(KernelKind::Plummer, 1.0, 0.0), -1.0, 1e-12);
+    CHECK_NEAR(kernel_potential_per_unit_mass(KernelKind::Plummer, 0.0, 0.1), 0.0, 1e-15);
+    CHECK_NEAR(kernel_potential_per_unit_mass(KernelKind::Plummer, 3.0, 4.0), -1.0/5.0, 1e-12);
+    CHECK_NEAR(kernel_accel_factor(KernelKind::Plummer, 2.0, 0.0), 1.0/8.0, 1e-12);
+    CHECK_NEAR(kernel_potential_per_unit_mass(KernelKind::CubicSplineW2, 2.0, 1.0), -1.0/2.0, 1e-12); // u>=1 -> -1/u
+    CHECK(multipole_min_separation_factor(KernelKind::Plummer) == 2.8);
+    CHECK(multipole_min_separation_factor(KernelKind::CubicSplineW2) == 1.0);
+    CHECK(multipole_soft_ok(KernelKind::Plummer, 3.0, 1.0));   // 3 > 2.8*1
+    CHECK(!multipole_soft_ok(KernelKind::Plummer, 2.0, 1.0));  // 2 < 2.8
+}
+
 int main() {
     test_vec3();
     test_common();
+    test_kernel();
     if (failures) { std::printf("%d FAILURE(S)\n", failures); return 1; }
     std::printf("ALL PASS\n");
     return 0;
