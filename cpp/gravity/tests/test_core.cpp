@@ -8,6 +8,7 @@
 #include "gravity/kernel.hpp"
 #include "gravity/direct.hpp"
 #include "gravity/octree.hpp"
+#include "gravity/traversal.hpp"
 #include "gravity/multipole/moment.hpp"
 #include "gravity/multipole/derivatives.hpp"
 #include "gravity/multipole/eval.hpp"
@@ -152,6 +153,33 @@ static void test_octree() {
     CHECK_NEAR((*tree.bh)[0].mass, 20.0, 1e-12); // root mass = sum
 }
 
+static void test_traversal() {
+    using namespace gravity;
+    // n=256, theta=0.0 forces full leaf traversal; must match direct to 1e-10.
+    // Matches gravity_tests.rs config: positions in [-0.5,0.5], masses in [0.5,1.5],
+    // leaf_capacity=32.
+    const size_t n = 256;
+    std::vector<Vec3> pos(n);
+    std::vector<double> mass(n);
+    unsigned s = 12345u;
+    auto rnd = [&s]() { s = s * 1664525u + 1013904223u; return (double)(s >> 8) / 16777216.0; };
+    for (size_t i = 0; i < n; ++i) pos[i] = Vec3(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5);
+    for (size_t i = 0; i < n; ++i) mass[i] = 0.5 + rnd();
+    Octree tree = Octree::build(pos, mass.data(), 32, 2);
+    std::vector<Vec3> acc_t(n), acc_d;
+    tree.compute_accelerations(0.0, acc_t);
+    acc_d = direct_accelerations(pos, mass.data());
+    for (size_t i = 0; i < n; ++i) {
+        CHECK_NEAR(acc_t[i].x, acc_d[i].x, 1e-10);
+        CHECK_NEAR(acc_t[i].y, acc_d[i].y, 1e-10);
+        CHECK_NEAR(acc_t[i].z, acc_d[i].z, 1e-10);
+    }
+    std::vector<double> pot_t(n), pot_d;
+    tree.compute_potentials(0.0, pot_t);
+    pot_d = direct_potentials(pos, mass.data());
+    for (size_t i = 0; i < n; ++i) CHECK_NEAR(pot_t[i], pot_d[i], 1e-10);
+}
+
 int main() {
     test_vec3();
     test_common();
@@ -161,6 +189,7 @@ int main() {
     test_eval();
     test_direct();
     test_octree();
+    test_traversal();
     if (failures) { std::printf("%d FAILURE(S)\n", failures); return 1; }
     std::printf("ALL PASS\n");
     return 0;

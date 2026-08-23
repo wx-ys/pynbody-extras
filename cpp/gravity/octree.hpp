@@ -78,6 +78,12 @@ public:
     void set_masses(std::optional<std::vector<double>> masses);
     const std::vector<NodeBh>& bh_payload() const;
 
+    // ---- Barnes-Hut traversal (defined in traversal.cpp) ----
+    void compute_accelerations(double theta, std::vector<Vec3>& out) const;
+    void compute_potentials(double theta, std::vector<double>& out) const;
+    void accelerations_at_points(const std::vector<Vec3>& points, double theta, std::vector<Vec3>& out) const;
+    void potentials_at_points(const std::vector<Vec3>& points, double theta, std::vector<double>& out) const;
+
 private:
     static std::pair<Vec3, double> bbox_of_points(const std::vector<Vec3>& pts);
     Node make_node(Vec3 center, double half_size, std::vector<size_t> indices);
