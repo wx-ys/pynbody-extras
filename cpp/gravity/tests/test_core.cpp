@@ -6,6 +6,7 @@
 #include "gravity/vec3.hpp"
 #include "gravity/common.hpp"
 #include "gravity/kernel.hpp"
+#include "gravity/direct.hpp"
 #include "gravity/multipole/moment.hpp"
 #include "gravity/multipole/derivatives.hpp"
 #include "gravity/multipole/eval.hpp"
@@ -104,6 +105,28 @@ static void test_eval() {
     CHECK_NEAR(t2.m000, 1.0, 1e-12);
 }
 
+static void test_direct() {
+    using namespace gravity;
+    // Two unit masses at (1,0,0) and (-1,0,0). Potential at each: -1/2 - 1/2 = -1? No:
+    // particle 0 sees particle 1 at distance 2 -> phi = -1*1/2. Self excluded.
+    std::vector<Vec3> pos = {Vec3(1,0,0), Vec3(-1,0,0)};
+    double ones[2] = {1.0, 1.0};
+    auto acc = direct_accelerations(pos, ones);
+    // acceleration on particle 0 from particle 1: m*x/r^3 = 1*(-2)/8 = -0.25
+    CHECK_NEAR(acc[0].x, -0.25, 1e-12);
+    CHECK_NEAR(acc[0].y, 0.0, 1e-12);
+    CHECK_NEAR(acc[1].x, 0.25, 1e-12);
+    auto pot = direct_potentials(pos, ones);
+    CHECK_NEAR(pot[0], -0.5, 1e-12);
+    CHECK_NEAR(pot[1], -0.5, 1e-12);
+    // At-points: query at origin.
+    std::vector<Vec3> q = {Vec3(0,0,0)};
+    auto acc_q = direct_accelerations_at_points(pos, ones, q);
+    CHECK_NEAR(acc_q[0].x, 0.0, 1e-12); // symmetric
+    auto pot_q = direct_potentials_at_points(pos, ones, q);
+    CHECK_NEAR(pot_q[0], -2.0, 1e-12);  // -1/1 - 1/1
+}
+
 int main() {
     test_vec3();
     test_common();
@@ -111,6 +134,7 @@ int main() {
     test_moment();
     test_derivatives();
     test_eval();
+    test_direct();
     if (failures) { std::printf("%d FAILURE(S)\n", failures); return 1; }
     std::printf("ALL PASS\n");
     return 0;
