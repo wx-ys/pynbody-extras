@@ -7,6 +7,7 @@
 #include "gravity/common.hpp"
 #include "gravity/kernel.hpp"
 #include "gravity/multipole/moment.hpp"
+#include "gravity/multipole/derivatives.hpp"
 
 static int failures = 0;
 #define CHECK(cond) \
@@ -68,11 +69,25 @@ static void test_moment() {
     CHECK_NEAR(t.m200, m2.m200, 1e-10);
 }
 
+static void test_derivatives() {
+    using namespace gravity;
+    // Monopole: d000 = 1/r at displacement (3,0,0), eps2=0.
+    auto d1 = PotentialDerivatives1::new_derivatives(3.0, 0.0, 0.0, 0.0);
+    CHECK_NEAR(d1.d000, 1.0/3.0, 1e-12);
+    CHECK_NEAR(d1.d100, -1.0/9.0, 1e-12);  // d(1/r)/dx = -x/r^3
+    CHECK_NEAR(d1.d010, 0.0, 1e-12);
+    // Full order-5 with eps2: r2 = 3^2+4^2 = 25 -> r=5, d000 = 1/sqrt(25)=0.2
+    auto d5 = PotentialDerivatives::new_derivatives(3.0, 4.0, 0.0, 0.0, 5);
+    CHECK_NEAR(d5.d000, 0.2, 1e-12);
+    CHECK_NEAR(d5.d100, -3.0/125.0, 1e-12); // -x/r^3 = -3/125
+}
+
 int main() {
     test_vec3();
     test_common();
     test_kernel();
     test_moment();
+    test_derivatives();
     if (failures) { std::printf("%d FAILURE(S)\n", failures); return 1; }
     std::printf("ALL PASS\n");
     return 0;
