@@ -6,6 +6,7 @@
 #include "gravity/vec3.hpp"
 #include "gravity/common.hpp"
 #include "gravity/kernel.hpp"
+#include "gravity/multipole/moment.hpp"
 
 static int failures = 0;
 #define CHECK(cond) \
@@ -47,10 +48,31 @@ static void test_kernel() {
     CHECK(!multipole_soft_ok(KernelKind::Plummer, 2.0, 1.0));  // 2 < 2.8
 }
 
+static void test_moment() {
+    using namespace gravity;
+    // Two unit-mass particles at (1,0,0) and (-1,0,0), center origin.
+    std::vector<Vec3> pos = {Vec3(1,0,0), Vec3(-1,0,0)};
+    std::vector<size_t> idx = {0, 1};
+    MultipoleMoment m = MultipoleMoment::from_points(pos, nullptr, idx, Vec3(0,0,0), 5);
+    CHECK_NEAR(m.m000, 2.0, 1e-12);
+    CHECK_NEAR(m.m100, 0.0, 1e-12);   // dipole vanishes by symmetry
+    CHECK_NEAR(m.m200, 1.0, 1e-12);   // 0.5*(1+1)
+    CHECK_NEAR(m.m020, 0.0, 1e-12);
+    CHECK_NEAR(m.m002, 0.0, 1e-12);
+    // translate: shift by (5,0,0). Mass-conservation: m000 unchanged.
+    MultipoleMoment t = translate_multipole(m, Vec3(5,0,0), 5);
+    CHECK_NEAR(t.m000, 2.0, 1e-12);
+    // from_points about shifted center should match translated moment's m100.
+    MultipoleMoment m2 = MultipoleMoment::from_points(pos, nullptr, idx, Vec3(5,0,0), 5);
+    CHECK_NEAR(t.m100, m2.m100, 1e-10);
+    CHECK_NEAR(t.m200, m2.m200, 1e-10);
+}
+
 int main() {
     test_vec3();
     test_common();
     test_kernel();
+    test_moment();
     if (failures) { std::printf("%d FAILURE(S)\n", failures); return 1; }
     std::printf("ALL PASS\n");
     return 0;
