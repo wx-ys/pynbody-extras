@@ -60,7 +60,7 @@ def test_multipole_order_convergence_accel(particles):
     for order in (0, 3, 4, 5):
         acc = g.tree_accelerations(theta=0.7, leaf_capacity=64, multipole_order=order, threads=1)
         errs.append(np.sqrt(np.mean(np.sum((acc - direct) ** 2, axis=1))))
-    assert errs == sorted(errs)  # non-increasing with order
+    assert errs == sorted(errs, reverse=True)  # non-increasing with order
     assert errs[-1] <= 0.8 * errs[0]  # order-5 at least 20% better than order-0
 
 
@@ -76,7 +76,7 @@ def test_multipole_order_convergence_potential(particles):
     for order in (0, 2, 3, 4, 5):
         pot = g.tree_potentials(theta=0.7, leaf_capacity=64, multipole_order=order, threads=1)
         errs.append(np.sqrt(np.mean((pot - direct) ** 2)))
-    assert errs == sorted(errs)
+    assert errs == sorted(errs, reverse=True)
     assert errs[-1] <= 0.8 * errs[0]
 
 
