@@ -1,7 +1,7 @@
 """High-performance gravity solvers (TreeBH + direct summation).
 
-This module provides a thin, stable Python API over a Rust backend
-(`pynbodyext._rust`) implementing:
+This module provides a thin, stable Python API over a C++ backend
+(`pynbodyext._native`) implementing:
 
 - direct summation (potentials and accelerations),
 - a Barnes–Hut TreeBH solver backed by an Octree,
@@ -48,7 +48,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 try:
-    from pynbodyext._rust import (
+    from pynbodyext._native import (
         Octree as _Octree,
         direct_accelerations_at_points_py as _direct_accelerations_at_points_py,
         direct_accelerations_py as _direct_accelerations_py,
@@ -57,8 +57,8 @@ try:
     )
 except ImportError as exc:  # pragma: no cover
     raise ImportError(
-        "pynbodyext.gravity requires the Rust extension module `pynbodyext._rust` to be built. "
-        "Install pynbodyext with Rust enabled or build the Rust bindings with maturin."
+        "pynbodyext.gravity requires the C++ extension module `pynbodyext._native` to be built. "
+        "Install pynbodyext with C++ enabled or build the native bindings with pip install -e ."
     ) from exc
 
 from pynbodyext.log import logger
