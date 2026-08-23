@@ -8,6 +8,7 @@
 #include "gravity/kernel.hpp"
 #include "gravity/multipole/moment.hpp"
 #include "gravity/multipole/derivatives.hpp"
+#include "gravity/multipole/eval.hpp"
 
 static int failures = 0;
 #define CHECK(cond) \
@@ -82,12 +83,34 @@ static void test_derivatives() {
     CHECK_NEAR(d5.d100, -3.0/125.0, 1e-12); // -x/r^3 = -3/125
 }
 
+static void test_eval() {
+    using namespace gravity;
+    // Single unit mass at origin; monopole moment about origin; target at (2,0,0).
+    // The treewalk evaluates derivatives at displacement (COM - target), i.e.
+    // source-minus-target, so here the derivative displacement is (-2,0,0).
+    std::vector<Vec3> pos = {Vec3(0,0,0)};
+    std::vector<size_t> idx = {0};
+    MultipoleMoment full = MultipoleMoment::from_points(pos, nullptr, idx, Vec3(0,0,0), 5);
+    PotentialDerivatives d = PotentialDerivatives::new_derivatives(-2.0, 0.0, 0.0, 0.0, 5);
+    CHECK_NEAR(gravity_potential_multipole(full, d, 0), -0.5, 1e-12);   // -1/r
+    CHECK_NEAR(gravity_potential_multipole(full, d, 5), -0.5, 1e-12);
+    Vec3 a = gravity_accel_multipole(full, d, 5);
+    CHECK_NEAR(a.x, -0.25, 1e-12);   // -m000*d100 = -1*(+0.25); d100 = -(-2)/8
+    CHECK_NEAR(a.y, 0.0, 1e-12);
+    CHECK_NEAR(a.z, 0.0, 1e-12);
+    // Moment2 translate invariance: a pure monopole stays m000 under shift.
+    Moment2 m2(full);
+    Moment2 t2 = MultipoleEval<2>::translate(m2, Vec3(3,0,0));
+    CHECK_NEAR(t2.m000, 1.0, 1e-12);
+}
+
 int main() {
     test_vec3();
     test_common();
     test_kernel();
     test_moment();
     test_derivatives();
+    test_eval();
     if (failures) { std::printf("%d FAILURE(S)\n", failures); return 1; }
     std::printf("ALL PASS\n");
     return 0;
