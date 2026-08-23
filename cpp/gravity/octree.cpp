@@ -178,7 +178,9 @@ void Octree::build_recursive(size_t node_idx) {
     }
     subdivide_node(node_idx);
     if (nodes[node_idx].children.has_value()) {
-        const auto& children = *nodes[node_idx].children;
+        // Copy by value: the recursive build_recursive(c) below push_backs into
+        // `nodes`, which may reallocate it and invalidate a reference into it.
+        const auto children = *nodes[node_idx].children;
         for (size_t c : children) {
             if (c == NO_INDEX) {
                 continue;
