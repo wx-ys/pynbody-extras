@@ -73,7 +73,7 @@ class KernelKind(Enum):
 
     Notes
     -----
-    The actual kernel implementation is provided by the Rust backend.
+    The actual kernel implementation is provided by the C++ backend.
     """
     No = None
     Plummer = 0
@@ -262,7 +262,7 @@ class Gravity:
         Notes
         -----
         Softening comes from ``self.softening`` (scalar-broadcasted to per-particle
-        in the constructor) and is applied by the Rust backend.
+        in the constructor) and is applied by the C++ backend.
 
         Examples
         --------

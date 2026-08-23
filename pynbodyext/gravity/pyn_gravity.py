@@ -18,7 +18,7 @@ def _coerce_softening(
     if softening is None:
         return None
     if isinstance(softening, SimArray):
-        # Convert to same length units as positions, then drop units for Rust backend.
+        # Convert to same length units as positions, then drop units for C++ backend.
         soft = softening.in_units(sim["pos"].units)
         arr = np.asarray(soft, dtype=np.float64)
         if arr.ndim == 0:

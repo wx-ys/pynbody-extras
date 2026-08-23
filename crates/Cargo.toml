@@ -1,9 +1,0 @@
-[workspace]
-resolver = "2"
-members = [
-	"gravity",
-	"pynbodyext-rust",
-]
-
-[profile.release]
-debug = true
