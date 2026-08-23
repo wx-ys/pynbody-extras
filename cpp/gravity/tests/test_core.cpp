@@ -7,6 +7,7 @@
 #include "gravity/common.hpp"
 #include "gravity/kernel.hpp"
 #include "gravity/direct.hpp"
+#include "gravity/octree.hpp"
 #include "gravity/multipole/moment.hpp"
 #include "gravity/multipole/derivatives.hpp"
 #include "gravity/multipole/eval.hpp"
@@ -127,6 +128,30 @@ static void test_direct() {
     CHECK_NEAR(pot_q[0], -2.0, 1e-12);  // -1/1 - 1/1
 }
 
+static void test_octree() {
+    using namespace gravity;
+    // 20 random-ish particles, leaf_capacity=4, order=2.
+    std::vector<Vec3> pos;
+    for (int i = 0; i < 20; ++i) pos.push_back(Vec3((i*7)%11 / 10.0, (i*13)%17 / 10.0, (i*5)%9 / 10.0));
+    std::vector<double> masses(20, 1.0);
+    Octree tree = Octree::build(pos, masses.data(), 4, 2);
+    // Every node is either a leaf (children absent) or has valid children.
+    for (const auto& node : tree.nodes) {
+        if (node.children.has_value()) {
+            for (size_t c : *node.children) {
+                CHECK(c == NO_INDEX || c < tree.nodes.size());
+            }
+        } else {
+            CHECK(!node.indices.empty());
+        }
+    }
+    CHECK(tree.nodes.size() >= 1);
+    CHECK(tree.bh.has_value());
+    CHECK(!tree.hmax.has_value());      // build_hmax_payload returns None when no softenings
+    CHECK(tree.multipoles.has_value()); // order 2
+    CHECK_NEAR((*tree.bh)[0].mass, 20.0, 1e-12); // root mass = sum
+}
+
 int main() {
     test_vec3();
     test_common();
@@ -135,6 +160,7 @@ int main() {
     test_derivatives();
     test_eval();
     test_direct();
+    test_octree();
     if (failures) { std::printf("%d FAILURE(S)\n", failures); return 1; }
     std::printf("ALL PASS\n");
     return 0;
