@@ -1,0 +1,282 @@
+#include <cstdio>
+#include <cstdlib>
+#include <cmath>
+#include <vector>
+#include <algorithm>
+#include <optional>
+#include "gravity/vec3.hpp"
+#include "gravity/common.hpp"
+#include "gravity/kernel.hpp"
+#include "gravity/direct.hpp"
+#include "gravity/octree.hpp"
+#include "gravity/traversal.hpp"
+#include "gravity/multipole/moment.hpp"
+#include "gravity/multipole/derivatives.hpp"
+#include "gravity/multipole/eval.hpp"
+
+static int failures = 0;
+#define CHECK(cond) \
+    do { if (!(cond)) { std::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); ++failures; } } while (0)
+#define CHECK_NEAR(a, b, tol) \
+    do { double _a = (a), _b = (b); if (std::fabs(_a - _b) > (tol)) { \
+        std::fprintf(stderr, "FAIL %s:%d: |%g - %g| > %g\n", __FILE__, __LINE__, _a, _b, (double)(tol)); ++failures; } } while (0)
+
+// The array-layout comparison in test_translate_vs_direct relies on MultipoleMoment
+// being exactly 56 contiguous doubles in field order.
+static_assert(sizeof(gravity::MultipoleMoment) == 56 * sizeof(double),
+              "MultipoleMoment must be 56 contiguous doubles");
+
+static void test_vec3() {
+    gravity::Vec3 a(1.0, 2.0, 3.0), b(4.0, 5.0, 6.0);
+    gravity::Vec3 c = a + b;
+    CHECK(c.x == 5.0 && c.y == 7.0 && c.z == 9.0);
+    CHECK(a[0] == 1.0 && a[1] == 2.0 && a[2] == 3.0);
+    CHECK_NEAR(gravity::norm2(a), 14.0, 1e-12);
+    CHECK_NEAR(gravity::dot3(a, b), 32.0, 1e-12);
+}
+
+static void test_common() {
+    CHECK_NEAR(gravity::inv_r_from_r2(4.0), 0.5, 1e-12);
+    double ir, ir3;
+    gravity::inv_r_and_inv_r3_from_r2(4.0, ir, ir3);
+    CHECK_NEAR(ir, 0.5, 1e-12);
+    CHECK_NEAR(ir3, 0.125, 1e-12);
+    CHECK(gravity::R2_TINY > 0.0);
+    CHECK(gravity::NO_INDEX == std::numeric_limits<size_t>::max());
+    CHECK(!gravity::timing_enabled()); // GRAVITY_TIMING unset in the test environment
+}
+
+static void test_kernel() {
+    using namespace gravity;
+    CHECK_NEAR(kernel_potential_per_unit_mass(KernelKind::Plummer, 1.0, 0.0), -1.0, 1e-12);
+    CHECK_NEAR(kernel_potential_per_unit_mass(KernelKind::Plummer, 0.0, 0.1), 0.0, 1e-15);
+    CHECK_NEAR(kernel_potential_per_unit_mass(KernelKind::Plummer, 3.0, 4.0), -1.0/5.0, 1e-12);
+    CHECK_NEAR(kernel_accel_factor(KernelKind::Plummer, 2.0, 0.0), 1.0/8.0, 1e-12);
+    CHECK_NEAR(kernel_potential_per_unit_mass(KernelKind::CubicSplineW2, 2.0, 1.0), -1.0/2.0, 1e-12); // u>=1 -> -1/u
+    CHECK(multipole_min_separation_factor(KernelKind::Plummer) == 2.8);
+    CHECK(multipole_min_separation_factor(KernelKind::CubicSplineW2) == 1.0);
+    CHECK(multipole_soft_ok(KernelKind::Plummer, 3.0, 1.0));   // 3 > 2.8*1
+    CHECK(!multipole_soft_ok(KernelKind::Plummer, 2.0, 1.0));  // 2 < 2.8
+}
+
+static void test_moment() {
+    using namespace gravity;
+    // Two unit-mass particles at (1,0,0) and (-1,0,0), center origin.
+    std::vector<Vec3> pos = {Vec3(1,0,0), Vec3(-1,0,0)};
+    std::vector<size_t> idx = {0, 1};
+    MultipoleMoment m = MultipoleMoment::from_points(pos, nullptr, idx, Vec3(0,0,0), 5);
+    CHECK_NEAR(m.m000, 2.0, 1e-12);
+    CHECK_NEAR(m.m100, 0.0, 1e-12);   // dipole vanishes by symmetry
+    CHECK_NEAR(m.m200, 1.0, 1e-12);   // 0.5*(1+1)
+    CHECK_NEAR(m.m020, 0.0, 1e-12);
+    CHECK_NEAR(m.m002, 0.0, 1e-12);
+    // translate: shift by (5,0,0). Mass-conservation: m000 unchanged.
+    MultipoleMoment t = translate_multipole(m, Vec3(5,0,0), 5);
+    CHECK_NEAR(t.m000, 2.0, 1e-12);
+    // from_points about shifted center should match translated moment's m100.
+    MultipoleMoment m2 = MultipoleMoment::from_points(pos, nullptr, idx, Vec3(5,0,0), 5);
+    CHECK_NEAR(t.m100, m2.m100, 1e-10);
+    CHECK_NEAR(t.m200, m2.m200, 1e-10);
+}
+
+static void test_derivatives() {
+    using namespace gravity;
+    // Monopole: d000 = 1/r at displacement (3,0,0), eps2=0.
+    auto d1 = PotentialDerivatives1::new_derivatives(3.0, 0.0, 0.0, 0.0);
+    CHECK_NEAR(d1.d000, 1.0/3.0, 1e-12);
+    CHECK_NEAR(d1.d100, -1.0/9.0, 1e-12);  // d(1/r)/dx = -x/r^3
+    CHECK_NEAR(d1.d010, 0.0, 1e-12);
+    // Full order-5 with eps2: r2 = 3^2+4^2 = 25 -> r=5, d000 = 1/sqrt(25)=0.2
+    auto d5 = PotentialDerivatives::new_derivatives(3.0, 4.0, 0.0, 0.0, 5);
+    CHECK_NEAR(d5.d000, 0.2, 1e-12);
+    CHECK_NEAR(d5.d100, -3.0/125.0, 1e-12); // -x/r^3 = -3/125
+}
+
+static void test_eval() {
+    using namespace gravity;
+    // Single unit mass at origin; monopole moment about origin; target at (2,0,0).
+    // The treewalk evaluates derivatives at displacement (COM - target), i.e.
+    // source-minus-target, so here the derivative displacement is (-2,0,0).
+    std::vector<Vec3> pos = {Vec3(0,0,0)};
+    std::vector<size_t> idx = {0};
+    MultipoleMoment full = MultipoleMoment::from_points(pos, nullptr, idx, Vec3(0,0,0), 5);
+    PotentialDerivatives d = PotentialDerivatives::new_derivatives(-2.0, 0.0, 0.0, 0.0, 5);
+    CHECK_NEAR(gravity_potential_multipole(full, d, 0), -0.5, 1e-12);   // -1/r
+    CHECK_NEAR(gravity_potential_multipole(full, d, 5), -0.5, 1e-12);
+    Vec3 a = gravity_accel_multipole(full, d, 5);
+    CHECK_NEAR(a.x, -0.25, 1e-12);   // -m000*d100 = -1*(+0.25); d100 = -(-2)/8
+    CHECK_NEAR(a.y, 0.0, 1e-12);
+    CHECK_NEAR(a.z, 0.0, 1e-12);
+    // Moment2 translate invariance: a pure monopole stays m000 under shift.
+    Moment2 m2(full);
+    Moment2 t2 = MultipoleEval<2>::translate(m2, Vec3(3,0,0));
+    CHECK_NEAR(t2.m000, 1.0, 1e-12);
+}
+
+static void test_direct() {
+    using namespace gravity;
+    // Two unit masses at (1,0,0) and (-1,0,0). Potential at each: -1/2 - 1/2 = -1? No:
+    // particle 0 sees particle 1 at distance 2 -> phi = -1*1/2. Self excluded.
+    std::vector<Vec3> pos = {Vec3(1,0,0), Vec3(-1,0,0)};
+    double ones[2] = {1.0, 1.0};
+    auto acc = direct_accelerations(pos, ones);
+    // acceleration on particle 0 from particle 1: m*x/r^3 = 1*(-2)/8 = -0.25
+    CHECK_NEAR(acc[0].x, -0.25, 1e-12);
+    CHECK_NEAR(acc[0].y, 0.0, 1e-12);
+    CHECK_NEAR(acc[1].x, 0.25, 1e-12);
+    auto pot = direct_potentials(pos, ones);
+    CHECK_NEAR(pot[0], -0.5, 1e-12);
+    CHECK_NEAR(pot[1], -0.5, 1e-12);
+    // At-points: query at origin.
+    std::vector<Vec3> q = {Vec3(0,0,0)};
+    auto acc_q = direct_accelerations_at_points(pos, ones, q);
+    CHECK_NEAR(acc_q[0].x, 0.0, 1e-12); // symmetric
+    auto pot_q = direct_potentials_at_points(pos, ones, q);
+    CHECK_NEAR(pot_q[0], -2.0, 1e-12);  // -1/1 - 1/1
+}
+
+static void test_octree() {
+    using namespace gravity;
+    // 20 random-ish particles, leaf_capacity=4, order=2.
+    std::vector<Vec3> pos;
+    for (int i = 0; i < 20; ++i) pos.push_back(Vec3((i*7)%11 / 10.0, (i*13)%17 / 10.0, (i*5)%9 / 10.0));
+    std::vector<double> masses(20, 1.0);
+    Octree tree = Octree::build(pos, masses.data(), 4, 2);
+    // Every node is either a leaf (children absent) or has valid children.
+    for (const auto& node : tree.nodes) {
+        if (node.children.has_value()) {
+            for (size_t c : *node.children) {
+                CHECK(c == NO_INDEX || c < tree.nodes.size());
+            }
+        } else {
+            CHECK(!node.indices.empty());
+        }
+    }
+    CHECK(tree.nodes.size() >= 1);
+    CHECK(tree.bh.has_value());
+    CHECK(!tree.hmax.has_value());      // build_hmax_payload returns None when no softenings
+    CHECK(tree.multipoles.has_value()); // order 2
+    CHECK_NEAR((*tree.bh)[0].mass, 20.0, 1e-12); // root mass = sum
+}
+
+static void test_traversal() {
+    using namespace gravity;
+    // n=256, theta=0.0 forces full leaf traversal; must match direct to 1e-10.
+    // Matches gravity_tests.rs config: positions in [-0.5,0.5], masses in [0.5,1.5],
+    // leaf_capacity=32.
+    const size_t n = 256;
+    std::vector<Vec3> pos(n);
+    std::vector<double> mass(n);
+    unsigned s = 12345u;
+    auto rnd = [&s]() { s = s * 1664525u + 1013904223u; return (double)(s >> 8) / 16777216.0; };
+    for (size_t i = 0; i < n; ++i) pos[i] = Vec3(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5);
+    for (size_t i = 0; i < n; ++i) mass[i] = 0.5 + rnd();
+    Octree tree = Octree::build(pos, mass.data(), 32, 2);
+    std::vector<Vec3> acc_t(n), acc_d;
+    tree.compute_accelerations(0.0, acc_t);
+    acc_d = direct_accelerations(pos, mass.data());
+    for (size_t i = 0; i < n; ++i) {
+        CHECK_NEAR(acc_t[i].x, acc_d[i].x, 1e-10);
+        CHECK_NEAR(acc_t[i].y, acc_d[i].y, 1e-10);
+        CHECK_NEAR(acc_t[i].z, acc_d[i].z, 1e-10);
+    }
+    std::vector<double> pot_t(n), pot_d;
+    tree.compute_potentials(0.0, pot_t);
+    pot_d = direct_potentials(pos, mass.data());
+    for (size_t i = 0; i < n; ++i) CHECK_NEAR(pot_t[i], pot_d[i], 1e-10);
+}
+
+static void test_translate_vs_direct() {
+    using namespace gravity;
+    unsigned s = 999u;
+    auto rnd = [&s]() { s = s*1664525u + 1013904223u; return (double)(s >> 8) / 16777216.0; };
+    std::vector<Vec3> pos(200);
+    for (auto& p : pos) p = Vec3(rnd(), rnd(), rnd());
+    std::vector<double> mass(200);
+    for (auto& m : mass) m = rnd();
+    std::vector<size_t> idx(200);
+    for (size_t i = 0; i < 200; ++i) idx[i] = i;
+    Vec3 B(0.3, 0.4, 0.5), A(0.8, -0.2, 0.1);
+    MultipoleMoment aboutB = MultipoleMoment::from_points(pos, mass.data(), idx, B, 5);
+    MultipoleMoment translated = translate_multipole(aboutB, A - B, 5);
+    MultipoleMoment aboutA = MultipoleMoment::from_points(pos, mass.data(), idx, A, 5);
+    // MultipoleMoment holds exactly 56 doubles in field order, so compare the
+    // layout as arrays (see the static_assert at namespace scope).
+    const double* t = &translated.m000;
+    const double* a = &aboutA.m000;
+    for (int i = 0; i < 56; ++i) CHECK_NEAR(t[i], a[i], 1e-10);
+}
+
+static void test_single_node_far_field() {
+    using namespace gravity;
+    // 4000 particles in [-0.1,0.1]^3, masses in [0.1, 1.0]; 400 targets at r in [20,30].
+    unsigned s = 7u;
+    auto rnd = [&s]() { s = s*1664525u + 1013904223u; return (double)(s >> 8) / 16777216.0; };
+    const size_t n = 4000;
+    std::vector<Vec3> pos(n);
+    std::vector<double> mass(n);
+    for (size_t i = 0; i < n; ++i) pos[i] = Vec3(-0.1 + 0.2*rnd(), -0.1 + 0.2*rnd(), -0.1 + 0.2*rnd());
+    for (size_t i = 0; i < n; ++i) mass[i] = 0.1 + 0.9*rnd();
+    // True mass-weighted COM.
+    Vec3 com(0,0,0); double mtot = 0.0;
+    for (size_t i = 0; i < n; ++i) { com = com + pos[i]*mass[i]; mtot += mass[i]; }
+    com.x /= mtot; com.y /= mtot; com.z /= mtot;
+    std::vector<size_t> idx(n);
+    for (size_t i = 0; i < n; ++i) idx[i] = i;
+    MultipoleMoment m = MultipoleMoment::from_points(pos, mass.data(), idx, com, 5);
+
+    auto direct_potential = [&](const Vec3& target) {
+        double phi = 0.0;
+        for (size_t i = 0; i < n; ++i) {
+            Vec3 dvec = pos[i] - target;
+            double r2 = norm2(dvec);
+            if (r2 == 0.0) continue;
+            phi += -mass[i] / std::sqrt(r2);
+        }
+        return phi;
+    };
+
+    std::vector<double> err_per_order[6];
+    for (int q = 0; q < 400; ++q) {
+        // random direction on the unit sphere
+        Vec3 dir;
+        do { dir = Vec3(2.0*rnd()-1.0, 2.0*rnd()-1.0, 2.0*rnd()-1.0); } while (norm2(dir) < 1e-6 || norm2(dir) > 1.0);
+        double norm = std::sqrt(norm2(dir));
+        double r = 20.0 + 10.0*rnd();
+        Vec3 target = com + Vec3(dir.x/norm*r, dir.y/norm*r, dir.z/norm*r);
+
+        double phi_direct = direct_potential(target);
+        Vec3 dvec = com - target;   // source-minus-target, matching the treewalk
+        PotentialDerivatives d = PotentialDerivatives::new_derivatives(dvec.x, dvec.y, dvec.z, 0.0, 5);
+        for (int order = 0; order <= 5; ++order) {
+            double phi_mp = gravity_potential_multipole(m, d, (unsigned char)order);
+            double err = phi_direct != 0.0 ? std::fabs(phi_mp - phi_direct) / std::fabs(phi_direct)
+                                           : std::fabs(phi_mp - phi_direct);
+            err_per_order[order].push_back(err);
+        }
+    }
+    // p90 of relative error per order must be < 1e-2 (matches the Rust assertion).
+    for (int order = 0; order <= 5; ++order) {
+        auto& errs = err_per_order[order];
+        std::sort(errs.begin(), errs.end());
+        size_t k = std::min((size_t)(errs.size() * 0.9), errs.size() - 1);
+        CHECK(errs[k] < 1e-2);
+    }
+}
+
+int main() {
+    test_vec3();
+    test_common();
+    test_kernel();
+    test_moment();
+    test_derivatives();
+    test_eval();
+    test_direct();
+    test_octree();
+    test_traversal();
+    test_translate_vs_direct();
+    test_single_node_far_field();
+    if (failures) { std::printf("%d FAILURE(S)\n", failures); return 1; }
+    std::printf("ALL PASS\n");
+    return 0;
+}

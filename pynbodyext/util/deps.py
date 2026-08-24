@@ -1,7 +1,7 @@
 from importlib.metadata import version
 from importlib.util import find_spec
 
-__all__ = ["GRAVITY_RUST_AVAILABLE", "DASK_AVAILABLE", "module_available", "PYNBODY_VERSION"]
+__all__ = ["GRAVITY_NATIVE_AVAILABLE", "DASK_AVAILABLE", "module_available", "PYNBODY_VERSION"]
 
 
 
@@ -11,7 +11,7 @@ def module_available(name: str) -> bool:
     return find_spec(name) is not None
 
 
-GRAVITY_RUST_AVAILABLE: bool = module_available("pynbodyext._rust")
+GRAVITY_NATIVE_AVAILABLE: bool = module_available("pynbodyext._native")
 
 DASK_AVAILABLE: bool = module_available("dask")
 

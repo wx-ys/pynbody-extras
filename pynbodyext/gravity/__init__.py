@@ -12,18 +12,18 @@ Example
 >>> from pynbodyext.gravity import calculate_acceleration, KernelKind
 >>> a = calculate_acceleration(sim, method="tree", theta=0.7, softening=0.01, kernel=KernelKind.Plummer)
 """
-from pynbodyext.util.deps import GRAVITY_RUST_AVAILABLE
+from pynbodyext.util.deps import GRAVITY_NATIVE_AVAILABLE
 
-__all__ = ["GRAVITY_RUST_AVAILABLE"]
+__all__ = ["GRAVITY_NATIVE_AVAILABLE"]
 
-if GRAVITY_RUST_AVAILABLE:
+if GRAVITY_NATIVE_AVAILABLE:
     from .base import Gravity, KernelKind
     from .pyn_gravity import calculate_acceleration, calculate_potential
 
     __all__ += ["Gravity", "KernelKind", "calculate_potential", "calculate_acceleration"]
 else:
     warning_msg = (
-        "pynbodyext.gravity: Rust extension not available; "
+        "pynbodyext.gravity: C++ extension not available; "
         "gravity calculations will be unavailable."
     )
     import warnings

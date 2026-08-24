@@ -369,38 +369,53 @@ class BinQueryEngine:
                     f"Vectorized apply callable must return shape ({owner.nbins},), got {values.shape}."
                 )
         else:
-            values = np.full(owner.nbins, empty, dtype=float)
-            if isinstance(query, CalculatorBase):
-                # Fast path 2: full CalculatorBase → reuse one EvalEngine, skip Result assembly
-                with query.batch(_BATCH_RUN_OPTIONS) as run_one:
-                    for index in range(owner.nbins):
-                        start = int(owner._bin_indptr[index])
-                        stop = int(owner._bin_indptr[index + 1])
-                        if start == stop:
-                            continue
-                        sub = owner.sim[owner._bin_data[start:stop]]
-                        arr = np.asarray(run_one(sub))
-                        if arr.ndim != 0:
-                            raise TypeError("Callable or CalculatorBase bin query must return a scalar in phase 1.")
-                        values[index] = arr.item()
-            else:
-                # Plain callable
-                for index in range(owner.nbins):
-                    start = int(owner._bin_indptr[index])
-                    stop = int(owner._bin_indptr[index + 1])
-                    if start == stop:
-                        continue
-                    sub = owner.sim[owner._bin_data[start:stop]]
-                    arr = np.asarray(query(sub))
-                    if arr.ndim != 0:
-                        raise TypeError("Callable or CalculatorBase bin query must return a scalar in phase 1.")
-                    values[index] = arr.item()
+            values = self._value_nonvectorized(query)
 
         result_name = str(name or getattr(query, "name", None) or getattr(query, "__name__", "apply"))
         result = self.wrap(values, name=result_name)
         self._cache[cache_key] = result
         self._diagnostics.record("apply", name=name, query=repr(query), vectorized=vectorized)
         return result
+
+    def _value_nonvectorized(self, query: Callable[[Any], Any] | CalculatorBase[Any, Any]) -> np.ndarray:
+        owner = self._owner
+        outputs: list[np.ndarray | None] = [None] * owner.nbins
+        sample_shape: tuple[int, ...] | None = None
+        if isinstance(query, CalculatorBase):
+            # Fast path: full CalculatorBase → reuse one EvalEngine, skip Result assembly
+            with query.batch(_BATCH_RUN_OPTIONS) as run_one:
+                for index in range(owner.nbins):
+                    start = int(owner._bin_indptr[index])
+                    stop = int(owner._bin_indptr[index + 1])
+                    if start == stop:
+                        continue
+                    sub = owner.sim[owner._bin_data[start:stop]]
+                    arr = np.asarray(run_one(sub))
+                    if sample_shape is None:
+                        sample_shape = arr.shape
+                    elif arr.shape != sample_shape:
+                        raise TypeError(f"Inconsistent output shape from query: expected {sample_shape}, got {arr.shape}.")
+                    outputs[index] = arr
+        else:
+            # Plain callable
+            for index in range(owner.nbins):
+                start = int(owner._bin_indptr[index])
+                stop = int(owner._bin_indptr[index + 1])
+                if start == stop:
+                    continue
+                sub = owner.sim[owner._bin_data[start:stop]]
+                arr = np.asarray(query(sub))
+                if sample_shape is None:
+                    sample_shape = arr.shape
+                elif arr.shape != sample_shape:
+                    raise TypeError(f"Inconsistent output shape from query: expected {sample_shape}, got {arr.shape}.")
+                outputs[index] = arr
+        if sample_shape is None:
+            sample_shape = (0,)
+        result_values = np.array([out if out is not None else np.full(sample_shape, np.nan) for out in outputs])
+        return result_values
+
+
 
     @staticmethod
     def callable_cache_token(query: Any) -> Any:
