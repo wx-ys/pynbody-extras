@@ -64,6 +64,11 @@ version = {attr = "pynbodyext.__version__"}
 
 chunk = ["dask"]
 
+# Relational database result store (SQLAlchemy-backed adapter).
+store = [
+    "sqlalchemy>=2.0",
+]
+
 dev = [
     "pre-commit",
     "mypy>=1.17",

@@ -44,6 +44,8 @@ coverage.xml
 
 .asv/
 
+.mypy_cache/
+
 # testdata
 testdata*
 
