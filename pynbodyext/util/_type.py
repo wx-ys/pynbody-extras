@@ -1,9 +1,9 @@
-""" Some type utilities for pynbodyext """
+"""Some type utilities for pynbodyext"""
 
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, TypeVar, Union, runtime_checkable
 
-#Protocol need python version >3.8
+# Protocol need python version >3.8
 import numpy as np
 from pynbody.array import IndexedSimArray, SimArray
 from pynbody.family import Family
@@ -24,10 +24,19 @@ if TYPE_CHECKING:
     from pynbodyext.profiles.proarray import ProfileArray
     from pynbodyext.profiles.profile import ProfileBase
 
-__all__ = ["Self","TypeVarTuple","Unpack"]
+__all__ = ["Self", "TypeVarTuple", "Unpack"]
 
 
-__all__ += ["UnitLike","SingleElementArray","SimNpArray","FilterLike","TransformLike","SimCallable","SimNpArrayFunc","SignatureProvider"]
+__all__ += [
+    "UnitLike",
+    "SingleElementArray",
+    "SimNpArray",
+    "FilterLike",
+    "TransformLike",
+    "SimCallable",
+    "SimNpArrayFunc",
+    "SignatureProvider",
+]
 # ---------------- General---------------------------------
 
 # can be convert to Unit
@@ -52,14 +61,18 @@ TransformLike: TypeAlias = Callable[[SimSnap], Transformation]
 """A type alias representing a callable that takes a simulation snapshot and returns a Transformation."""
 
 
-_ReturnT = TypeVar("_ReturnT",covariant=True)
+_ReturnT = TypeVar("_ReturnT", covariant=True)
+
+
 class SimCallable(Protocol[_ReturnT]):
     """A protocol representing a callable that takes a simulation snapshot and returns a value of type _ReturnT."""
+
     def __call__(self, sim: SimSnap, *args: Any, **kwargs: Any) -> _ReturnT: ...
 
 
 SimNpArrayFunc: TypeAlias = SimCallable[SimNpArray]
 """A type alias representing a callable that takes a simulation snapshot and returns a simulation or numpy array."""
+
 
 @runtime_checkable
 class SignatureProvider(Protocol):
@@ -67,12 +80,18 @@ class SignatureProvider(Protocol):
     Duck-typed protocol: any object with a callable .signature() matches this.
     Use runtime_checkable so isinstance(obj, SignatureProvider) works.
     """
+
     def signature(self) -> object: ...
 
 
-
-__all__ += ["BinByFunc","BinsAreaFunc","BinsAlgorithmFunc",
-            "RegistBinByString","RegistBinAreaString","RegistBinAlgorithmString"]
+__all__ += [
+    "BinByFunc",
+    "BinsAreaFunc",
+    "BinsAlgorithmFunc",
+    "RegistBinByString",
+    "RegistBinAreaString",
+    "RegistBinAlgorithmString",
+]
 # ------------------Profile---------------------------------
 BinByFunc: TypeAlias = Callable[[SimSnap], SimNpArray]
 """Callable extracting a 1D array from a simulation."""
@@ -83,13 +102,13 @@ BinsAreaFunc: TypeAlias = Callable[["BinsSet", SimNpArray], SimNpArray]
 BinsAlgorithmFunc: TypeAlias = Callable[["BinsSet", SimNpArray], SimNpArray]
 """Callable constructing bin edges from raw data (returns length nbins+1)."""
 
-RegistBinByString: TypeAlias = str | Literal["r","rxy"]
+RegistBinByString: TypeAlias = str | Literal["r", "rxy"]
 """A type alias representing valid strings for binning by."""
 
-RegistBinAreaString: TypeAlias = str | Literal["length","annulus","cylindrical_shell","spherical_shell"]
+RegistBinAreaString: TypeAlias = str | Literal["length", "annulus", "cylindrical_shell", "spherical_shell"]
 """A type alias representing valid strings for binning area."""
 
-RegistBinAlgorithmString: TypeAlias = str | Literal["lin","log","equaln"]
+RegistBinAlgorithmString: TypeAlias = str | Literal["lin", "log", "equaln"]
 """A type alias representing valid strings for binning algorithms."""
 
 
@@ -98,13 +117,13 @@ SimNpPrArray: TypeAlias = Union[SimNpArray, "ProfileArray"]
 
 SimNpPrArrayFunc: TypeAlias = SimCallable[SimNpPrArray]
 
-ProfileType = TypeVar("ProfileType", bound = "ProfileBase")
+ProfileType = TypeVar("ProfileType", bound="ProfileBase")
 SimNpPrArrayPrFunc: TypeAlias = Callable[[ProfileType], SimNpPrArray]
 
 
-
-__all__ += ["has_signature","get_signature_safe"]
+__all__ += ["has_signature", "get_signature_safe"]
 # ---------------helpful functions---------------------
+
 
 def has_signature(obj: object) -> bool:
     """
@@ -115,6 +134,7 @@ def has_signature(obj: object) -> bool:
         return True
     # fallback: attribute exists and is callable
     return callable(getattr(obj, "signature", None))
+
 
 def get_signature_safe(obj: object, *, fallback_to_id: bool = True) -> object | None:
     """

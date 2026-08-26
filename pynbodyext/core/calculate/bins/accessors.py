@@ -17,6 +17,7 @@ class BinParticlesAccessor:
     >>> bins.particles_at_bin[:, 0]  # particles in the first bin along the second axis (for 2D or higher)
 
     """
+
     def __init__(self, bins: Any) -> None:
         self._bins = bins
 
@@ -35,8 +36,7 @@ class BinParticlesAccessor:
             return self._bins.sim[np.asarray([], dtype=int)]
 
         groups = [
-            self._bins._bin_data[self._bins._bin_indptr[int(i)] : self._bins._bin_indptr[int(i) + 1]]
-            for i in flat
+            self._bins._bin_data[self._bins._bin_indptr[int(i)] : self._bins._bin_indptr[int(i) + 1]] for i in flat
         ]
         indices = np.concatenate(groups) if groups else np.asarray([], dtype=int)
         if indices.size:

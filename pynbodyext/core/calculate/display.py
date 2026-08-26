@@ -377,18 +377,11 @@ def _html_value(value: Any, *, escape_values: bool) -> str:
 def html_badge(text: Any, tone: str = "neutral") -> str:
     """Return a small badge pill."""
     safe_tone = tone if tone in {"neutral", "info", "ok", "warn", "error"} else "neutral"
-    return (
-        f"<span class='pynbodyext-calc-badge pynbodyext-calc-badge-{safe_tone}'>"
-        f"{html_escape(text)}"
-        "</span>"
-    )
+    return f"<span class='pynbodyext-calc-badge pynbodyext-calc-badge-{safe_tone}'>{html_escape(text)}</span>"
 
 
 def html_table(
-    rows: list[tuple[str, Any]],
-    *,
-    escape_values: bool = True,
-    class_name: str = "pynbodyext-calc-table",
+    rows: list[tuple[str, Any]], *, escape_values: bool = True, class_name: str = "pynbodyext-calc-table"
 ) -> str:
     """Return a two-column div grid for the given rows."""
     body = "".join(
@@ -415,8 +408,7 @@ def html_data_table(
         column_template = "max-content"
 
     header_html = "".join(
-        f"<div class='pynbodyext-calc-data-head-cell'>{html_escape(header)}</div>"
-        for header in headers
+        f"<div class='pynbodyext-calc-data-head-cell'>{html_escape(header)}</div>" for header in headers
     )
     body_html = "".join(
         "<div class='pynbodyext-calc-data-row'>"
@@ -434,6 +426,7 @@ def html_data_table(
         "</div>"
     )
 
+
 def html_scroll_x(body: str, *, min_width: str | None = None) -> str:
     """Return a horizontal scroll container."""
     inner_style = ""
@@ -446,6 +439,7 @@ def html_scroll_x(body: str, *, min_width: str | None = None) -> str:
         "</div>"
     )
 
+
 def html_metric_grid(metrics: list[tuple[str, Any]], *, escape_values: bool = True) -> str:
     """Return a compact responsive metric grid."""
     body = "".join(
@@ -456,6 +450,7 @@ def html_metric_grid(metrics: list[tuple[str, Any]], *, escape_values: bool = Tr
         for label, value in metrics
     )
     return f"<div class='pynbodyext-calc-metric-grid'>{body}</div>"
+
 
 def html_metric_strip(metrics: list[tuple[str, Any]], *, escape_values: bool = True) -> str:
     """Return a single-row metric strip intended for horizontal scrolling."""
@@ -483,10 +478,7 @@ def html_details(summary: str, body: str, *, open: bool = False) -> str:
     """Return a collapsible section."""
     open_attr = " open" if open else ""
     return (
-        f"<details class='pynbodyext-calc-details'{open_attr}>"
-        f"<summary>{html_escape(summary)}</summary>"
-        f"{body}"
-        "</details>"
+        f"<details class='pynbodyext-calc-details'{open_attr}><summary>{html_escape(summary)}</summary>{body}</details>"
     )
 
 
@@ -496,12 +488,7 @@ def html_pre(text: str) -> str:
 
 
 def html_card(
-    title: str,
-    rows: list[tuple[str, Any]],
-    *,
-    body: str = "",
-    html_style: str = HTML_STYLE,
-    escape_values: bool = True,
+    title: str, rows: list[tuple[str, Any]], *, body: str = "", html_style: str = HTML_STYLE, escape_values: bool = True
 ) -> str:
     """Return an HTML card with a title, table of rows, and optional body."""
     return (

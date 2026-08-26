@@ -61,7 +61,6 @@ def _is_sim_like(x: Any) -> bool:
 
 
 class _ProfileParticle:
-
     def __init__(self, profile: ProfileBase):
         self._profile = profile
 
@@ -96,6 +95,7 @@ class _ProfileParticle:
         indices = np.sort(indices)
         return pr.sim[indices]
 
+
 # ------------------------------------------------------------------
 # Profile base
 # ------------------------------------------------------------------
@@ -120,12 +120,9 @@ class ProfileBase:
 
     _profile_property_registry: defaultdict[type, dict[str, SimNpPrArrayPrFunc]] = defaultdict(dict)
 
-
-    def __init__(self,
-                 sim: SimSnap,
-                 bins_set: BinsSet,
-                 weight: SimNpPrArray | None = None,
-                 parent: Profile | None = None):
+    def __init__(
+        self, sim: SimSnap, bins_set: BinsSet, weight: SimNpPrArray | None = None, parent: Profile | None = None
+    ):
         self.sim: SimSnap = sim
         self._bins: BinsSet = bins_set if bins_set.is_defined() else bins_set(sim)
         self._parent: Profile | None = parent
@@ -234,10 +231,10 @@ class ProfileBase:
 
         Example
         -------
-        >>> prof.particles_at_bin[0]          # particles in the first bin
-        >>> prof.particles_at_bin[0:5]       # particles in the first five bins
-        >>> prof.particles_at_bin[[0, 2, 4]] # particles in bins 0, 2, and 4
-        >>> prof.particles_at_bin[mask]       # particles in bins where mask is True
+        >>> prof.particles_at_bin[0]  # particles in the first bin
+        >>> prof.particles_at_bin[0:5]  # particles in the first five bins
+        >>> prof.particles_at_bin[[0, 2, 4]]  # particles in bins 0, 2, and 4
+        >>> prof.particles_at_bin[mask]  # particles in bins where mask is True
         """
         return _ProfileParticle(self)
 
@@ -270,6 +267,7 @@ class ProfileBase:
         for c in par.__class__.mro():
             reg_keys |= set(reg_by_cls.get(c, {}).keys())
         return sorted(reg_keys)
+
     def all_keys(self) -> list[str]:
         """Union of :meth:`keys` and :meth:`property_keys`."""
         return sorted(set(self.keys()).union(set(self.property_keys())))
@@ -307,14 +305,12 @@ class ProfileBase:
         """
         child_bins = self._bins.spawn_with_same_edges(sim_subset)
         root_parent = self.parent
-        sub_weight = (self._weight[sim_subset.get_index_list(self.sim)]
-                      if self._weight is not None
-                      else None)
+        sub_weight = self._weight[sim_subset.get_index_list(self.sim)] if self._weight is not None else None
         return SubProfile(
             sim_subset,
             bins_set=child_bins,
             weight=sub_weight,
-            parent=root_parent,   # ensure single parent
+            parent=root_parent,  # ensure single parent
         )
 
     # ---- Field resolution ----
@@ -344,7 +340,7 @@ class ProfileBase:
         """
         # Per-bin properties (rbins, etc.)
         if key in self._data_cache:
-                return self._data_cache[key]
+            return self._data_cache[key]
 
         if key in self._stats_cache:
             if "mean" in self._stats_cache[key]:
@@ -372,10 +368,18 @@ class ProfileBase:
         self._stats_cache[key][cast("str", base_arr._mode)] = base_arr
         return base_arr
 
-    def plot(self, y: str, x: str = "rbins", ax: Axes | None = None,
-             set_label: bool = True, y_name: str | None = None,x_name: str | None = None,
-             **kwargs: Any) -> list[Line2D]:
+    def plot(
+        self,
+        y: str,
+        x: str = "rbins",
+        ax: Axes | None = None,
+        set_label: bool = True,
+        y_name: str | None = None,
+        x_name: str | None = None,
+        **kwargs: Any,
+    ) -> list[Line2D]:
         import matplotlib.pyplot as plt
+
         xdata = self[x]
         ydata = self[y]
         with plt.style.context("pynbodyext.util.default"):
@@ -392,20 +396,19 @@ class ProfileBase:
                 ax.set_ylabel(ylabel)
             return line
 
-
-
     def get_subprofile(self, subset: SimSnap) -> SubProfile:
         """
         Deprecated alias for creating a :class:`~pynbodyext.profiles.profile.SubProfile`.
 
         Use slicing/filtering on the profile instead, e.g. ``prof[pynbody.filt.Disc(...)]``.
         """
-        warnings.warn("get_subprofile is deprecated; use __getitem__ with a filter instead",
-                      DeprecationWarning, stacklevel=2)
+        warnings.warn(
+            "get_subprofile is deprecated; use __getitem__ with a filter instead", DeprecationWarning, stacklevel=2
+        )
         subprof = self._spawn(subset)
         return subprof
 
-     # ---- Main public indexing ----
+    # ---- Main public indexing ----
     @overload
     def __getitem__(self, key: str) -> ProfileArray: ...
     @overload
@@ -424,10 +427,10 @@ class ProfileBase:
 
         Examples
         --------
-        >>> mprof = prof["mass"]           # base per-bin array (mean by default)
-        >>> m50 = prof["mass"]["p50"]      # median via percentile syntax
-        >>> disp = prof["vel"]["disp"]     # dispersion
-        >>> m16 = prof["mass_p16"]         # shorthand for prof["mass"]["p16"]
+        >>> mprof = prof["mass"]  # base per-bin array (mean by default)
+        >>> m50 = prof["mass"]["p50"]  # median via percentile syntax
+        >>> disp = prof["vel"]["disp"]  # dispersion
+        >>> m16 = prof["mass_p16"]  # shorthand for prof["mass"]["p16"]
         """
 
         # str -> ProfileArray
@@ -496,34 +499,30 @@ class ProfileBase:
 
     @classmethod
     @overload
-    def profile_property(
-        cls,
-        fn: SimNpPrArrayPrFunc,
-        name: str | None = None,
-    ) -> SimNpPrArrayPrFunc: ...
+    def profile_property(cls, fn: SimNpPrArrayPrFunc, name: str | None = None) -> SimNpPrArrayPrFunc: ...
     @classmethod
     @overload
     def profile_property(
-        cls,
-        fn: None = None,
-        name: str | None = None,
+        cls, fn: None = None, name: str | None = None
     ) -> Callable[[SimNpPrArrayPrFunc], SimNpPrArrayPrFunc]: ...
     @classmethod
-    def profile_property(cls,
-        fn: SimNpPrArrayPrFunc | None = None,
-        name: str | None = None
+    def profile_property(
+        cls, fn: SimNpPrArrayPrFunc | None = None, name: str | None = None
     ) -> SimNpPrArrayPrFunc | Callable[[SimNpPrArrayPrFunc], SimNpPrArrayPrFunc]:
         def decorator(func: SimNpPrArrayPrFunc) -> SimNpPrArrayPrFunc:
             bucket = cls._profile_property_registry[cls]
             bucket[name or func.__name__] = func
             return func
+
         if fn is None:
             return decorator
         return decorator(fn)
 
+
 # ------------------------------------------------------------------
 # Root profile
 # ------------------------------------------------------------------
+
 
 class Profile(ProfileBase):
     """
@@ -532,8 +531,8 @@ class Profile(ProfileBase):
     Usage
     -----
     >>> prof = Profile(sim, nbins=50, bins_type="lin", weight="mass")
-    >>> zprof = prof["z"]          # per-bin mean (default)
-    >>> z50 = prof["z"]["p50"]     # median via percentile syntax
+    >>> zprof = prof["z"]  # per-bin mean (default)
+    >>> z50 = prof["z"]["p50"]  # median via percentile syntax
     >>> disp = prof["z"]["disp"]
 
     Indexing
@@ -556,14 +555,21 @@ class Profile(ProfileBase):
         bin_min: float | None = None,
         bin_max: float | None = None,
         bins_set: BinsSet | None = None,
-        **kwargs: Any):
+        **kwargs: Any,
+    ):
         # Build or reuse BinsSet
         if bins_set is not None:
             bset = bins_set
         else:
             bset = BinsSet(
-                bins_by=bins_by, bins_area=bins_area, bins_type=bins_type,
-                nbins=nbins, bin_min=bin_min, bin_max=bin_max,**kwargs)
+                bins_by=bins_by,
+                bins_area=bins_area,
+                bins_type=bins_type,
+                nbins=nbins,
+                bin_min=bin_min,
+                bin_max=bin_max,
+                **kwargs,
+            )
         weight_arr: SimNpPrArray | None
         if weight is None:
             weight_arr = None
@@ -577,7 +583,6 @@ class Profile(ProfileBase):
         super().__init__(sim, bset, weight=weight_arr, parent=None)
         self._subs_cache: dict[SimSnap, SubProfile] = {}
 
-
     def get_subprofile(self, subset: SimSnap) -> SubProfile:
         """Return a cached or newly spawned :class:`~pynbodyext.profiles.profile.SubProfile`."""
         if subset in self._subs_cache:
@@ -585,7 +590,6 @@ class Profile(ProfileBase):
         subprof = self._spawn(subset)
         self._subs_cache[subset] = subprof
         return subprof
-
 
     @property
     def nsubs(self) -> int:
@@ -605,9 +609,11 @@ class Profile(ProfileBase):
         parent_flag = "root" if self._parent is None else "sub"
         return f"<{cls} type={parent_flag} nbins={self.nbins} families={fams} nsubs={len(self._subs_cache)} ncache={self.total_cached_arr}>"
 
+
 # ------------------------------------------------------------------
 # SubProfile (subset view)
 # ------------------------------------------------------------------
+
 
 class SubProfile(ProfileBase):
     """

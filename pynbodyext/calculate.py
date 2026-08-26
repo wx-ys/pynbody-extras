@@ -52,11 +52,12 @@ Define a simple property calculator::
 
     from pynbodyext.calculate import PropertyBase
 
+
     @PropertyBase.dataclass
     class StellarMass(PropertyBase[float]):
-
         def calculate(self, sim, params=None):
             return float(sim["mass"].sum())
+
 
     result = StellarMass().run(sim)
     print(result.value)
@@ -67,6 +68,7 @@ Compose a property with a custom filter::
 
     from pynbodyext.calculate import FilterBase, PropertyBase
 
+
     @FilterBase.dataclass
     class TemperatureAbove(FilterBase):
         threshold: float
@@ -74,11 +76,12 @@ Compose a property with a custom filter::
         def calculate(self, sim, params=None):
             return sim["temp"] > self.threshold
 
+
     @PropertyBase.dataclass
     class MeanTemperature(PropertyBase[float]):
-
         def calculate(self, sim, params=None):
             return float(np.asarray(sim["temp"]).mean())
+
 
     result = MeanTemperature().filter(TemperatureAbove(1.0e5)).run(sim)
     print(result.value)
@@ -86,6 +89,7 @@ Compose a property with a custom filter::
 Apply a temporary transform::
 
     from pynbodyext.calculate import PropertyBase, TransformBase
+
 
     @TransformBase.dataclass
     class XShift(TransformBase[dict[str, object]]):
@@ -102,11 +106,12 @@ Apply a temporary transform::
         def is_revertible(self, handle):
             return True
 
+
     @PropertyBase.dataclass
     class XMean(PropertyBase[float]):
-
         def calculate(self, sim, params=None):
             return float(sim["x"].mean())
+
 
     result = XMean().transform(XShift(1.0)).run(sim)
     print(result.value)
@@ -116,11 +121,7 @@ Evaluate several outputs in one run::
     from pynbodyext.calculate import Pipeline
 
     pipe = Pipeline(
-        {
-            "mass": StellarMass(),
-            "hot_temp": MeanTemperature().filter(TemperatureAbove(1.0e5)),
-        },
-        name="basic_summary",
+        {"mass": StellarMass(), "hot_temp": MeanTemperature().filter(TemperatureAbove(1.0e5))}, name="basic_summary"
     )
 
     result = pipe.run(sim, progress="phase")

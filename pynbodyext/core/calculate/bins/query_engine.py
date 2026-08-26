@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from pynbody.array import IndexedSimArray, SimArray
+from pynbody.units import NoUnit
 
 from pynbodyext.core.calculate.nodes.base import CalculatorBase
 from pynbodyext.core.calculate.runtime.options import RunOptions
@@ -19,11 +20,7 @@ if TYPE_CHECKING:
 # Minimal RunOptions for per-bin apply loops: no cache, no progress, no perf,
 # no observer.  Created once and reused across all apply() calls.
 _BATCH_RUN_OPTIONS: RunOptions = RunOptions(
-    cache=False,
-    progress=False,
-    perf_time=False,
-    perf_memory=False,
-    observe=False,
+    cache=False, progress=False, perf_time=False, perf_memory=False, observe=False
 )
 
 # Density suffix pattern — only .density (dot notation)
@@ -73,13 +70,7 @@ class BinQueryEngine:
         parsed = type(owner)._extensions.parse_pipeline_key(key)
         if parsed is not None:
             field, transforms, terminal_stat, weight_field = parsed
-            result = self.stat_pipeline(
-                field,
-                transforms,
-                terminal_stat,
-                weight=weight_field,
-                query_key=key,
-            )
+            result = self.stat_pipeline(field, transforms, terminal_stat, weight=weight_field, query_key=key)
             self._diagnostics.record("query", key=key, scope=scope)
             return result
 
@@ -99,14 +90,7 @@ class BinQueryEngine:
         self._diagnostics.record("query", key=key, scope=scope)
         return arr
 
-    def wrap(
-        self,
-        values: Any,
-        *,
-        name: str,
-        field: str | None = None,
-        mode: str | None = None,
-    ) -> BinsArray:
+    def wrap(self, values: Any, *, name: str, field: str | None = None, mode: str | None = None) -> BinsArray:
         return BinsArray(self._owner, values, name=name, field=field, mode=mode)
 
     # ------------------------------------------------------------------
@@ -168,6 +152,14 @@ class BinQueryEngine:
             numerator = owner._resolve_query(f"{base_field}.sum")
 
         denominator = owner._resolve_query("measure")
+
+        # A dimensionless (NoUnit) measure — e.g. a bin axis with no physical
+        # units — must not strip the numerator's units.  pynbody's
+        # ``SimArray / NoUnit`` degrades the quotient to ``NoUnit``, so drop the
+        # denominator's wrapper and divide by a bare array to retain the mass
+        # units (``mass / dimensionless_measure`` keeps ``Msol``).
+        if isinstance(getattr(denominator, "units", None), NoUnit):
+            denominator = np.asarray(denominator)
 
         # Divide BinsArray objects directly to preserve units
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -365,9 +357,7 @@ class BinQueryEngine:
             raw = query(owner.sim, owner._particle_bin)  # type: ignore[call-arg]
             values = np.asarray(raw, dtype=float)
             if values.shape != (owner.nbins,):
-                raise TypeError(
-                    f"Vectorized apply callable must return shape ({owner.nbins},), got {values.shape}."
-                )
+                raise TypeError(f"Vectorized apply callable must return shape ({owner.nbins},), got {values.shape}.")
         else:
             values = self._value_nonvectorized(query)
 
@@ -394,7 +384,9 @@ class BinQueryEngine:
                     if sample_shape is None:
                         sample_shape = arr.shape
                     elif arr.shape != sample_shape:
-                        raise TypeError(f"Inconsistent output shape from query: expected {sample_shape}, got {arr.shape}.")
+                        raise TypeError(
+                            f"Inconsistent output shape from query: expected {sample_shape}, got {arr.shape}."
+                        )
                     outputs[index] = arr
         else:
             # Plain callable
@@ -415,8 +407,6 @@ class BinQueryEngine:
         result_values = np.array([out if out is not None else np.full(sample_shape, np.nan) for out in outputs])
         return result_values
 
-
-
     @staticmethod
     def callable_cache_token(query: Any) -> Any:
         if isinstance(query, CalculatorBase):
@@ -428,11 +418,7 @@ class BinQueryEngine:
 
     def cache_report(self) -> dict[str, Any]:
         owner = self._owner
-        return {
-            "queries": len(self._cache),
-            "subresults": owner.nsubs,
-            "total_queries": owner.total_cached_arr,
-        }
+        return {"queries": len(self._cache), "subresults": owner.nsubs, "total_queries": owner.total_cached_arr}
 
     def query_report(self) -> list[dict[str, Any]]:
         return list(self._diagnostics.diagnostics)

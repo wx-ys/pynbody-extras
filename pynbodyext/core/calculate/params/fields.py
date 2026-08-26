@@ -19,6 +19,7 @@ A calculator class can be declared with dataclass-style fields::
 
     from pynbodyext.core.calculate import Param, PropertyBase
 
+
     @PropertyBase.dataclass
     class MassInsideRadius(PropertyBase[float]):
         radius: Param[float] = Param(field_name="r")
@@ -28,6 +29,7 @@ A calculator class can be declared with dataclass-style fields::
             radius = params.radius
             mask = sim["r"] < radius
             return float(sim["mass"][mask].sum())
+
 
     result = MassInsideRadius(10.0, family="star").run(sim)
     print(result.value)
@@ -88,17 +90,9 @@ If a field seems to affect caching unexpectedly, check whether its
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import MISSING, dataclass, field, fields, is_dataclass
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Generic,
-    Literal,
-    TypeAlias,
-    TypeVar,
-    get_origin,
-    overload,
-)
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeAlias, TypeVar, get_origin, overload
 
 from .resolution import DynamicParamSpec, dynamic_value_dependencies
 
@@ -194,11 +188,7 @@ class Param(Generic[T]):
             signature=signature,
         )
 
-        kwargs: dict[str, Any] = {
-            "metadata": _merge_metadata(spec),
-            "init": init,
-            "kw_only": kw_only,
-        }
+        kwargs: dict[str, Any] = {"metadata": _merge_metadata(spec), "init": init, "kw_only": kw_only}
         if default is not MISSING:
             kwargs["default"] = default
         return field(**kwargs)
@@ -207,42 +197,17 @@ class Param(Generic[T]):
 
     @overload
     @classmethod
-    def static(
-        cls,
-        default: T,
-        *,
-        signature: bool = True,
-        init: bool = True,
-        kw_only: bool = False,
-    ) -> T: ...
+    def static(cls, default: T, *, signature: bool = True, init: bool = True, kw_only: bool = False) -> T: ...
 
     @overload
     @classmethod
-    def static(
-        cls,
-        *,
-        signature: bool = True,
-        init: bool = True,
-        kw_only: bool = False,
-    ) -> Any: ...
+    def static(cls, *, signature: bool = True, init: bool = True, kw_only: bool = False) -> Any: ...
 
     @classmethod
-    def static(
-        cls,
-        default: Any = MISSING,
-        *,
-        signature: bool = True,
-        init: bool = True,
-        kw_only: bool = False,
-    ) -> Any:
-        """Create a static (non-dynamic) dataclass field specifier.
-        """
+    def static(cls, default: Any = MISSING, *, signature: bool = True, init: bool = True, kw_only: bool = False) -> Any:
+        """Create a static (non-dynamic) dataclass field specifier."""
         spec = ParamSpec(name="", kind="static", signature=signature)
-        kwargs: dict[str, Any] = {
-            "metadata": _merge_metadata(spec),
-            "init": init,
-            "kw_only": kw_only,
-        }
+        kwargs: dict[str, Any] = {"metadata": _merge_metadata(spec), "init": init, "kw_only": kw_only}
         if default is not MISSING:
             kwargs["default"] = default
         return field(**kwargs)
@@ -265,9 +230,7 @@ class ParamSpec:
     def as_dynamic_param_spec(self) -> DynamicParamSpec:
         """Return runtime resolver metadata for dynamic parameters."""
         return DynamicParamSpec(
-            field_name=self.field_name,
-            target_units=self.target_units,
-            optional_units=self.optional_units,
+            field_name=self.field_name, target_units=self.target_units, optional_units=self.optional_units
         )
 
 
@@ -284,7 +247,7 @@ class ParamView:
         static = dict(self.static)
         object.__setattr__(self, "dynamic", dynamic)
         object.__setattr__(self, "static", static)
-        object.__setattr__(self, "data", {**static, **dynamic})
+        object.__setattr__(self, "data", static | dynamic)
 
     @classmethod
     def from_calculator(cls, instance: Any, dynamic_values: dict[str, Any]) -> ParamView:
@@ -325,11 +288,13 @@ class ParamView:
 def _merge_metadata(spec: ParamSpec) -> dict[str, Any]:
     return {_PARAM_METADATA_KEY: spec}
 
+
 def _raw_annotations(cls: type[Any]) -> dict[str, Any]:
     annotations: dict[str, Any] = {}
     for base in reversed(cls.__mro__):
         annotations.update(getattr(base, "__annotations__", {}))
     return annotations
+
 
 def _is_param_annotation(annotation: Any) -> bool:
     if annotation is Param:
@@ -340,6 +305,7 @@ def _is_param_annotation(annotation: Any) -> bool:
         text = annotation if " " not in annotation else annotation.replace(" ", "")
         return text == "Param" or text.startswith("Param[")
     return getattr(annotation, "__origin__", None) is Param
+
 
 def collect_param_specs(cls: type[Any]) -> tuple[ParamSpec, ...]:
     """Collect declarative calculator field metadata from a dataclass class."""
@@ -377,21 +343,14 @@ def collect_param_specs(cls: type[Any]) -> tuple[ParamSpec, ...]:
         specs.append(ParamSpec(name=item.name, kind="static"))
 
     result = tuple(specs)
-    try:
+    with contextlib.suppress(Exception):
         type.__setattr__(cls, "__calculate_param_specs__", result)
-    except Exception:
-        pass
     return result
 
 
 def declarative_dynamic_param_specs(cls: type[Any]) -> dict[str, DynamicParamSpec]:
     """Return dynamic resolver specs declared on a dataclass calculator."""
-    return {
-        spec.name: spec.as_dynamic_param_spec()
-        for spec in collect_param_specs(cls)
-        if spec.kind == "dynamic"
-    }
-
+    return {spec.name: spec.as_dynamic_param_spec() for spec in collect_param_specs(cls) if spec.kind == "dynamic"}
 
 
 def declarative_dependencies(instance: Any) -> list[CalculatorBase[Any, Any]]:

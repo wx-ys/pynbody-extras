@@ -41,8 +41,8 @@ from .query import ResultQuery
 if TYPE_CHECKING:
     from .result import Result, ResultNode
 
-class ResultRepr:
 
+class ResultRepr:
     # ── Status helpers ─────────────────────────────────────────────────────────
 
     @staticmethod
@@ -138,10 +138,7 @@ class ResultRepr:
                 format_mem(phase.memory_used),
                 format_mem(phase.memory_peak),
                 format_mem(phase.rss_used),
-                html_badge(
-                    phase.status,
-                    tone=ResultRepr._tone_for_status(phase.status),
-                ),
+                html_badge(phase.status, tone=ResultRepr._tone_for_status(phase.status)),
             ]
             for phase in node.phases
         ]
@@ -182,25 +179,13 @@ class ResultRepr:
 
         observer_lines: list[str] = []
         if node.observation.reads:
-            observer_lines.append(
-                f"reads: {ResultRepr._format_field_set(node.observation.reads)}"
-            )
+            observer_lines.append(f"reads: {ResultRepr._format_field_set(node.observation.reads)}")
         if node.observation.dirty_fields:
-            observer_lines.append(
-                f"dirty: {ResultRepr._format_field_set(node.observation.dirty_fields)}"
-            )
+            observer_lines.append(f"dirty: {ResultRepr._format_field_set(node.observation.dirty_fields)}")
         if node.observation.deletes:
-            observer_lines.append(
-                f"deletes: {ResultRepr._format_field_set(node.observation.deletes)}"
-            )
+            observer_lines.append(f"deletes: {ResultRepr._format_field_set(node.observation.deletes)}")
         fields_html = (
-            html_details(
-                "Observer fields",
-                html_pre("\n".join(observer_lines)),
-                open=False,
-            )
-            if observer_lines
-            else ""
+            html_details("Observer fields", html_pre("\n".join(observer_lines)), open=False) if observer_lines else ""
         )
         return counts_html + fields_html
 
@@ -209,27 +194,15 @@ class ResultRepr:
         """Return Error section HTML, or empty string."""
         if node.error is None:
             return ""
-        error_rows = [
-            ("type", node.error.error_type),
-            ("message", node.error.message),
-        ]
+        error_rows = [("type", node.error.error_type), ("message", node.error.message)]
         if node.error.phase is not None:
             error_rows.append(("phase", node.error.phase))
         error_html = html_section(
             "Error",
-            html_scroll_x(
-                html_table(
-                    error_rows,
-                    class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap",
-                )
-            ),
+            html_scroll_x(html_table(error_rows, class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap")),
         )
         if node.error.traceback_text:
-            error_html += html_details(
-                "Traceback",
-                html_pre(node.error.traceback_text),
-                open=True,
-            )
+            error_html += html_details("Traceback", html_pre(node.error.traceback_text), open=True)
         return error_html
 
     @staticmethod
@@ -238,24 +211,16 @@ class ResultRepr:
             ("label", node.label),
             ("ref", node.ref),
             ("kind", html_badge(display_value(node.kind), tone="info")),
-            (
-                "status",
-                html_badge(
-                    display_value(node.status),
-                    tone=ResultRepr._tone_for_status(node.status),
-                ),
-            ),
+            ("status", html_badge(display_value(node.status), tone=ResultRepr._tone_for_status(node.status))),
             (
                 "stored",
                 " ".join(
                     [
                         html_badge(
-                            "value" if node.stored_value else "value: no",
-                            tone="ok" if node.stored_value else "neutral",
+                            "value" if node.stored_value else "value: no", tone="ok" if node.stored_value else "neutral"
                         ),
                         html_badge(
-                            "raw" if node.stored_raw else "raw: no",
-                            tone="ok" if node.stored_raw else "neutral",
+                            "raw" if node.stored_raw else "raw: no", tone="ok" if node.stored_raw else "neutral"
                         ),
                     ]
                 ),
@@ -289,22 +254,13 @@ class ResultRepr:
             + ResultRepr._node_error_section(node)
         )
 
-        return html_card(
-            "ResultNode",
-            rows,
-            body=body,
-            escape_values=False,
-        )
+        return html_card("ResultNode", rows, body=body, escape_values=False)
 
     # ── Result repr ────────────────────────────────────────────────────────────
 
     @staticmethod
     def result_repr(result: Result[Any]) -> str:
-        parts = [
-            f"value={type(result.value).__name__}",
-            f"ok={result.ok}",
-            f"nodes={len(result.nodes)}",
-        ]
+        parts = [f"value={type(result.value).__name__}", f"ok={result.ok}", f"nodes={len(result.nodes)}"]
         if result.named:
             parts.append(f"named={tuple(result.named.keys())!r}")
         if result.warnings:
@@ -367,29 +323,16 @@ class ResultRepr:
             provenance_rows.append(("calculator hash", result.provenance.calculator_signature_hash))
         elif result.provenance.calculator_signature_text is not None:
             provenance_rows.append(
-                (
-                    "calculator",
-                    compact_repr(result.provenance.calculator_signature_text, max_length=180),
-                )
+                ("calculator", compact_repr(result.provenance.calculator_signature_text, max_length=180))
             )
-        provenance_rows.append(
-            ("sim signature", compact_repr(result.provenance.sim_signature, max_length=180))
-        )
+        provenance_rows.append(("sim signature", compact_repr(result.provenance.sim_signature, max_length=180)))
         if result.provenance.finished_at is not None:
             provenance_rows.append(
-                (
-                    "wall time",
-                    format_time(result.provenance.finished_at - result.provenance.started_at),
-                )
+                ("wall time", format_time(result.provenance.finished_at - result.provenance.started_at))
             )
         return html_details(
             "Provenance",
-            html_scroll_x(
-                html_table(
-                    provenance_rows,
-                    class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap",
-                )
-            ),
+            html_scroll_x(html_table(provenance_rows, class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap")),
         )
 
     @staticmethod
@@ -408,13 +351,7 @@ class ResultRepr:
             )
         remaining_slots = max(0, 8 - len(error_rows))
         for error in result.errors[:remaining_slots]:
-            error_rows.append(
-                [
-                    "<run>",
-                    error.phase or "-",
-                    f"{error.error_type}: {error.message}",
-                ]
-            )
+            error_rows.append(["<run>", error.phase or "-", f"{error.error_type}: {error.message}"])
         if not error_rows:
             return ""
         return html_section(
@@ -430,14 +367,10 @@ class ResultRepr:
 
     @staticmethod
     def result_html(result: Result[Any]) -> str:
-
         rows: list[tuple[str, Any]] = [
             ("root", result.root.label),
             ("value", type(result.value).__name__),
-            (
-                "status",
-                html_badge("ok" if result.ok else "error", tone="ok" if result.ok else "error"),
-            ),
+            ("status", html_badge("ok" if result.ok else "error", tone="ok" if result.ok else "error")),
         ]
         if result.named:
             rows.append(("named", compact_repr(tuple(result.named.keys()), max_length=96)))
@@ -445,24 +378,14 @@ class ResultRepr:
             rows.append(("signature", result.provenance.calculator_signature_hash[:12]))
 
         execution_tree_html = html_details(
-            "Execution tree",
-            html_pre(result.report_execution_tree()),
-            open=not result.ok,
+            "Execution tree", html_pre(result.report_execution_tree()), open=not result.ok
         )
 
         perf_text = result.report_perf().strip()
-        perf_html = (
-            html_details("Performance", html_pre(perf_text), open=False)
-            if perf_text
-            else ""
-        )
+        perf_html = html_details("Performance", html_pre(perf_text), open=False) if perf_text else ""
 
         cache_text = ResultRepr.cache_section(result).strip()
-        cache_html = (
-            html_details("Cache", html_pre(cache_text), open=False)
-            if cache_text
-            else ""
-        )
+        cache_html = html_details("Cache", html_pre(cache_text), open=False) if cache_text else ""
 
         body = (
             ResultRepr._result_metrics_section(result)
@@ -474,22 +397,13 @@ class ResultRepr:
             + cache_html
         )
 
-        return html_card(
-            "Result",
-            rows,
-            body=body,
-            escape_values=False,
-        )
+        return html_card("Result", rows, body=body, escape_values=False)
 
     # ── Perf table ─────────────────────────────────────────────────────────────
 
     @staticmethod
     def perf_table(
-        result: Result[Any],
-        *,
-        show_ids: bool = False,
-        max_depth: int | None = None,
-        max_children: int | None = None,
+        result: Result[Any], *, show_ids: bool = False, max_depth: int | None = None, max_children: int | None = None
     ) -> str:
         ResultQuery._validate_tree_limits(max_depth, max_children)
         title = result.root.name or str(result.root.kind)
@@ -504,10 +418,7 @@ class ResultRepr:
             hidden_count = 0
         else:
             visible_nodes, hidden_count = ResultQuery._visible_tree_nodes(
-                result,
-                result.root,
-                max_depth=max_depth,
-                max_children=max_children,
+                result, result.root, max_depth=max_depth, max_children=max_children
             )
             seen_node_ids: set[str] = set()
             nodes = []
@@ -518,9 +429,7 @@ class ResultRepr:
                 nodes.append(node)
 
         for node in nodes:
-            node_label = ResultQuery.node_label(
-                node, show_ids=show_ids, show_ref=True, show_kind=True, max_width=30
-            )
+            node_label = ResultQuery.node_label(node, show_ids=show_ids, show_ref=True, show_kind=True, max_width=30)
             for phase in node.phases:
                 lines.append(
                     f"{node_label:<30} | "
@@ -534,14 +443,7 @@ class ResultRepr:
         if hidden_count:
             hidden_suffix = "node" if hidden_count == 1 else "nodes"
             hidden_label = f"... {hidden_count} {hidden_suffix} hidden"
-            lines.append(
-                f"{hidden_label[:30]:<30} | "
-                f"{'-':<15} | "
-                f"{'-':>12} | "
-                f"{'-':>14} | "
-                f"{'-':>14} | "
-                f"{'-':>10}"
-            )
+            lines.append(f"{hidden_label[:30]:<30} | {'-':<15} | {'-':>12} | {'-':>14} | {'-':>14} | {'-':>10}")
 
         lines.append("-" * len(header))
         lines.append(
@@ -573,12 +475,7 @@ class ResultRepr:
         for event in events[-max_events:]:
             if event.node_id and event.node_id in result.nodes:
                 node = result.nodes[event.node_id]
-                label = ResultQuery.node_label(
-                    node,
-                    show_ref=True,
-                    show_kind=True,
-                    max_width=48,
-                )
+                label = ResultQuery.node_label(node, show_ref=True, show_kind=True, max_width=48)
             else:
                 label = "-"
             lines.append(f"- {event.event}: {label}")
@@ -588,11 +485,7 @@ class ResultRepr:
     # ── Summary ────────────────────────────────────────────────────────────────
 
     @staticmethod
-    def summary(
-        result: Result[Any],
-        *,
-        include_cache_counts: bool = True
-    ) -> str:
+    def summary(result: Result[Any], *, include_cache_counts: bool = True) -> str:
         root_label = result.root.label
         lines = [
             f"root: {root_label}",
@@ -632,30 +525,19 @@ class ResultRepr:
             "Summary",
             ResultRepr.summary(result),
             "Pipeline",
-            ResultQuery.node_tree(
-                result,
-                show_ids=show_ids,
-                max_depth=max_depth,
-                max_children=max_children,
-            ),
+            ResultQuery.node_tree(result, show_ids=show_ids, max_depth=max_depth, max_children=max_children),
         ]
 
         if include_execution_tree:
             execution_text = ResultQuery.execution_tree(
-                result,
-                show_ids=show_ids,
-                max_depth=max_depth,
-                max_children=max_children,
+                result, show_ids=show_ids, max_depth=max_depth, max_children=max_children
             ).strip()
             if execution_text:
                 sections.extend(["Execution", execution_text])
 
         if include_perf:
             perf_text = ResultRepr.perf_table(
-                result,
-                show_ids=show_ids,
-                max_depth=max_depth,
-                max_children=max_children,
+                result, show_ids=show_ids, max_depth=max_depth, max_children=max_children
             ).strip()
             if perf_text:
                 sections.extend(["Performance", perf_text])
@@ -679,12 +561,7 @@ class ResultRepr:
                 for node in error_nodes:
                     phase = node.error.phase if node.error is not None else None
                     phase_suffix = f" phase={phase}" if phase else ""
-                    label = ResultQuery.node_label(
-                        node,
-                        show_ids=show_ids,
-                        show_ref=True,
-                        show_kind=True,
-                    )
+                    label = ResultQuery.node_label(node, show_ids=show_ids, show_ref=True, show_kind=True)
                     error_section.append(f"- {label}{phase_suffix}")
 
             if result.errors:

@@ -118,3 +118,35 @@ class BinsArray(SimArray):
         if copy:
             arr = arr.copy()
         return arr.reshape(self.shape_bins)
+
+    def plot(self, ax: Any = None, **kwargs: Any) -> Any:
+        """Plot this 1-D per-bin array against the first axis's bin centers.
+
+        Parameters
+        ----------
+        ax:
+            Matplotlib axes object.  A new figure/axes is created if ``None``.
+        **kwargs:
+            Extra keyword arguments forwarded to :meth:`matplotlib.axes.Axes.plot`.
+
+        Returns
+        -------
+        list[Line2D]
+            The line objects returned by ``ax.plot`` (one line for a 1-D array).
+
+        Raises
+        ------
+        ValueError
+            If the owning result is not one-dimensional.
+        """
+        import matplotlib.pyplot as plt
+
+        bins = self._bins
+        if bins is None or bins.ndim != 1:
+            raise ValueError("BinsArray.plot requires a one-dimensional bin result.")
+
+        if ax is None:
+            _, ax = plt.subplots()
+        x = np.asarray(bins.centers)
+        y = np.asarray(self)
+        return ax.plot(x, y, **kwargs)

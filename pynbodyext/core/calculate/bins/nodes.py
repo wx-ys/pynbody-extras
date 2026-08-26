@@ -19,9 +19,9 @@ if TYPE_CHECKING:
 
 TBinNode = TypeVar("TBinNode", bound="_BinNodeBase")
 
+
 class _BinNodeBase(CalculatorBase[BinNDResult, BinNDResult]):
     kind: ClassVar[NodeKind] = BuiltinKinds.BINND
-
 
     def _own_dependencies(self) -> list[CalculatorBase[Any, Any]]:
         raise NotImplementedError
@@ -30,28 +30,16 @@ class _BinNodeBase(CalculatorBase[BinNDResult, BinNDResult]):
         raise NotImplementedError
 
     @staticmethod
-    def register_bin_algorithm(
-        name: str,
-        func: Any = None,
-        *,
-        overwrite: bool = False,
-    ) -> Any:
+    def register_bin_algorithm(name: str, func: Any = None, *, overwrite: bool = False) -> Any:
         return register_bin_algorithm(name, func, overwrite=overwrite)
 
     register_algorithm = register_bin_algorithm
 
     @staticmethod
     def register_axis_property(
-        name: str | AxisPropertyFunc,
-        func: AxisPropertyFunc | None = None,
-        *,
-        overwrite: bool = False,
+        name: str | AxisPropertyFunc, func: AxisPropertyFunc | None = None, *, overwrite: bool = False
     ) -> AxisPropertyFunc | Callable[[AxisPropertyFunc], AxisPropertyFunc]:
-        return BinAxis.register_property(
-            cast("Any", name),
-            cast("Any", func),
-            overwrite=overwrite,
-        )
+        return BinAxis.register_property(cast("Any", name), cast("Any", func), overwrite=overwrite)
 
     axis_property = register_axis_property
 
@@ -65,11 +53,7 @@ class _BinNodeBase(CalculatorBase[BinNDResult, BinNDResult]):
         overwrite: bool = False,
     ) -> Callable[[Any], Any] | Callable[[Callable[[Any], Any]], Callable[[Any], Any]]:
         return BinNDResult.derived(
-            cast("Any", fn),
-            name=cast("Any", name),
-            scope=scope,
-            condition=condition,
-            overwrite=overwrite,
+            cast("Any", fn), name=cast("Any", name), scope=scope, condition=condition, overwrite=overwrite
         )
 
     derived = register_derived
@@ -90,7 +74,7 @@ class _BinNodeBase(CalculatorBase[BinNDResult, BinNDResult]):
 
     def with_active(self: TBinNode, keys: Iterable[Any]) -> TBinNode:
         cl = cast("TBinNode", self._clone())
-        cl.active = tuple(keys) # type: ignore[attr-defined]
+        cl.active = tuple(keys)  # type: ignore[attr-defined]
         return cl
 
     def public_value(self, value: BinNDResult) -> BinNDResult:

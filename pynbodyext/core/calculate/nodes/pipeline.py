@@ -21,25 +21,20 @@ Group several outputs under stable names::
 
     from pynbodyext.core.calculate import Pipeline, PropertyBase
 
+
     @PropertyBase.dataclass
     class StellarMass(PropertyBase[float]):
-
         def calculate(self, sim, params=None):
             return float(sim["mass"].sum())
 
+
     @PropertyBase.dataclass
     class MeanTemperature(PropertyBase[float]):
-
         def calculate(self, sim, params=None):
             return float(sim["temp"].mean())
 
-    pipe = Pipeline(
-        {
-            "mass": StellarMass(),
-            "temp_mean": MeanTemperature(),
-        },
-        name="basic_summary",
-    )
+
+    pipe = Pipeline({"mass": StellarMass(), "temp_mean": MeanTemperature()}, name="basic_summary")
 
     result = pipe.run(sim)
     print(result.value["mass"])
@@ -58,13 +53,9 @@ Scoped Pipeline
 ---------------
 A pipeline composes with filters and transforms like any other calculator::
 
-    hot_summary = Pipeline(
-        {
-            "mass": StellarMass(),
-            "temp_mean": MeanTemperature(),
-        },
-        name="hot_summary",
-    ).filter(TemperatureAbove(1.0e5))
+    hot_summary = Pipeline({"mass": StellarMass(), "temp_mean": MeanTemperature()}, name="hot_summary").filter(
+        TemperatureAbove(1.0e5)
+    )
 
     result = hot_summary.run(sim, progress="phase")
     print(result.value["mass"])
@@ -113,7 +104,7 @@ if TYPE_CHECKING:
     from pynbodyext.core.calculate.runtime.input import NodeInput
 
 
-class Pipeline(CalculatorBase[dict[str, Any],dict[str, Any]]):
+class Pipeline(CalculatorBase[dict[str, Any], dict[str, Any]]):
     """Calculator that returns a dictionary of named outputs.
 
     Parameters
@@ -140,8 +131,7 @@ class Pipeline(CalculatorBase[dict[str, Any],dict[str, Any]]):
                 raise ValueError("Pipeline output names must be non-empty.")
             if child.name is not None and child.name != key and child.name in output_keys:
                 raise ValueError(
-                    f"Pipeline output {key!r} uses child name {child.name!r}, "
-                    "which conflicts with another output key."
+                    f"Pipeline output {key!r} uses child name {child.name!r}, which conflicts with another output key."
                 )
 
     def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:

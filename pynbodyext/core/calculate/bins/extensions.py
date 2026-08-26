@@ -17,15 +17,12 @@ if TYPE_CHECKING:
 
 class BinExtensionRegistry:
     """Registry for extensions to BinNDResult, including derived properties and pipeline transforms."""
+
     def __init__(self) -> None:
         self._derived_specs: defaultdict[type, dict[str, BinDerivedSpec]] = defaultdict(dict)
 
     def register_transform(
-        self,
-        name: str,
-        func: Callable[[np.ndarray], np.ndarray],
-        *,
-        overwrite: bool = False,
+        self, name: str, func: Callable[[np.ndarray], np.ndarray], *, overwrite: bool = False
     ) -> None:
         """Register a new pipeline transform that can be used in BinNDResult statistic definitions."""
         register_pipeline_transform(name, func, overwrite=overwrite)
@@ -41,25 +38,14 @@ class BinExtensionRegistry:
         overwrite: bool = False,
     ) -> Any:
         if isinstance(fn, str):
-            return self.register_derived(
-                owner_cls,
-                name=fn,
-                scope=scope,
-                condition=condition,
-                overwrite=overwrite,
-            )
+            return self.register_derived(owner_cls, name=fn, scope=scope, condition=condition, overwrite=overwrite)
 
         def decorator(func: BinDerivedFunc) -> BinDerivedFunc:
             query_name = name or func.__name__
             bucket = self._derived_specs[owner_cls]
             if not overwrite and query_name in bucket:
                 raise KeyError(f"BinNDResult derived property {query_name!r} is already registered.")
-            bucket[query_name] = BinDerivedSpec(
-                name=query_name,
-                func=func,
-                scope=scope,
-                condition=condition,
-            )
+            bucket[query_name] = BinDerivedSpec(name=query_name, func=func, scope=scope, condition=condition)
             return func
 
         if fn is None:

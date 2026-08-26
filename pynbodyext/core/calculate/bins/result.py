@@ -113,8 +113,8 @@ class BinNDResult(BinPlotMixin):
         # BinAxis.register_measure_type(..., overwrite=True)) so that
         # cached density entries are invalidated when a named type changes.
         from .axes import _measure_change_subscribers
-        _measure_change_subscribers.add(self)
 
+        _measure_change_subscribers.add(self)
 
     @property
     def root(self) -> BinNDResult:
@@ -123,6 +123,11 @@ class BinNDResult(BinPlotMixin):
     @property
     def is_root(self) -> bool:
         return self._parent is None
+
+    @property
+    def parent(self) -> BinNDResult | None:
+        """The parent result this subresult was derived from, or ``None`` for a root."""
+        return self._parent
 
     @property
     def nbins(self) -> int:
@@ -148,7 +153,7 @@ class BinNDResult(BinPlotMixin):
         --------
         >>> bins.particles_at_bin[0]  # particles in the first bin
         >>> bins.particles_at_bin[1:5]  # particles in bins 1 through 4
-        >>> bins.particles_at_bin[1,3,5] # particles in bins 1, 3, and 5
+        >>> bins.particles_at_bin[1, 3, 5]  # particles in bins 1, 3, and 5
         >>> bins.particles_at_bin[:, 0]  # particles in the first bin along the second axis (for 2D or higher)
 
         """
@@ -170,9 +175,9 @@ class BinNDResult(BinPlotMixin):
 
         Examples
         --------
-        >>> bins.axis.r          # axis with alias "r"
-        >>> bins.axis["r"]       # same
-        >>> bins.axis[0]         # first axis
+        >>> bins.axis.r  # axis with alias "r"
+        >>> bins.axis["r"]  # same
+        >>> bins.axis[0]  # first axis
         >>> bins.axis.set_axis_measure_type("r", "annulus")  # per-instance override
         """
         return BinAxisAccessor(self._axes, owner=self)
@@ -188,6 +193,7 @@ class BinNDResult(BinPlotMixin):
         type_name = self._axis_measure_overrides.get(axis.alias)
         if type_name is not None:
             from .axes import _AXIS_MEASURE_TYPE_REGISTRY as _types
+
             func = _types.get(type_name)
             if func is not None:
                 return func(axis)
@@ -244,7 +250,6 @@ class BinNDResult(BinPlotMixin):
         if self.ndim != 1:
             raise AttributeError(f"{name} is ambiguous for ND bins; use bins.axis[alias].{name}.")
 
-
     def families(self) -> Any:
         return self.sim.families()
 
@@ -292,7 +297,9 @@ class BinNDResult(BinPlotMixin):
             # Axis properties like "r.center" must be accessed via bins.axis("r").center
             # String queries only handle: geometry/derived properties and pipeline stat queries
             return self._resolve_query(key)
-        if (isinstance(key, CalculatorBase) and not isinstance(key, FilterBase)) or (callable(key) and not isinstance(key, (str, bytes))):
+        if (isinstance(key, CalculatorBase) and not isinstance(key, FilterBase)) or (
+            callable(key) and not isinstance(key, (str, bytes))
+        ):
             return self.apply(key)
         if isinstance(key, tuple) or isinstance(key, (int, np.integer, slice)) or is_int_sequence(key):
             raise TypeError("Bin selectors must use bins.particles_at_bin[...], not BinNDResult.__getitem__.")
@@ -301,7 +308,10 @@ class BinNDResult(BinPlotMixin):
     def __getattr__(self, name: str) -> Any:
         if name in {"center", "width", "min", "max", "edges"} and self.ndim == 1:
             # Convenience shortcuts for 1D results – delegate to the axis object
-            return getattr(self._axes[0], {"center": "centers", "width": "widths", "min": "mins", "max": "maxs", "edges": "edges"}[name])
+            return getattr(
+                self._axes[0],
+                {"center": "centers", "width": "widths", "min": "mins", "max": "maxs", "edges": "edges"}[name],
+            )
         try:
             sub = getattr(self.sim, name)
         except AttributeError as exc:
@@ -313,15 +323,19 @@ class BinNDResult(BinPlotMixin):
     @property
     def gas(self) -> SubBinNDResult:
         return self._family_subresult("gas")
+
     @property
     def g(self) -> SubBinNDResult:
         return self._family_subresult("gas")
+
     @property
     def dm(self) -> SubBinNDResult:
         return self._family_subresult("dm")
+
     @property
     def star(self) -> SubBinNDResult:
         return self._family_subresult("star")
+
     @property
     def s(self) -> SubBinNDResult:
         return self._family_subresult("star")
@@ -361,9 +375,7 @@ class BinNDResult(BinPlotMixin):
         weight: str | Callable[[Any], Any] | Any | None = None,
         query_key: str | None = None,
     ) -> BinsArray:
-        return self._query_engine.stat_pipeline(
-            field, transforms, terminal_stat, weight=weight, query_key=query_key
-        )
+        return self._query_engine.stat_pipeline(field, transforms, terminal_stat, weight=weight, query_key=query_key)
 
     def stat_explicit(
         self,
@@ -381,12 +393,7 @@ class BinNDResult(BinPlotMixin):
             bins.stat_explicit("vz", "mean", transforms=["abs"])
             bins.stat_explicit("mass", "mean", weight="mass")
         """
-        return self._query_engine.stat_explicit(
-            field,
-            statistic,
-            weight = weight,
-            transforms= transforms
-        )
+        return self._query_engine.stat_explicit(field, statistic, weight=weight, transforms=transforms)
 
     def apply(
         self,
@@ -416,12 +423,7 @@ class BinNDResult(BinPlotMixin):
 
             Signature: ``query(sim, particle_bin) -> np.ndarray``
         """
-        return self._query_engine.apply(
-            query,
-            name=name,
-            empty=empty,
-            vectorized=vectorized,
-        )
+        return self._query_engine.apply(query, name=name, empty=empty, vectorized=vectorized)
 
     def _callable_cache_token(self, query: Any) -> Any:
         return self._query_engine.callable_cache_token(query)
@@ -467,10 +469,7 @@ class BinNDResult(BinPlotMixin):
             del self._axis_measure_overrides[alias]
         else:
             if type_name not in _types:
-                raise KeyError(
-                    f"Unknown measure type {type_name!r}. "
-                    f"Known types: {sorted(_types)}."
-                )
+                raise KeyError(f"Unknown measure type {type_name!r}. Known types: {sorted(_types)}.")
             old_type = self._axis_measure_overrides.get(alias)
             if old_type == type_name:
                 return  # no change — nothing to do
@@ -507,23 +506,43 @@ class BinNDResult(BinPlotMixin):
 
     @classmethod
     def register_transform(
-        cls,
-        name: str,
-        func: Callable[[np.ndarray], np.ndarray],
-        *,
-        overwrite: bool = False,
+        cls, name: str, func: Callable[[np.ndarray], np.ndarray], *, overwrite: bool = False
     ) -> None:
         cls._extensions.register_transform(name, func, overwrite=overwrite)
 
     @overload
     @classmethod
-    def register_derived(cls, fn: BinDerivedFunc, *, name: None = None, scope: str = "derived", condition: BinDerivedCondition | None = None, overwrite: bool = False) -> BinDerivedFunc: ...
+    def register_derived(
+        cls,
+        fn: BinDerivedFunc,
+        *,
+        name: None = None,
+        scope: str = "derived",
+        condition: BinDerivedCondition | None = None,
+        overwrite: bool = False,
+    ) -> BinDerivedFunc: ...
     @overload
     @classmethod
-    def register_derived(cls, fn: str, *, name: None = None, scope: str = "derived", condition: BinDerivedCondition | None = None, overwrite: bool = False) -> Callable[[BinDerivedFunc], BinDerivedFunc]: ...
+    def register_derived(
+        cls,
+        fn: str,
+        *,
+        name: None = None,
+        scope: str = "derived",
+        condition: BinDerivedCondition | None = None,
+        overwrite: bool = False,
+    ) -> Callable[[BinDerivedFunc], BinDerivedFunc]: ...
     @overload
     @classmethod
-    def register_derived(cls, fn: None = None, *, name: str | None = None, scope: str = "derived", condition: BinDerivedCondition | None = None, overwrite: bool = False) -> Callable[[BinDerivedFunc], BinDerivedFunc]: ...
+    def register_derived(
+        cls,
+        fn: None = None,
+        *,
+        name: str | None = None,
+        scope: str = "derived",
+        condition: BinDerivedCondition | None = None,
+        overwrite: bool = False,
+    ) -> Callable[[BinDerivedFunc], BinDerivedFunc]: ...
     @classmethod
     def register_derived(
         cls,
@@ -535,13 +554,9 @@ class BinNDResult(BinPlotMixin):
         overwrite: bool = False,
     ) -> Any:
         return cls._extensions.register_derived(
-            cls,
-            fn,
-            name=name,
-            scope=scope,
-            condition=condition,
-            overwrite=overwrite,
+            cls, fn, name=name, scope=scope, condition=condition, overwrite=overwrite
         )
+
     derived = register_derived
     derived_property = register_derived
 
@@ -564,6 +579,7 @@ def _has_family(name: str) -> Callable[[Any], bool]:
             return False
 
     return condition
+
 
 @BinNDResult.derived("measure", scope="geometry")
 def _bin_measure(bins: BinNDResult) -> np.ndarray:
@@ -595,8 +611,71 @@ def _count(bins: BinNDResult) -> np.ndarray:
     return np.bincount(bins._particle_bin[valid_mask], minlength=bins.nbins).astype(int)
 
 
+@BinNDResult.derived(
+    "vcirc", condition=lambda bins: bins.ndim == 1 and any(axis_matches(axis, {"r", "rxy"}) for axis in bins.axes)
+)
+def _vcirc(bins: BinNDResult) -> np.ndarray:
+    """Per-bin circular velocity from the gravitational field.
 
+    Available on 1-D radial (``r`` / ``rxy``) profiles only.  For each bin
+    radius ``R`` the magnitude of the gravitational acceleration is evaluated
+    at a set of points on the mid-plane circle of radius ``R`` (averaging a few
+    azimuthal samples so a lumpy distribution does not bias one azimuth), then
+    ``sqrt(<|a|> * R)`` is returned.
 
+    The acceleration is computed by the gravity backend (``tree`` by default)
+    from ``sim['pos']``, ``sim['mass']`` and ``sim['smooth']`` — i.e. the
+    particles of :attr:`~BinNDResult.sim`.  For a spherically symmetric mass
+    distribution this equals ``sqrt(G * M_enc(<R) / R)``, the classic
+    circular (rotation) velocity.
+
+    Returns a :class:`pynbody.array.SimArray` in ``km s**-1``.
+    """
+    from pynbody.array import SimArray
+
+    from pynbodyext.gravity import KernelKind, calculate_acceleration
+
+    sim = bins.sim
+    centers = bins.centers
+
+    # Bin-center radii as a unit-bearing array (kpc for a physical r/rxy
+    # profile).  Keep the axis units if present so the kpc→km conversion is
+    # exact; otherwise fall back to the snapshot's position units.
+    if isinstance(centers, SimArray):
+        radii_arr = centers
+        radii = np.asarray(centers)
+    else:
+        radii = np.asarray(centers)
+        radii_arr = SimArray(radii, units=sim["pos"].units)
+
+    # Sample the mid-plane circle at each bin radius.
+    n_azimuth = 8
+    angles = np.linspace(0.0, 2.0 * np.pi, n_azimuth, endpoint=False)
+    rr = np.repeat(radii, n_azimuth)
+    aa = np.tile(angles, radii.size)
+    points = np.zeros((rr.size, 3), dtype=float)
+    points[:, 0] = rr * np.cos(aa)
+    points[:, 1] = rr * np.sin(aa)
+
+    softening = sim["smooth"] if "smooth" in sim.keys() else None
+    # A softening kernel must accompany any softening length (KernelKind.No is
+    # only valid with no softenings).  Plummer with eps=0 reduces to Newtonian,
+    # so it is exact whenever sim['smooth'] is present.
+    kernel = KernelKind.Plummer if softening is not None else KernelKind.No
+    acc = calculate_acceleration(sim, positions=points, softening=softening, method="tree", kernel=kernel, theta=0.7)
+    # |a| in km s**-2, averaged over the azimuthal samples at each radius.
+    acc_mag = np.linalg.norm(np.asarray(acc), axis=1)
+    mean_a = acc_mag.reshape(radii.size, n_azimuth).mean(axis=1)
+
+    # vcirc = sqrt(|a| * R): a is km/s**2, so R must be in km for the product
+    # to yield km**2/s**2 (and sqrt → km/s).
+    R_km = np.asarray(radii_arr.in_units("km"))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        vcirc = np.sqrt(mean_a * R_km)
+
+    out = SimArray(vcirc, units="km s**-1")
+    out.sim = sim
+    return out
 
 
 @BinNDResult.derived("density", overwrite=True)
@@ -623,7 +702,7 @@ def _number_density(bins: BinNDResult) -> np.ndarray:
 
 @BinNDResult.derived("enclosed_mass")
 def _enclosed_mass(bins: BinNDResult) -> np.ndarray:
-    return np.cumsum(bins["mass.sum"])
+    return bins["mass.sum"].cumsum()
 
 
 @BinNDResult.derived("gas_fraction", condition=_has_family("gas"))

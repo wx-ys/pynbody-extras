@@ -14,6 +14,7 @@ ProgressVerbosity = Literal["run", "node", "phase", "debug"]
 if TYPE_CHECKING:
     import logging
 
+
 def _node_ref(node_id: str) -> str:
     return f"n{node_id.rsplit(':', 1)[-1]}"
 
@@ -185,12 +186,7 @@ class LoggerProgressSink:
         """Log a phase start event when verbosity includes debug starts."""
         if not self._shows_phase_start():
             return
-        self.log.info(
-            "%s[%s] phase %s start",
-            self._phase_prefix(event.depth),
-            _node_ref(event.node_id),
-            event.phase,
-        )
+        self.log.info("%s[%s] phase %s start", self._phase_prefix(event.depth), _node_ref(event.node_id), event.phase)
 
     def on_phase_end(self, event: PhaseProgressEvent) -> None:
         """Log a phase summary event."""
@@ -403,19 +399,11 @@ def resolve_progress_sink(
     elif isinstance(progress, str):
         progress_name = progress.lower()
         if progress_name == "bar":
-            sink = CompositeProgressSink(
-                (
-                    LoggerProgressSink(verbosity="node"),
-                    TqdmProgressSink(verbosity="node"),
-                )
-            )
+            sink = CompositeProgressSink((LoggerProgressSink(verbosity="node"), TqdmProgressSink(verbosity="node")))
         elif progress_name.startswith("bar:"):
             verbosity = cast("ProgressVerbosity", progress_name.split(":", 1)[1])
             sink = CompositeProgressSink(
-                (
-                    LoggerProgressSink(verbosity=verbosity),
-                    TqdmProgressSink(verbosity=verbosity),
-                )
+                (LoggerProgressSink(verbosity=verbosity), TqdmProgressSink(verbosity=verbosity))
             )
         elif progress_name == "bar-only":
             sink = TqdmProgressSink(verbosity="node")

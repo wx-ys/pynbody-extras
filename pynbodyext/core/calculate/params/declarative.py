@@ -7,12 +7,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast, dataclass_transform, overl
 
 from pynbodyext.core.calculate.nodes.base import CalculatorBase
 
-from .fields import (
-    Param,
-    collect_param_specs,
-    declarative_dependencies,
-    declarative_dynamic_param_specs,
-)
+from .fields import Param, collect_param_specs, declarative_dependencies, declarative_dynamic_param_specs
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -21,10 +16,8 @@ if TYPE_CHECKING:
 TCalc = TypeVar("TCalc", bound=CalculatorBase[Any, Any])
 
 
-
 def _declared_dependencies(instance: CalculatorBase[Any, Any]) -> list[CalculatorBase[Any, Any]]:
     return declarative_dependencies(instance)
-
 
 
 @overload
@@ -37,8 +30,7 @@ def dataclass_calc(cls: None = None, **dataclass_kwargs: Any) -> Callable[[type[
 
 @dataclass_transform(field_specifiers=(Param,))
 def dataclass_calc(
-    cls: type[TCalc] | None = None,
-    **dataclass_kwargs: Any,
+    cls: type[TCalc] | None = None, **dataclass_kwargs: Any
 ) -> type[TCalc] | Callable[[type[TCalc]], type[TCalc]]:
     """Decorate a calculator subclass with dataclass-style parameters.
 
@@ -69,10 +61,7 @@ def dataclass_calc(
         if raw_cls.declared_dependencies is CalculatorBase.declared_dependencies:
             type.__setattr__(dc_cls, "declared_dependencies", _declared_dependencies)
 
-
         type.__setattr__(dc_cls, "__calculate_param_specs__", collect_param_specs(dc_cls))
         return dc_cls
 
-    if cls is None:
-        return wrap
-    return wrap(cls)
+    return wrap if cls is None else wrap(cls)

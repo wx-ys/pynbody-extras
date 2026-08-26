@@ -1,13 +1,6 @@
 from .accessors import BinParticlesAccessor
 from .arrays import BinsArray
-from .axes import (
-    BIN_ALGORITHMS,
-    BinAxis,
-    BinAxisAccessor,
-    has_axes,
-    has_axis,
-    register_bin_algorithm,
-)
+from .axes import BIN_ALGORITHMS, BinAxis, BinAxisAccessor, has_axes, has_axis, register_bin_algorithm
 from .nodes import Bin1D, BinND
 from .plot import BinPlotMixin
 from .result import BinNDResult, BinsResultEngine, SubBinNDResult

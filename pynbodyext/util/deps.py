@@ -4,8 +4,6 @@ from importlib.util import find_spec
 __all__ = ["GRAVITY_NATIVE_AVAILABLE", "DASK_AVAILABLE", "module_available", "PYNBODY_VERSION"]
 
 
-
-
 def module_available(name: str) -> bool:
     """Return True if a module is importable."""
     return find_spec(name) is not None

@@ -55,6 +55,7 @@ implements :meth:`compute`::
         def public_value(self, value):
             return value["ratio"]
 
+
     result = Ratio(ParamSum("mass"), ParamContain()).run(sim)
     print(result.value)
 
@@ -126,22 +127,13 @@ class RuntimeCalculatorBase(CalculatorBase[TRaw, TPublic], Generic[TRaw, TPublic
         return self.with_filter(filt)
 
     def with_transformation(
-        self: TRuntime,
-        transform: TransformBase[Any],
-        *,
-        revert: bool = True,
+        self: TRuntime, transform: TransformBase[Any], *, revert: bool = True
     ) -> BoundCalculator[TRuntime, TRaw, TPublic]:
         """Return a transformed calculator while preserving the concrete base type."""
-        return cast(
-            "BoundCalculator[TRuntime, TRaw, TPublic]",
-            super().with_transformation(transform, revert=revert),
-        )
+        return cast("BoundCalculator[TRuntime, TRaw, TPublic]", super().with_transformation(transform, revert=revert))
 
     def transform(
-        self: TRuntime,
-        transform: TransformBase[Any],
-        *,
-        revert: bool = True,
+        self: TRuntime, transform: TransformBase[Any], *, revert: bool = True
     ) -> BoundCalculator[TRuntime, TRaw, TPublic]:
         """Alias for :meth:`with_transformation`."""
         return self.with_transformation(transform, revert=revert)
@@ -162,7 +154,7 @@ class RuntimeCalculatorBase(CalculatorBase[TRaw, TPublic], Generic[TRaw, TPublic
         :meth:`prepare_resolved_params` when they need the full runtime facade.
         """
         params = ParamView.from_calculator(self, values)
-        return params if params else None
+        return params or None
 
     def prepare_resolved_params(self, runtime: CalcRuntime, values: dict[str, Any]) -> Any:
         """Prepare resolved parameters using the runtime facade."""

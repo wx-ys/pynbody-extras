@@ -17,28 +17,28 @@ from .snapview import MiniSimSnap, SimSnapView
 
 def _check_pynbody_version_warn() -> None:
     import warnings
+
     m = PYNBODY_VERSION.split(".")
     major, minor = int(m[0]), int(m[1])
     if (major, minor) < (2, 4):
         warnings.warn(
             f"ChunkSimSnap: detected pynbody {PYNBODY_VERSION} — versions older than 2.4 may have issues with "
-            "Gadget HDF partial loading. Consider upgrading to pynbody>=2.4.", stacklevel=3
+            "Gadget HDF partial loading. Consider upgrading to pynbody>=2.4.",
+            stacklevel=3,
         )
 
-class ChunkDaskArrayLoader:
 
+class ChunkDaskArrayLoader:
     simsnap: SimSnap
     chunks: ChunkManager
     minisnap: MiniSimSnap
-    def __init__(self, simsnap: SimSnap, chunk_size: int = 1000_000, **kwargs: Any):
 
+    def __init__(self, simsnap: SimSnap, chunk_size: int = 1000_000, **kwargs: Any):
         self.simsnap = simsnap
         self.chunks = kwargs.get("chunks", ChunkManager(simsnap, chunk_size))
         self.minisnap = kwargs.get("minisnap", MiniSimSnap(simsnap))
 
-
     def __getitem__(self, key: str) -> SimDaskArray | Any:
-
         # preserve family order from the snapshot’s internal layout
         fam_order = self.chunks.families
         all_fam_das: list[da.Array] = []
@@ -54,7 +54,7 @@ class ChunkDaskArrayLoader:
             fam_chunk_das: list[da.Array] = []
             for ch in chunk_list:
                 shape = (ch.num_particles,) + arr_info.shape[1:]
-                d = dask.delayed(ch.get_np_array,pure=False,traverse=False)(key)
+                d = dask.delayed(ch.get_np_array, pure=False, traverse=False)(key)
                 fam_chunk_das.append(da.from_delayed(d, shape=shape, dtype=arr_info.dtype))
 
             if not fam_chunk_das:
@@ -69,9 +69,9 @@ class ChunkDaskArrayLoader:
         # Wrap in SimDaskArray to track units/sim/name
         return sim_from_dask(all_da, units=arr_info.units, sim=self.simsnap, name=arr_info.name, family=arr_info.family)
 
-
     def clear_cache(self) -> None:
         self.chunks.clear_cache()
+
 
 class ChunkSimSnap(ChunkDaskArrayLoader, SimSnapView):
     def __init__(self, simsnap: SimSnap, chunk_size: int = 1000_000, **kwargs: Any):
@@ -91,7 +91,6 @@ class ChunkSimSnap(ChunkDaskArrayLoader, SimSnapView):
         self.minisnap.ancestor.__delitem__(key)
         super().__delitem__(key)
 
-
     def _load_array(self, key: str, fam: Family | None = None) -> None:
         self.minisnap._load_array(key, fam)
 
@@ -104,8 +103,7 @@ class ChunkSimSnap(ChunkDaskArrayLoader, SimSnapView):
 
         self._make_array(arr, key, fam=fam)
 
-    def _make_array(self,arr: SimDaskArray, name: str, fam: Family | None = None, derived: bool = False) -> None:
-
+    def _make_array(self, arr: SimDaskArray, name: str, fam: Family | None = None, derived: bool = False) -> None:
         arr.sim = self
         arr.family = fam
         self._arrays[name] = arr
@@ -150,13 +148,13 @@ class ChunkSimSnap(ChunkDaskArrayLoader, SimSnapView):
     def is_ancestor(self, other: "ChunkSimSnap") -> bool:
         return self is other.ancestor
 
-    def apply_transformation_to_array(self, array_name, family = None):
+    def apply_transformation_to_array(self, array_name, family=None):
         pass
 
 
 class ChunkSubSnap(ChunkSimSnap):
-
     chunk_ancestor: ChunkSimSnap
+
     def __init__(self, base: ChunkSimSnap, slice_: slice | np.ndarray | int | Family | Filter):
         self.chunk_ancestor = base.ancestor
         if isinstance(slice_, Filter):

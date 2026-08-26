@@ -81,12 +81,7 @@ from pynbodyext.core.calculate.diagnostics.trace import TraceCollector
 from pynbodyext.core.calculate.runtime.cache import ExecutionValue, RuntimeCache
 from pynbodyext.log import logger
 
-from .progress import (
-    NodeProgressEvent,
-    PhaseProgressEvent,
-    ProgressSink,
-    resolve_progress_sink,
-)
+from .progress import NodeProgressEvent, PhaseProgressEvent, ProgressSink, resolve_progress_sink
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -101,6 +96,8 @@ if TYPE_CHECKING:
 
 TRaw = TypeVar("TRaw")
 TPublic = TypeVar("TPublic")
+
+
 @dataclass(slots=True)
 class LogEvent:
     """Runtime log entry captured in :attr:`Result.diagnostics`."""
@@ -139,6 +136,10 @@ class ExecutionContext:
     unknown_mutation_generation: int = 0
     field_generations: dict[str, int] = field(default_factory=dict)
     last_error_node_id: str | None = None
+    #: Structured signature of the root calculator, computed once during
+    #: evaluation and reused for provenance assembly (avoids a redundant
+    #: re-serialization of the root node).
+    root_signature: Any | None = None
     _node_stack: list[ResultNode] = field(default_factory=list)
     _evaluation_stack: list[tuple[int, tuple[Any, ...]]] = field(default_factory=list)
     _progress_sink: ProgressSink = field(init=False)
@@ -180,10 +181,7 @@ class ExecutionContext:
                 existing_node = self.node_registry.get(existing)
                 if existing_node is not None and existing_node.signature == node_result.signature:
                     node_result.artifacts["duplicate_named_node"] = existing
-                    self.log(
-                        "debug",
-                        f"duplicate named calculator {node_result.name!r}; keeping first registration",
-                    )
+                    self.log("debug", f"duplicate named calculator {node_result.name!r}; keeping first registration")
                     return
 
                 raise ValueError(f"Duplicate named calculator node {node_result.name!r}.")
@@ -192,11 +190,7 @@ class ExecutionContext:
 
     def register_runtime_value(self, node_id: str, raw_value: Any, public_value: Any) -> None:
         """Store raw and public runtime values for a node."""
-        self.runtime_store[node_id] = ExecutionValue(
-            node_id=node_id,
-            raw_value=raw_value,
-            public_value=public_value,
-        )
+        self.runtime_store[node_id] = ExecutionValue(node_id=node_id, raw_value=raw_value, public_value=public_value)
 
     def advance_mutation_generation(self, reason: str, *, observed_phase: str | None | object = Ellipsis) -> int:
         """Advance the mutation generation after a transform changes state."""
@@ -206,10 +200,7 @@ class ExecutionContext:
             for field_name in fields:
                 self.field_generations[field_name] = self.mutation_generation
             rendered_fields = ", ".join(sorted(fields))
-            self.log(
-                "debug",
-                f"mutation generation {self.mutation_generation}: {reason}; fields={rendered_fields}",
-            )
+            self.log("debug", f"mutation generation {self.mutation_generation}: {reason}; fields={rendered_fields}")
         else:
             self.unknown_mutation_generation = self.mutation_generation
             self.log("debug", f"mutation generation {self.mutation_generation}: {reason}; fields=*unknown*")
@@ -257,8 +248,7 @@ class ExecutionContext:
             return False
         try:
             return all(
-                self.field_generations.get(field_name, 0) == generation
-                for field_name, generation in field_items
+                self.field_generations.get(field_name, 0) == generation for field_name, generation in field_items
             )
         except Exception:
             return False
@@ -266,13 +256,7 @@ class ExecutionContext:
     def log(self, level: str, message: str, *, node_id: str | None = None, phase: str | None = None) -> None:
         """Record and emit a runtime log message."""
         self.log_events.append(
-            LogEvent(
-                timestamp=time.perf_counter(),
-                level=level,
-                node_id=node_id,
-                phase=phase,
-                message=message,
-            )
+            LogEvent(timestamp=time.perf_counter(), level=level, node_id=node_id, phase=phase, message=message)
         )
         log_fn = getattr(logger, level, logger.debug)
         log_fn(message)
@@ -334,10 +318,7 @@ class ExecutionContext:
             try:
                 from pynbodyext.core.calculate.diagnostics.observer import format_observation_access
 
-                access_summary = format_observation_access(
-                    node_result.observation,
-                    include_reads=False,
-                )
+                access_summary = format_observation_access(node_result.observation, include_reads=False)
             except Exception:
                 access_summary = None
             self._progress_sink.on_node_end(
@@ -396,9 +377,7 @@ class ExecutionContext:
             try:
                 with observation_phase(phase_name):
                     with self.perf.phase(
-                        phase_name,
-                        measure_time=self.options.perf_time,
-                        measure_memory=self.options.perf_memory,
+                        phase_name, measure_time=self.options.perf_time, measure_memory=self.options.perf_memory
                     ) as phase_record:
                         record = phase_record
                         yield
@@ -417,9 +396,7 @@ class ExecutionContext:
                         )
 
                         access_summary = format_observation_access(
-                            current_observation(),
-                            phase=phase_name,
-                            include_reads=True,
+                            current_observation(), phase=phase_name, include_reads=True
                         )
                     except Exception:
                         access_summary = None
@@ -437,12 +414,7 @@ class ExecutionContext:
                             access_summary=access_summary,
                         )
                     )
-                    self.log(
-                        "debug",
-                        f"{node_name}:{phase_name} {status}",
-                        node_id=current.node_id,
-                        phase=phase_name,
-                    )
+                    self.log("debug", f"{node_name}:{phase_name} {status}", node_id=current.node_id, phase=phase_name)
 
 
 def resolve_value(
@@ -456,10 +428,4 @@ def resolve_value(
     """Resolve constants, callables, and calculator-valued parameters."""
     from pynbodyext.core.calculate.params import resolve_dynamic_value
 
-    return resolve_dynamic_value(
-        ctx,
-        input,
-        value,
-        field_name=field_name,
-        target_units=target_units,
-    )
+    return resolve_dynamic_value(ctx, input, value, field_name=field_name, target_units=target_units)

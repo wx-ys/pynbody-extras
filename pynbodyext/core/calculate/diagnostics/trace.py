@@ -87,6 +87,7 @@ if TYPE_CHECKING:
     import logging
     from collections.abc import Iterator
 
+
 @dataclass(slots=True)
 class TraceEvent:
     """One trace event emitted by the evaluation engine."""
@@ -161,14 +162,12 @@ class TraceCollector:
         for event in sorted(self.events, key=lambda item: item.timestamp):
             indent = "  " * event.depth
             payload = f" {event.payload}" if event.payload else ""
-            lines.append(
-                f"{indent}{event.node_name} [{event.node_id}] "
-                f"{event.phase}:{event.event}{payload}"
-            )
+            lines.append(f"{indent}{event.node_name} [{event.node_id}] {event.phase}:{event.event}{payload}")
         return "\n".join(lines)
 
     def render_tree(self, nodes: dict[str, Any], root_id: str) -> str:
         """Render a result-node tree with node ids."""
+
         def render(node_id: str, prefix: str, is_last: bool) -> list[str]:
             node = nodes[node_id]
             branch = "└─" if is_last else "├─"
@@ -193,10 +192,7 @@ class TraceCollector:
         return "\n".join(parts)
 
     def report(
-        self,
-        logger: logging.Logger | None = None,
-        nodes: dict[str, Any] | None = None,
-        root_id: str | None = None,
+        self, logger: logging.Logger | None = None, nodes: dict[str, Any] | None = None, root_id: str | None = None
     ) -> str:
         """Return the trace report and optionally log it."""
         text = self.report_text(nodes=nodes, root_id=root_id)

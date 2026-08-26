@@ -14,6 +14,7 @@ from .perf import StatsTool
 
 class EvalCacheManager:
     """Manage ephemeral per-top-level-call evaluation cache (sim-local)."""
+
     _CTX: ContextVar[dict[tuple[int, tuple[Any, ...]], Any] | None] = ContextVar("_EVAL_CTX", default=None)
     _SIM_TOKEN: ContextVar[int | None] = ContextVar("_EVAL_SIM_TOKEN", default=None)
     _CACHE_ENABLED: ContextVar[bool | None] = ContextVar("_EVAL_CACHE_ENABLED", default=None)
@@ -64,6 +65,7 @@ class EvalCacheManager:
                 cls._CACHE_ENABLED.reset(ce_token)
             except Exception:
                 cls._CACHE_ENABLED.set(prev_ce)
+
     @classmethod
     def cache_enabled(cls) -> bool:
         """Return whether evaluation caching is enabled for the current ctx."""
@@ -114,15 +116,18 @@ class EvalCacheManager:
             return
         ctx[key] = val
 
+
 @contextmanager
 def eval_cache(sim: SimSnap) -> Generator[None, None, None]:
     """Compatibility wrapper: manage a temporary evaluation cache for multiple top-level calls."""
     with EvalCacheManager.use(sim):
         yield
 
+
 # --- runtime trace context (run-level id + call path) ---
 class TraceManager:
     """Centralize trace context and provide a contextmanager for phases."""
+
     _CALC_PATH: ContextVar[tuple[str, ...]] = ContextVar("_CALC_PATH", default=())
     _CALC_RUN_ID: ContextVar[int | None] = ContextVar("_CALC_RUN_ID", default=None)
 
@@ -190,6 +195,7 @@ class TraceManager:
                 else:
                     cls._CALC_ROOT_NODE.set(None)
                 cls._CALC_RUN_ID.set(None)
+
     @classmethod
     def trace_cache_event(cls, node: Any, event: str, payload: dict | None = None) -> None:
         """
@@ -248,7 +254,6 @@ class TraceManager:
             if start_time is not None:
                 elapsed = time.perf_counter() - start_time
             logger.debug("%s | leave: %s (elapsed=%s)", prefix, phase, StatsTool._format_time(elapsed))
-
 
             # If we set a root phase token on enter, restore previous root phase now.
             if root_phase_token is not None:

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
     from pynbodyext.core.calculate.nodes.base import CalculatorBase
 
@@ -16,10 +16,7 @@ if TYPE_CHECKING:
     from .input import NodeInput
 
 
-_CURRENT_RUNTIME: ContextVar[Any] = ContextVar(
-    "pynbodyext_calculate_current_runtime",
-    default=None,
-)
+_CURRENT_RUNTIME: ContextVar[Any] = ContextVar("pynbodyext_calculate_current_runtime", default=None)
 
 
 def current_runtime() -> CalcRuntime | None:
@@ -28,7 +25,7 @@ def current_runtime() -> CalcRuntime | None:
 
 
 @contextmanager
-def bind_runtime(runtime: CalcRuntime) -> Iterator[None]:
+def bind_runtime(runtime: CalcRuntime) -> Generator[None]:
     """Temporarily expose ``runtime`` to simple subclass hooks."""
     token = _CURRENT_RUNTIME.set(runtime)
     try:

@@ -15,6 +15,7 @@ to return a concrete :class:`~pynbodyext.profiles.profile.Profile` (or any
 >>> class RadialProfileBuilder(ProfileBuilderBase[Profile]):
 ...     def __init__(self, nbins: int = 50):
 ...         self._nbins = nbins
+...
 ...     def __call__(self, sim) -> Profile:
 ...         return Profile(sim, nbins=self._nbins, bins_type="lin", bins_by="r")
 
@@ -26,13 +27,7 @@ from typing import Any, Generic, Literal, TypeVar
 from pynbody.snapshot import SimSnap
 
 from pynbodyext.calculate import CalculatorBase
-from pynbodyext.util._type import (
-    BinsAlgorithmFunc,
-    RegistBinAlgorithmString,
-    SimNpPrArray,
-    SimNpPrArrayFunc,
-    UnitLike,
-)
+from pynbodyext.util._type import BinsAlgorithmFunc, RegistBinAlgorithmString, SimNpPrArray, SimNpPrArrayFunc, UnitLike
 
 from .bins import BinsSet
 from .profile import ProfileBase
@@ -73,18 +68,20 @@ class ProfileBuilderBase(CalculatorBase[TProf, TProf], Generic[TProf]):
 
 
 class RadialProfileBuilder(ProfileBuilderBase[RadialProfile]):
-    """ Radial profile builder. """
+    """Radial profile builder."""
+
     dynamic_param_specs = {"bin_min": None, "bin_max": None}
+
     def __init__(
         self,
-        ndim: Literal[2,3] = 3,
+        ndim: Literal[2, 3] = 3,
         weight: SimNpPrArray | str | SimNpPrArrayFunc | None = None,
         bins_type: RegistBinAlgorithmString | BinsAlgorithmFunc = "lin",
         nbins: SimNpPrArray | int = 100,
         bin_min: UnitLike | float | Callable[[SimSnap], float] | None = None,
         bin_max: UnitLike | float | Callable[[SimSnap], float] | None = None,
         bins_set: BinsSet | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ):
         """
         Parameters
@@ -105,7 +102,7 @@ class RadialProfileBuilder(ProfileBuilderBase[RadialProfile]):
             Predefined set of bins.
         """
         super().__init__()
-        if ndim not in [2,3]:
+        if ndim not in [2, 3]:
             raise ValueError("ndim must be either 2 or 3")
         self.ndim = ndim
         self.weight = weight
@@ -116,17 +113,19 @@ class RadialProfileBuilder(ProfileBuilderBase[RadialProfile]):
         self.bins_set = bins_set
         self.kwargs = kwargs
 
-    def instance_signature(self):
-        return (self.__class__.__name__,
-            self.ndim,
-            self.weight,
-            self.bins_type,
-            id(self.nbins),
-            self.bins_set,
-        )
+    def signature_payload(self):
+        return {
+            "ndim": self.ndim,
+            "weight": self.weight,
+            "bins_type": self.bins_type,
+            "nbins": self.nbins,
+            "bin_min": self.bin_min,
+            "bin_max": self.bin_max,
+            "bins_set": self.bins_set,
+            "kwargs": self.kwargs,
+        }
 
     def build_profile(self, sim, params):
-
         return RadialProfile(
             sim,
             ndim=self.ndim,
@@ -136,5 +135,5 @@ class RadialProfileBuilder(ProfileBuilderBase[RadialProfile]):
             bin_min=params["bin_min"],
             bin_max=params["bin_max"],
             bins_set=self.bins_set,
-            **self.kwargs
+            **self.kwargs,
         )
