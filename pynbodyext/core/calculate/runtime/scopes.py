@@ -80,17 +80,10 @@ class ScopeSpec:
     def with_filter(self, filt: FilterBase) -> ScopeSpec:
         """Return a copy with ``filt`` composed into the scope."""
         merged = filt if self.filter is None else self.filter & filt
-        return ScopeSpec(
-            transforms=self.transforms,
-            filter=merged,
-            revert_policy=self.revert_policy,
-        )
+        return ScopeSpec(transforms=self.transforms, filter=merged, revert_policy=self.revert_policy)
 
     def with_transform(
-        self,
-        transform: TransformBase[Any],
-        *,
-        revert: RevertPolicy | str | bool | None = None,
+        self, transform: TransformBase[Any], *, revert: RevertPolicy | str | bool | None = None
     ) -> ScopeSpec:
         """Return a copy with a transform appended to the scope."""
         if transform.kind != BuiltinKinds.TRANSFORM:
@@ -101,23 +94,19 @@ class ScopeSpec:
             policy = RevertPolicy.NEVER
         else:
             policy = normalize_revert_policy(revert)
-        return ScopeSpec(
-            transforms=(*self.transforms, transform),
-            filter=self.filter,
-            revert_policy=policy,
-        )
+        return ScopeSpec(transforms=(*self.transforms, transform), filter=self.filter, revert_policy=policy)
 
     def compose(self, child: ScopeSpec) -> ScopeSpec:
         """Compose this scope with a child scope."""
         merged_filter = self.filter
         if child.filter is not None:
             merged_filter = child.filter if merged_filter is None else merged_filter & child.filter
-        policy = RevertPolicy.NEVER if RevertPolicy.NEVER in (self.revert_policy, child.revert_policy) else RevertPolicy.ALWAYS
-        return ScopeSpec(
-            transforms=(*self.transforms, *child.transforms),
-            filter=merged_filter,
-            revert_policy=policy,
+        policy = (
+            RevertPolicy.NEVER
+            if RevertPolicy.NEVER in (self.revert_policy, child.revert_policy)
+            else RevertPolicy.ALWAYS
         )
+        return ScopeSpec(transforms=(*self.transforms, *child.transforms), filter=merged_filter, revert_policy=policy)
 
     def as_transform(self) -> TransformBase[Any] | None:
         """Return the transform component as a single transform node."""
@@ -216,7 +205,7 @@ class Scope:
         if transform is not None and transforms is not None:
             raise ValueError("Use either transform= or transforms=, not both.")
         spec = ScopeSpec(revert_policy=normalize_revert_policy(revert_policy))
-        for item in (() if transforms is None else transforms):
+        for item in () if transforms is None else transforms:
             spec = spec.with_transform(item)
         if transform is not None:
             spec = spec.with_transform(transform)
@@ -235,12 +224,7 @@ class Scope:
         """Return a copy with ``filt`` added to the scope."""
         return Scope.from_spec(self.spec.with_filter(filt))
 
-    def transform(
-        self,
-        transform: TransformBase[Any],
-        *,
-        revert: RevertPolicy | str | bool | None = None,
-    ) -> Scope:
+    def transform(self, transform: TransformBase[Any], *, revert: RevertPolicy | str | bool | None = None) -> Scope:
         """Return a copy with ``transform`` appended to the scope."""
         return Scope.from_spec(self.spec.with_transform(transform, revert=revert))
 
@@ -263,7 +247,9 @@ class Scope:
             )
         return BoundCalculator(base=calculator, scope=self.spec.compose(getattr(calculator, "scope", ScopeSpec())))
 
-    def pipeline(self, outputs: Mapping[str, CalculatorBase[Any, Any]], *, name: str | None = None) -> CalculatorBase[dict[str, Any], dict[str, Any]]:
+    def pipeline(
+        self, outputs: Mapping[str, CalculatorBase[Any, Any]], *, name: str | None = None
+    ) -> CalculatorBase[dict[str, Any], dict[str, Any]]:
         """Build a :class:`Pipeline` and apply this scope to it."""
         from pynbodyext.core.calculate.nodes.pipeline import Pipeline
 
@@ -274,7 +260,7 @@ class Scope:
         return ("scope_object", self.spec.signature())
 
     def __repr__(self) -> str:
-        return f"Scope({self.spec.short_label()})" if not self.spec.is_empty else "Scope()"
+        return "Scope()" if self.spec.is_empty else f"Scope({self.spec.short_label()})"
 
     def _repr_pretty_(self, printer: Any, cycle: bool) -> None:
         printer.text("Scope(...)" if cycle else repr(self))

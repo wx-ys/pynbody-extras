@@ -104,10 +104,7 @@ def normalize_kind(kind: str | None, default: NodeKind = BuiltinKinds.CALCULATOR
     if not value:
         return default
     if not _NODE_KIND_RE.fullmatch(value):
-        raise ValueError(
-            f"Invalid node kind {kind!r}. "
-            "Expected pattern: ^[a-z][a-z0-9_.:-]*$"
-        )
+        raise ValueError(f"Invalid node kind {kind!r}. Expected pattern: ^[a-z][a-z0-9_.:-]*$")
     return value
 
 
@@ -155,9 +152,7 @@ class ErrorPolicy(str, Enum):
 
 def normalize_error_policy(value: ErrorPolicy | str) -> ErrorPolicy:
     """Return an :class:`ErrorPolicy` from an enum or string value."""
-    if isinstance(value, ErrorPolicy):
-        return value
-    return ErrorPolicy(value)
+    return value if isinstance(value, ErrorPolicy) else ErrorPolicy(value)
 
 
 class RevertPolicy(str, Enum):

@@ -1,5 +1,3 @@
-
-
 import gc
 import math
 import threading
@@ -20,6 +18,7 @@ class _ChunkDescriptor:
     Descriptor for a chunk of a SimSnap.
     Holds optional numbering: global_index (global) and family_index (per-family).
     """
+
     def __init__(
         self,
         ancestor: SimSnap,
@@ -62,6 +61,7 @@ class _ChunkDescriptor:
         else:
             return f"Chunk:{self.family}"
 
+
 class _ChunkSnapshotCache:
     _global_sem = threading.Semaphore(1)  # cap simultaneously loaded chunk snaps
 
@@ -75,7 +75,7 @@ class _ChunkSnapshotCache:
         self.chunk_slice = chunk_slice
         self._chunk_snap: SimSnap | None = None
 
-        self._lock = threading.RLock()      # TODO Rlock or Lock?
+        self._lock = threading.RLock()  # TODO Rlock or Lock?
         self._active = 0
 
         self._holds_global = False
@@ -146,6 +146,7 @@ class _ChunkSnapshotCache:
         if self.ancestor is None and fname:
             try:
                 import pynbody
+
                 self.ancestor = pynbody.load(fname)
             except Exception:
                 pass
@@ -168,15 +169,14 @@ class FamilyChunk(_ChunkDescriptor, _ChunkSnapshotCache):
 
 
 class ChunkManager:
-
     simsnap: SimSnap
     chunk_size: int
     chunks: dict[Family, list[FamilyChunk]]
+
     def __init__(self, simsnap: SimSnap, chunk_size: int):
         self.simsnap = simsnap
         self.chunk_size = chunk_size
         self.chunks = self.build_chunks(simsnap, chunk_size)
-
 
     # --------- initialization helpers ---------
     @classmethod
@@ -218,14 +218,13 @@ class ChunkManager:
             family_chunks[family] = chunks
         return family_chunks
 
-
     # --------- building new ChunkManager from selection ---------
     def select(self, indices: slice | np.ndarray | int | Family | Filter) -> "ChunkManager":
         # Implement this method to create new ChunkManager from given indices
 
         fam_regis = family_registry
         new_sim = cast("SimSnap", self.simsnap[indices])
-        if not new_sim._family_slice and len(new_sim)>0:
+        if not new_sim._family_slice and len(new_sim) > 0:
             # Rebuild family_slice if missing
             fm_sl = {}
             for fam in fam_regis:
@@ -236,14 +235,12 @@ class ChunkManager:
 
         return ChunkManager(new_sim, self.chunk_size)
 
-
     # --------- cache management ---------
     def clear_cache(self) -> None:
         for chunks in self.chunks.values():
             for chunk in chunks:
                 chunk.clear_cache()
         gc.collect()
-
 
     # --------- properties ---------
     @property
@@ -257,7 +254,6 @@ class ChunkManager:
     @property
     def families(self):
         return list(self.chunks.keys())
-
 
     # --------- representation ---------
     def __repr__(self):

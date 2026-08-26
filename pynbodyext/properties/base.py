@@ -12,14 +12,7 @@ from pynbody.array import SimArray
 from pynbodyext.calculate import Param, PropertyBase
 from pynbodyext.filters.filt import Annulus, BandPass, ValueLike
 
-__all__ = [
-    "PropertyBase",
-    "ParamSum",
-    "ParamContain",
-    "VolumeDensity",
-    "SurfaceDensity",
-    "RadiusAtSurfaceDensity",
-]
+__all__ = ["PropertyBase", "ParamSum", "ParamContain", "VolumeDensity", "SurfaceDensity", "RadiusAtSurfaceDensity"]
 
 
 def _normalize_frac(frac: Any) -> tuple[np.ndarray, bool]:
@@ -29,6 +22,8 @@ def _normalize_frac(frac: Any) -> tuple[np.ndarray, bool]:
     if not np.all((frac_array > 0) & (frac_array < 1)):
         raise ValueError(f"frac values must be between 0 and 1, got {frac_array}.")
     return frac_array, frac_array.size == 1 and isinstance(frac, (int, float, np.floating))
+
+
 @PropertyBase.dataclass
 class ParamContain(PropertyBase[SimArray]):
     """Containment radius for one or more cumulative fractions.
@@ -48,11 +43,12 @@ class ParamContain(PropertyBase[SimArray]):
     pynbody.array.SimArray
         Radius or radii at the requested containment fractions.
     """
+
     frac: Param[float] = Param(default=0.5)
     cal_key: str = "r"
     parameter: str = "mass"
 
-    def calculate(self, sim, params = None):
+    def calculate(self, sim, params=None):
         frac = params.frac
         frac_array, frac_is_scalar = _normalize_frac(frac)
         key = sim[params.cal_key]
@@ -90,6 +86,7 @@ class ParamSum(PropertyBase[Any]):
     def calculate(self, sim: Any, params: Any = None) -> Any:
         return sim[params.parameter].sum()
 
+
 @PropertyBase.dataclass
 class VolumeDensity(PropertyBase[SimArray]):
     """Mean volume density inside a volume filter or radius range.
@@ -104,24 +101,23 @@ class VolumeDensity(PropertyBase[SimArray]):
         Field name to use as the weight for the density calculation.
     """
 
-
     rmax: Param[ValueLike] = Param(field_name="pos")
     rmin: Param[ValueLike] = Param(default=0.0, field_name="pos")
     parameter: str = "mass"
 
-
-    def calculate(self, sim, params = None):
-        selector = Annulus(params.rmin, params.rmax)    # type: ignore
+    def calculate(self, sim, params=None):
+        selector = Annulus(params.rmin, params.rmax)
 
         param_sum = sim[selector][params.parameter].sum()
         volume = selector.volume(sim)
 
         den = param_sum / volume
         if isinstance(volume, float):
-            den.units = sim[params.parameter].units / sim["pos"].units**3
+            den.units = sim[params.parameter].units / sim["pos"].units ** 3
         den.sim = sim.ancestor
-        den.in_units(sim[params.parameter].units / sim["pos"].units**3)
+        den.in_units(sim[params.parameter].units / sim["pos"].units ** 3)
         return den
+
 
 @PropertyBase.dataclass
 class SurfaceDensity(PropertyBase[SimArray]):
@@ -141,12 +137,12 @@ class SurfaceDensity(PropertyBase[SimArray]):
     rmin: Param[ValueLike] = Param(default=0.0, field_name="pos")
     parameter: str = "mass"
 
-    def calculate_with_params(self, sim, params = None):
-        selector = BandPass("rxy", params["rmin"], params["rmax"])  # type: ignore
+    def calculate_with_params(self, sim, params=None):
+        selector = BandPass("rxy", params["rmin"], params["rmax"])
         param_sum = sim[selector][self.parameter].sum()
-        area = np.pi * (params["rmax"]**2 - params["rmin"]**2)
+        area = np.pi * (params["rmax"] ** 2 - params["rmin"] ** 2)
         den = param_sum / area
-        den.units = sim[self.parameter].units / sim["pos"].units**2
+        den.units = sim[self.parameter].units / sim["pos"].units ** 2
         den.sim = sim.ancestor
         return den
 
@@ -171,6 +167,7 @@ class RadiusAtSurfaceDensity(PropertyBase[SimArray]):
         Radial width to use for the "shell" mode.  Should be small compared to
         the typical radius of interest.
     """
+
     target: Param[ValueLike]
     parameter: str = "mass"
     mode: str = "shell"
@@ -181,19 +178,13 @@ class RadiusAtSurfaceDensity(PropertyBase[SimArray]):
         if self.mode not in ("shell", "total"):
             raise ValueError(f"Invalid mode: {self.mode}. Expected 'shell' or 'total'.")
 
-    def _target_value(self, sim, params = None):
-        surf_units = sim[params.parameter].units / sim["pos"].units**2
+    def _target_value(self, sim, params=None):
+        surf_units = sim[params.parameter].units / sim["pos"].units ** 2
         raw_target = params["target"]
         return self._in_sim_units(raw_target, params.parameter, sim, target_units=surf_units)
 
     @staticmethod
-    def _sigma_at_radius(
-        r_val: float,
-        r_sorted: np.ndarray,
-        m_cum: np.ndarray,
-        eps: float,
-        mode: str,
-    ) -> float:
+    def _sigma_at_radius(r_val: float, r_sorted: np.ndarray, m_cum: np.ndarray, eps: float, mode: str) -> float:
         if r_val <= 0:
             return 0.0
 
@@ -220,7 +211,7 @@ class RadiusAtSurfaceDensity(PropertyBase[SimArray]):
         area_shell = np.pi * (rout**2 - rin**2)
         return 0.0 if area_shell <= 0 else float(m_shell / area_shell)
 
-    def calculate(self, sim, params = None):
+    def calculate(self, sim, params=None):
         r_arr = sim[params.r_key]
         m_arr = sim[params.parameter]
 
@@ -244,11 +235,7 @@ class RadiusAtSurfaceDensity(PropertyBase[SimArray]):
 
         sample_grid = np.linspace(max(r_min, params.eps), r_max, 256)
         sigma_grid = np.array(
-            [
-                self._sigma_at_radius(r, r_sorted, m_cum, params.eps, params.mode)
-                for r in sample_grid
-            ],
-            dtype=float,
+            [self._sigma_at_radius(r, r_sorted, m_cum, params.eps, params.mode) for r in sample_grid], dtype=float
         )
 
         diff = sigma_grid - target

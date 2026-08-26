@@ -3,6 +3,7 @@
 Extracted from result.py to reduce the size of the god class.
 ``BinNDResult`` inherits from :class:`BinPlotMixin`; no public API changes.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -34,15 +35,7 @@ class _BinQueryable(Protocol):
 class BinPlotMixin:
     """Provides ``plot`` and ``imshow`` methods for :class:`~.result.BinNDResult`."""
 
-    def plot(
-        self: _BinQueryable,
-        x: str,
-        y: str,
-        ax: Any = None,
-        *,
-        kind: str | None = None,
-        **kwargs: Any,
-    ) -> Any:
+    def plot(self: _BinQueryable, x: str, y: str, ax: Any = None, *, kind: str | None = None, **kwargs: Any) -> Any:
         """Plot a 1-D profile.
 
         Parameters
@@ -72,12 +65,7 @@ class BinPlotMixin:
             return ax.plot(x_values, y_arr, **kwargs)
         raise ValueError(f"Unknown plot kind {plot_kind!r}; use 'plot' or 'scatter'.")
 
-    def imshow(
-        self: _BinQueryable,
-        field: str,
-        ax: Any = None,
-        **kwargs: Any,
-    ) -> Any:
+    def imshow(self: _BinQueryable, field: str, ax: Any = None, **kwargs: Any) -> Any:
         """Show a 2-D bin grid as an image.
 
         Requires exactly two axes.  The first axis maps to the x-direction and
@@ -97,7 +85,7 @@ class BinPlotMixin:
         if self.ndim != 2:
             raise ValueError("imshow requires exactly 2 bin axes.")
         if ax is None:
-            _, ax = plt.subplots(figsize = kwargs.pop("figsize", (5, 5)))
+            _, ax = plt.subplots(figsize=kwargs.pop("figsize", (5, 5)))
 
         grid = np.asarray(self[field]).reshape(self.shape_bins)
         return ax.imshow(grid.T, origin="lower", aspect="auto", extent=self.axis.extent, **kwargs)

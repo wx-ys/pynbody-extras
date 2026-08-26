@@ -72,7 +72,7 @@ class SignaturePrinter:
     All methods are static; use them as::
 
         SignaturePrinter.calculator(payload)  # -> "MyCalc(42, mass=True)"
-        SignaturePrinter.value(payload)       # -> "42" / "Unit('kpc')"
+        SignaturePrinter.value(payload)  # -> "42" / "Unit('kpc')"
 
     Handler dispatch dicts are populated after the class definition.
     """
@@ -108,10 +108,7 @@ class SignaturePrinter:
         cls_name = "SimArray" if payload.get("simarray") else "array"
         shape = tuple(payload.get("shape", ()))
         dtype = payload.get("dtype")
-        suffix = (
-            f", units={_quote_string(str(payload['units']))}"
-            if payload.get("units") is not None else ""
-        )
+        suffix = f", units={_quote_string(str(payload['units']))}" if payload.get("units") is not None else ""
         return f"{cls_name}(shape={shape!r}, dtype={dtype!r}{suffix})"
 
     @staticmethod
@@ -214,16 +211,22 @@ class SignaturePrinter:
         op_name = payload.get("op_name")
         operands = payload.get("operands", ())
         _SYM = {
-            "add": " + ", "mul": " * ", "sub": " - ", "truediv": " / ",
-            "pow": " ** ", "lt": " < ", "le": " <= ", "gt": " > ",
-            "ge": " >= ", "eq": " == ", "ne": " != ",
+            "add": " + ",
+            "mul": " * ",
+            "sub": " - ",
+            "truediv": " / ",
+            "pow": " ** ",
+            "lt": " < ",
+            "le": " <= ",
+            "gt": " > ",
+            "ge": " >= ",
+            "eq": " == ",
+            "ne": " != ",
         }
         _PREC = {"add": 10, "sub": 10, "mul": 20, "truediv": 20, "pow": 30}
         _UNARY = {"neg": "-", "pos": "+", "abs": "abs"}
         if op_name in {"add", "mul"}:
-            text = _SYM[op_name].join(
-                SignaturePrinter.property_operand(i, parent_op=op_name) for i in operands
-            )
+            text = _SYM[op_name].join(SignaturePrinter.property_operand(i, parent_op=op_name) for i in operands)
         elif op_name in _SYM and len(operands) == 2:
             l = SignaturePrinter.property_operand(operands[0], parent_op=op_name)
             r = SignaturePrinter.property_operand(operands[1], parent_op=op_name)
@@ -259,10 +262,7 @@ class SignaturePrinter:
 
     @staticmethod
     def bound_calculator(payload: dict[str, Any]) -> str:
-        return (
-            SignaturePrinter.calculator(payload["base"])
-            + SignaturePrinter.scope_suffix(payload.get("scope", {}))
-        )
+        return SignaturePrinter.calculator(payload["base"]) + SignaturePrinter.scope_suffix(payload.get("scope", {}))
 
     @staticmethod
     def combined_calculator(payload: dict[str, Any]) -> str:
@@ -314,26 +314,26 @@ class SignaturePrinter:
 # Populate handler dicts after class definition so we can reference bound staticmethods.
 SignaturePrinter._VALUE_HANDLERS = {
     "numpy_scalar": SignaturePrinter.numpy_scalar,
-    "enum":         SignaturePrinter.enum_,
-    "family":       SignaturePrinter.family,
-    "unit":         SignaturePrinter.unit,
-    "array":        SignaturePrinter.array,
-    "tuple":        SignaturePrinter.tuple_,
-    "list":         SignaturePrinter.list_,
-    "dict":         SignaturePrinter.dict_,
-    "unsupported":  SignaturePrinter.unsupported,
+    "enum": SignaturePrinter.enum_,
+    "family": SignaturePrinter.family,
+    "unit": SignaturePrinter.unit,
+    "array": SignaturePrinter.array,
+    "tuple": SignaturePrinter.tuple_,
+    "list": SignaturePrinter.list_,
+    "dict": SignaturePrinter.dict_,
+    "unsupported": SignaturePrinter.unsupported,
 }
 SignaturePrinter._CALCULATOR_HANDLERS = {
-    "dataclass":                 SignaturePrinter.dataclass_calculator,
-    "bound":                     SignaturePrinter.bound_calculator,
-    "combined":                  SignaturePrinter.combined_calculator,
-    "transform_chain":           SignaturePrinter.transform_chain,
-    "filter_op":                 SignaturePrinter.filter_,
-    "constant_property":         SignaturePrinter.constant_property,
+    "dataclass": SignaturePrinter.dataclass_calculator,
+    "bound": SignaturePrinter.bound_calculator,
+    "combined": SignaturePrinter.combined_calculator,
+    "transform_chain": SignaturePrinter.transform_chain,
+    "filter_op": SignaturePrinter.filter_,
+    "constant_property": SignaturePrinter.constant_property,
     "calculator_value_property": SignaturePrinter.calculator_value_property,
-    "op_property":               SignaturePrinter.op,
-    "lambda_property":           SignaturePrinter.lambda_property,
-    "generic":                   SignaturePrinter.generic_calculator,
+    "op_property": SignaturePrinter.op,
+    "lambda_property": SignaturePrinter.lambda_property,
+    "generic": SignaturePrinter.generic_calculator,
 }
 
 
@@ -349,7 +349,7 @@ class TreePrinter:
     in multi-line tree displays.  Use as::
 
         TreePrinter.calculator_head(payload)  # -> "MyCalc"
-        TreePrinter.dataclass_args(payload)   # -> "42, mass=True"
+        TreePrinter.dataclass_args(payload)  # -> "42, mass=True"
 
     Handler dispatch dicts are populated after the class definition.
     ``value()`` falls back to :attr:`SignaturePrinter._VALUE_HANDLERS` for
@@ -376,10 +376,7 @@ class TreePrinter:
 
     @staticmethod
     def dict_(payload: dict[str, Any]) -> str:
-        pairs = [
-            f"{TreePrinter.value(i['key'])}: {TreePrinter.value(i['value'])}"
-            for i in payload.get("items", ())
-        ]
+        pairs = [f"{TreePrinter.value(i['key'])}: {TreePrinter.value(i['value'])}" for i in payload.get("items", ())]
         return "{" + ", ".join(pairs) + "}"
 
     @staticmethod
@@ -429,16 +426,22 @@ class TreePrinter:
         op_name = payload.get("op_name")
         operands = payload.get("operands", ())
         _SYM = {
-            "add": " + ", "mul": " * ", "sub": " - ", "truediv": " / ",
-            "pow": " ** ", "lt": " < ", "le": " <= ", "gt": " > ",
-            "ge": " >= ", "eq": " == ", "ne": " != ",
+            "add": " + ",
+            "mul": " * ",
+            "sub": " - ",
+            "truediv": " / ",
+            "pow": " ** ",
+            "lt": " < ",
+            "le": " <= ",
+            "gt": " > ",
+            "ge": " >= ",
+            "eq": " == ",
+            "ne": " != ",
         }
         _PREC = {"add": 10, "sub": 10, "mul": 20, "truediv": 20, "pow": 30}
         _UNARY = {"neg": "-", "pos": "+", "abs": "abs"}
         if op_name in {"add", "mul"}:
-            text = _SYM[op_name].join(
-                TreePrinter.property_operand(i, parent_op=op_name) for i in operands
-            )
+            text = _SYM[op_name].join(TreePrinter.property_operand(i, parent_op=op_name) for i in operands)
         elif op_name in _SYM and len(operands) == 2:
             l = TreePrinter.property_operand(operands[0], parent_op=op_name)
             r = TreePrinter.property_operand(operands[1], parent_op=op_name)
@@ -475,9 +478,10 @@ class TreePrinter:
 
     @staticmethod
     def filter_op_head(payload: dict[str, Any]) -> str:
-        return {"and": "AndFilter", "or": "OrFilter", "not": "NotFilter"}.get(
-            payload.get("op"), "FilterOp"  # type: ignore[arg-type]
-        )
+        op = payload.get("op")
+        if not isinstance(op, str):
+            return "FilterOp"
+        return {"and": "AndFilter", "or": "OrFilter", "not": "NotFilter"}.get(op, "FilterOp")
 
     @staticmethod
     def constant_property_head(payload: dict[str, Any]) -> str:
@@ -531,23 +535,23 @@ class TreePrinter:
 
 # Populate handler dicts.
 TreePrinter._VALUE_HANDLERS = {
-    "tuple":       TreePrinter.tuple_,
-    "list":        TreePrinter.list_,
-    "dict":        TreePrinter.dict_,
-    "array":       TreePrinter.array,
+    "tuple": TreePrinter.tuple_,
+    "list": TreePrinter.list_,
+    "dict": TreePrinter.dict_,
+    "array": TreePrinter.array,
     "unsupported": TreePrinter.unsupported,
 }
 TreePrinter._CALCULATOR_HEADERS = {
-    "dataclass":                 TreePrinter.dataclass_head,
-    "bound":                     TreePrinter.bound_head,
-    "transform_chain":           TreePrinter.transform_chain_head,
-    "combined":                  lambda p: "CombinedCalculator",
-    "filter_op":                 TreePrinter.filter_op_head,
-    "constant_property":         TreePrinter.constant_property_head,
+    "dataclass": TreePrinter.dataclass_head,
+    "bound": TreePrinter.bound_head,
+    "transform_chain": TreePrinter.transform_chain_head,
+    "combined": lambda p: "CombinedCalculator",
+    "filter_op": TreePrinter.filter_op_head,
+    "constant_property": TreePrinter.constant_property_head,
     "calculator_value_property": TreePrinter.calculator_value_property_head,
-    "op_property":               TreePrinter.op,
-    "lambda_property":           lambda p: "LambdaProperty",
-    "generic":                   TreePrinter.generic_head,
+    "op_property": TreePrinter.op,
+    "lambda_property": lambda p: "LambdaProperty",
+    "generic": TreePrinter.generic_head,
 }
 
 

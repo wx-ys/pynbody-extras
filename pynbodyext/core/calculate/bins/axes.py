@@ -33,7 +33,6 @@ def _as_1d_array(value: Any, *, name: str) -> np.ndarray:
     return arr
 
 
-
 def _linear_edges(values: np.ndarray, nbins: int, vmin: float, vmax: float) -> np.ndarray:
     return np.linspace(vmin, vmax, nbins + 1)
 
@@ -66,14 +65,18 @@ BIN_ALGORITHMS: dict[str, BinAlgorithm] = {
 
 
 @overload
-def register_bin_algorithm(name: str, func: None = None, *, overwrite: bool = False) -> Callable[[BinAlgorithm], BinAlgorithm]: ...
+def register_bin_algorithm(
+    name: str, func: None = None, *, overwrite: bool = False
+) -> Callable[[BinAlgorithm], BinAlgorithm]: ...
 
 
 @overload
 def register_bin_algorithm(name: str, func: BinAlgorithm, *, overwrite: bool = False) -> BinAlgorithm: ...
 
 
-def register_bin_algorithm(name: str, func: BinAlgorithm | None = None, *, overwrite: bool = False) -> BinAlgorithm | Callable[[BinAlgorithm], BinAlgorithm]:
+def register_bin_algorithm(
+    name: str, func: BinAlgorithm | None = None, *, overwrite: bool = False
+) -> BinAlgorithm | Callable[[BinAlgorithm], BinAlgorithm]:
     def decorator(algorithm: BinAlgorithm) -> BinAlgorithm:
         if not overwrite and name in BIN_ALGORITHMS:
             raise KeyError(f"Bin algorithm {name!r} is already registered.")
@@ -112,10 +115,10 @@ class BinAxisAccessor:
 
     Supports attribute access by alias, string subscript, and integer subscript::
 
-        bins.axis.r          # axis with alias "r"
-        bins.axis["r"]       # same
-        bins.axis[0]         # first axis
-        list(bins.axis)      # iterate over all axes
+        bins.axis.r  # axis with alias "r"
+        bins.axis["r"]  # same
+        bins.axis[0]  # first axis
+        list(bins.axis)  # iterate over all axes
     """
 
     def __init__(self, axes: tuple[BinAxis, ...], owner: Any = None) -> None:
@@ -165,9 +168,7 @@ class BinAxisAccessor:
             ``"spherical_shell"``, ``"annulus"``, and ``"linear"``.
         """
         if self._owner is None:
-            raise RuntimeError(
-                "BinAxisAccessor.set_axis_measure_type requires an owning BinNDResult."
-            )
+            raise RuntimeError("BinAxisAccessor.set_axis_measure_type requires an owning BinNDResult.")
         self._owner.set_axis_measure_type(alias, type_name)
 
     def __iter__(self):
@@ -179,13 +180,13 @@ class BinAxisAccessor:
     def __repr__(self) -> str:
         aliases = ", ".join(ax.alias for ax in self._axes)
         return f"<BinAxisAccessor [{aliases}]>"
+
     def __dir__(self) -> list[str]:
         # Include axis aliases in dir() for better auto-completion in interactive environments
         return [ax.alias for ax in self._axes] + list(super().__dir__())
 
     def _ipython_key_completions_(self) -> list[str]:
         return [ax.alias for ax in self._axes]
-
 
 
 def has_axis(names: set[str]) -> BinDerivedCondition:
@@ -209,20 +210,20 @@ class BinAxis:
 
     @overload
     @classmethod
-    def register_property(cls, name: AxisPropertyFunc, func: None = None, *, overwrite: bool = False) -> AxisPropertyFunc: ...
+    def register_property(
+        cls, name: AxisPropertyFunc, func: None = None, *, overwrite: bool = False
+    ) -> AxisPropertyFunc: ...
     @overload
     @classmethod
     def register_property(cls, name: str, func: AxisPropertyFunc, *, overwrite: bool = False) -> AxisPropertyFunc: ...
     @overload
     @classmethod
-    def register_property(cls, name: str, func: None = None, *, overwrite: bool = False) -> Callable[[AxisPropertyFunc], AxisPropertyFunc]: ...
+    def register_property(
+        cls, name: str, func: None = None, *, overwrite: bool = False
+    ) -> Callable[[AxisPropertyFunc], AxisPropertyFunc]: ...
     @classmethod
     def register_property(
-        cls,
-        name: str | AxisPropertyFunc,
-        func: AxisPropertyFunc | None = None,
-        *,
-        overwrite: bool = False,
+        cls, name: str | AxisPropertyFunc, func: AxisPropertyFunc | None = None, *, overwrite: bool = False
     ) -> AxisPropertyFunc | Callable[[AxisPropertyFunc], AxisPropertyFunc]:
         """Register a computed axis property accessible via attribute lookup on :class:`BinAxis`.
 
@@ -233,10 +234,12 @@ class BinAxis:
             def my_prop(axis: BinAxis):
                 return axis.centers * 2
 
+
             # decorator factory — explicit name
             @BinAxis.register_property("my_prop")
             def _(axis: BinAxis):
                 return axis.centers * 2
+
 
             # direct call
             BinAxis.register_property("my_prop", my_func)
@@ -299,12 +302,12 @@ class BinAxis:
     @property
     def annulus_area(self) -> np.ndarray:
         """Per-bin annulus area ``π(max² − min²)`` regardless of axis alias."""
-        return np.pi * (self.maxs** 2 - self.mins ** 2)
+        return np.pi * (self.maxs**2 - self.mins**2)
 
     @property
     def shell_volume(self) -> np.ndarray:
         """Per-bin spherical shell volume ``4/3 π(max³ − min³)`` regardless of axis alias."""
-        return (4.0 / 3.0) * np.pi * (self.maxs ** 3 - self.mins ** 3)
+        return (4.0 / 3.0) * np.pi * (self.maxs**3 - self.mins**3)
 
     @property
     def measure(self) -> np.ndarray:
@@ -346,11 +349,7 @@ class BinAxis:
 
     @classmethod
     def register_axis_measure(
-        cls,
-        alias: str,
-        func: Callable[[BinAxis], np.ndarray],
-        *,
-        overwrite: bool = False,
+        cls, alias: str, func: Callable[[BinAxis], np.ndarray], *, overwrite: bool = False
     ) -> None:
         """Register a physical measure function for a specific axis alias.
 
@@ -373,11 +372,7 @@ class BinAxis:
 
     @classmethod
     def register_measure_type(
-        cls,
-        name: str,
-        func: Callable[[BinAxis], np.ndarray],
-        *,
-        overwrite: bool = False,
+        cls, name: str, func: Callable[[BinAxis], np.ndarray], *, overwrite: bool = False
     ) -> None:
         """Register a named physical measure type (global).
 
@@ -422,9 +417,9 @@ class BinAxis:
                 unique = sorted(set(all_cleared))
                 _logger = logging.getLogger("pynbody")
                 _logger.warning(
-                    "Measure type %r redefined (overwrite=True). "
-                    "Cleared %d cached entr%s: %s.",
-                    name, total_cleared,
+                    "Measure type %r redefined (overwrite=True). Cleared %d cached entr%s: %s.",
+                    name,
+                    total_cleared,
                     "y" if total_cleared == 1 else "ies",
                     ", ".join(unique),
                 )
@@ -469,20 +464,22 @@ class BinAxis:
 
         return axis_bin, axis_bin >= 0
 
+
 @BinAxis.register_property("min")
 def _axis_min(axis: BinAxis) -> Any:
     return axis.mins[0:1]
+
 
 @BinAxis.register_property("max")
 def _axis_max(axis: BinAxis) -> Any:
     return axis.maxs[-1:]
 
+
 @BinAxis.register_property("center")
 def _axis_center(axis: BinAxis) -> Any:
     return 0.5 * (axis.min + axis.max)
 
+
 @BinAxis.register_property("width")
 def _axis_width(axis: BinAxis) -> Any:
     return axis.max - axis.min
-
-

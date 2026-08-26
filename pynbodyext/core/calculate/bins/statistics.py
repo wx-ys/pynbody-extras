@@ -29,6 +29,7 @@ extended with :func:`register_pipeline_transform`.  Built-in transforms:
 
 Empty bin → each statistic returns ``np.nan`` (or 0 for ``count``).
 """
+
 from __future__ import annotations
 
 import re
@@ -79,10 +80,7 @@ _PIPELINE_TRANSFORMS: dict[str, Callable[[np.ndarray], np.ndarray]] = {
 
 
 def register_pipeline_transform(
-    name: str,
-    func: Callable[[np.ndarray], np.ndarray],
-    *,
-    overwrite: bool = False,
+    name: str, func: Callable[[np.ndarray], np.ndarray], *, overwrite: bool = False
 ) -> None:
     """Register a named element-wise transform for use in pipeline queries.
 
@@ -143,11 +141,7 @@ class BinStatisticBase:
         raise NotImplementedError
 
     def vectorized_call(
-        self,
-        values: np.ndarray,
-        bins: np.ndarray,
-        weights: np.ndarray | None,
-        nbins: int,
+        self, values: np.ndarray, bins: np.ndarray, weights: np.ndarray | None, nbins: int
     ) -> np.ndarray | None:
         """Compute statistic over all bins simultaneously without a Python loop.
 
@@ -252,8 +246,7 @@ def apply_pipeline(arr: np.ndarray, transforms: list[str]) -> np.ndarray:
     for t in transforms:
         fn = _PIPELINE_TRANSFORMS.get(t)
         if fn is None:
-            raise KeyError(f"Unknown pipeline transform {t!r}. "
-                           f"Known transforms: {sorted(_PIPELINE_TRANSFORMS)}.")
+            raise KeyError(f"Unknown pipeline transform {t!r}. Known transforms: {sorted(_PIPELINE_TRANSFORMS)}.")
         out = fn(out)
     return out
 
@@ -479,6 +472,24 @@ class BinNDStatAccessor:
 
     def __getitem__(self, key: str) -> BinsArray:
         return self._owner._resolve_query(key)
+
+    def __call__(
+        self,
+        field: str,
+        statistic: str,
+        *,
+        weight: str | Callable[[Any], Any] | Any | None = None,
+        transforms: list[str] | None = None,
+    ) -> BinsArray:
+        """Evaluate an explicit per-bin statistic and return a cached :class:`BinsArray`.
+
+        Equivalent to ``bins["field.stat"]`` but accepts optional transforms and
+        weight::
+
+            bins.stat("mass", "mean", weight="mass")
+            bins.stat("vz", "mean", transforms=["abs"])
+        """
+        return self._owner.stat_explicit(field, statistic, weight=weight, transforms=transforms)
 
     def keys(self) -> list[str]:
         return [cls.example_name for cls in _REGISTRY if cls.example_name is not None]

@@ -98,14 +98,7 @@ class AccessObservation:
     def record_derive(self, sim: Any, key: Any) -> None:
         self._record("derive", sim, key, fallback_to_string=True)
 
-    def _record(
-        self,
-        operation: FieldOperation,
-        sim: Any,
-        key: Any,
-        *,
-        fallback_to_string: bool,
-    ) -> None:
+    def _record(self, operation: FieldOperation, sim: Any, key: Any, *, fallback_to_string: bool) -> None:
         phase = current_observation_phase()
         for name in _field_names(key, fallback_to_string=fallback_to_string):
             if operation == "read":
@@ -140,12 +133,7 @@ class AccessObservation:
             phases.append(event.phase)
         return tuple(phases)
 
-    def fields_for(
-        self,
-        operation: FieldOperation,
-        *,
-        phase: str | None | object = Ellipsis,
-    ) -> set[str]:
+    def fields_for(self, operation: FieldOperation, *, phase: str | None | object = Ellipsis) -> set[str]:
         """Return observed fields for an operation, optionally limited to one phase."""
         return {
             event.field
@@ -159,11 +147,7 @@ class AccessObservation:
         dirty_fields = self.fields_for("dirty", phase=phase)
         deletes = self.fields_for("delete", phase=phase)
         derived_fields = self.fields_for("derive", phase=phase)
-        event_count = sum(
-            1
-            for event in self.events
-            if phase is Ellipsis or event.phase == phase
-        )
+        event_count = sum(1 for event in self.events if phase is Ellipsis or event.phase == phase)
         return {
             "reads": sorted(reads),
             "dirty_fields": sorted(dirty_fields),
@@ -194,19 +178,14 @@ class AccessObservation:
 
 
 _OBSERVATION_STACK: ContextVar[tuple[AccessObservation, ...]] = ContextVar(
-    "pynbodyext_calculate_observation_stack",
-    default=(),
+    "pynbodyext_calculate_observation_stack", default=()
 )
 
 _OBSERVATION_PHASE_STACK: ContextVar[tuple[str | None, ...]] = ContextVar(
-    "pynbodyext_calculate_observation_phase_stack",
-    default=(),
+    "pynbodyext_calculate_observation_phase_stack", default=()
 )
 
-_DERIVATION_STACK: ContextVar[tuple[str, ...]] = ContextVar(
-    "pynbodyext_calculate_derivation_stack",
-    default=(),
-)
+_DERIVATION_STACK: ContextVar[tuple[str, ...]] = ContextVar("pynbodyext_calculate_derivation_stack", default=())
 
 
 def current_observation() -> AccessObservation | None:
@@ -266,13 +245,7 @@ def _candidate_snapshot_classes() -> tuple[type[Any], ...]:
         modules.append(module)
 
     for module in modules:
-        for name in (
-            "SimSnap",
-            "SubSnapBase",
-            "SubSnap",
-            "IndexedSubSnap",
-            "FamilySubSnap",
-        ):
+        for name in ("SimSnap", "SubSnapBase", "SubSnap", "IndexedSubSnap", "FamilySubSnap"):
             cls = getattr(module, name, None)
             if isinstance(cls, type):
                 classes.append(cls)
@@ -386,7 +359,6 @@ def _wrap_delitem(original: Any) -> Any:
     return wrapped
 
 
-
 @contextmanager
 def observe_sim_access(node_id: str, node_label: str) -> Any:
     """Observe pynbody snapshot reads, dirty calls, and deletes in this context."""
@@ -412,10 +384,7 @@ def _truncate_text(text: str, max_length: int | None) -> str:
 
 
 def _join_fields(
-    values: set[str] | list[str] | tuple[str, ...],
-    *,
-    max_items: int | None = None,
-    max_length: int | None = None,
+    values: set[str] | list[str] | tuple[str, ...], *, max_items: int | None = None, max_length: int | None = None
 ) -> str:
     if not values:
         return "-"
@@ -469,12 +438,7 @@ def format_observation_access(
     return "; ".join(parts)
 
 
-def render_observer_report(
-    observations: Any,
-    *,
-    include_empty: bool = False,
-    show_ids: bool = False,
-) -> str:
+def render_observer_report(observations: Any, *, include_empty: bool = False, show_ids: bool = False) -> str:
     """Render a compact text report for access observations."""
     items = list(observations)
     if not include_empty:
@@ -483,14 +447,7 @@ def render_observer_report(
     if not items:
         return "No observed pynbody field access events."
 
-    widths = {
-        "node": 16 if not show_ids else 25,
-        "phase": 14,
-        "reads": 34,
-        "dirty": 34,
-        "deletes": 28,
-        "derived": 28,
-    }
+    widths = {"node": 16 if not show_ids else 25, "phase": 14, "reads": 34, "dirty": 34, "deletes": 28, "derived": 28}
     header = (
         f"{'Node':<{widths['node']}} | "
         f"{'Phase':<{widths['phase']}} | "

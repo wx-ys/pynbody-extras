@@ -75,11 +75,12 @@ user-facing property modules::
 
     from pynbodyext.core.calculate import PropertyBase
 
+
     @PropertyBase.dataclass
     class StellarMass(PropertyBase[float]):
-
         def calculate(self, sim, params=None):
             return float(sim["mass"].sum())
+
 
     result = StellarMass().run(sim)
     print(result.value)
@@ -91,6 +92,7 @@ Scope one calculator with a filter in the same style used by
 
     from pynbodyext.core.calculate import FilterBase, PropertyBase
 
+
     @FilterBase.dataclass
     class TemperatureAbove(FilterBase):
         threshold: float
@@ -98,11 +100,12 @@ Scope one calculator with a filter in the same style used by
         def calculate(self, sim, params=None):
             return sim["temp"] > self.threshold
 
+
     @PropertyBase.dataclass
     class MeanTemperature(PropertyBase[float]):
-
         def calculate(self, sim, params=None):
             return float(np.asarray(sim["temp"]).mean())
+
 
     result = MeanTemperature().filter(TemperatureAbove(1.0e5)).run(sim)
     print(result.value)
@@ -111,6 +114,7 @@ Apply a temporary transform in the same style used by
 :mod:`pynbodyext.transforms`::
 
     from pynbodyext.core.calculate import PropertyBase, TransformBase
+
 
     @TransformBase.dataclass
     class XShift(TransformBase[dict[str, object]]):
@@ -127,11 +131,12 @@ Apply a temporary transform in the same style used by
         def is_revertible(self, handle):
             return True
 
+
     @PropertyBase.dataclass
     class XMean(PropertyBase[float]):
-
         def calculate(self, sim, params=None):
             return float(sim["x"].mean())
+
 
     result = XMean().transform(XShift(1.0)).run(sim)
     print(result.value)
@@ -141,11 +146,7 @@ Evaluate several outputs in one run::
     from pynbodyext.core.calculate import Pipeline
 
     pipe = Pipeline(
-        {
-            "mass": StellarMass(),
-            "hot_temp": MeanTemperature().filter(TemperatureAbove(1.0e5)),
-        },
-        name="basic_summary",
+        {"mass": StellarMass(), "hot_temp": MeanTemperature().filter(TemperatureAbove(1.0e5))}, name="basic_summary"
     )
 
     result = pipe.run(sim, progress="phase")
@@ -214,15 +215,7 @@ from .result.enums import (
     normalize_revert_policy,
 )
 from .result.exceptions import CalculatorError, CycleError
-from .result.result import (
-    ErrorInfo,
-    PerfSummary,
-    PhaseRecord,
-    ProvenanceInfo,
-    Result,
-    ResultNode,
-    ValueSummary,
-)
+from .result.result import ErrorInfo, PerfSummary, PhaseRecord, ProvenanceInfo, Result, ResultNode, ValueSummary
 from .result.signature import CalculatorSignature, calculator_from_signature, calculator_to_signature
 from .runtime import CalcRuntime, TransformRuntime
 from .runtime.cache import CacheEvent, ExecutionValue, RuntimeCache

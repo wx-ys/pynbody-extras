@@ -42,6 +42,7 @@ class SimSnapViewBase(SimSnap):
         The snapshot instance that backs this view. Metadata will be referenced
         from `base`.
     """
+
     def __init__(self, base: SimSnap):
         super().__init__()
         self._transformations = base._transformations
@@ -50,7 +51,7 @@ class SimSnapViewBase(SimSnap):
         self.properties = base.properties
 
 
-class SimSnapView(SimSnapViewBase): # should use ExposedBaseSnapshotMixin ?
+class SimSnapView(SimSnapViewBase):  # should use ExposedBaseSnapshotMixin ?
     """
     Read-only view of an existing `SimSnap`.
 
@@ -71,14 +72,14 @@ class SimSnapView(SimSnapViewBase): # should use ExposedBaseSnapshotMixin ?
     >>> view.keys()
     >>> view.physical_units()
     """
+
     base: SimSnap
+
     def __init__(self, simsnap: SimSnap):
         self.base = simsnap
         SimSnapViewBase.__init__(self, simsnap)
 
-
     def physical_units(self, distance="kpc", velocity="km s^-1", mass="Msol", persistent=True, convert_parent=True):
-
         self.base.physical_units(distance, velocity, mass, persistent, convert_parent)
         return super().physical_units(distance, velocity, mass, persistent, convert_parent)
 
@@ -107,7 +108,8 @@ class SimSnapView(SimSnapViewBase): # should use ExposedBaseSnapshotMixin ?
 
 @dataclass(slots=True)
 class ArrayInfo:
-    """ Metadata container describing a SimArray """
+    """Metadata container describing a SimArray"""
+
     shape: tuple[int, ...]
     dtype: np.dtype
     units: UnitBase
@@ -131,6 +133,7 @@ class MiniSimSnap(SubSnap):
     """
 
     base: SimSnap
+
     def __init__(self, simsnap: SimSnap):
         """
         Build a `MiniSimSnap` from `simsnap`.
@@ -141,7 +144,7 @@ class MiniSimSnap(SubSnap):
             Snapshot used to derive the minimal representative snapshot.
         """
         base = self.create_minisnap(simsnap)
-        super().__init__(base,slice(0, len(base)))
+        super().__init__(base, slice(0, len(base)))
         self._descriptor = ""
 
     @property

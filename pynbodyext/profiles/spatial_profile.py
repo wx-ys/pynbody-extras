@@ -1,5 +1,3 @@
-
-
 from typing import Any, Literal
 
 from pynbody.snapshot import SimSnap
@@ -12,11 +10,14 @@ from .profile import Profile
 
 __all__ = ["SpatialProfile", "RadialProfile"]
 
+
 class SpatialProfile(Profile):
     pass
 
+
 class RadialProfile(SpatialProfile):
-    def __init__(self,
+    def __init__(
+        self,
         sim: SimSnap,
         *,
         ndim: Literal[2, 3] = 3,
@@ -26,7 +27,8 @@ class RadialProfile(SpatialProfile):
         bin_min: float | None = None,
         bin_max: float | None = None,
         bins_set: BinsSet | None = None,
-        **kwargs: Any):
+        **kwargs: Any,
+    ):
         if ndim == 2:
             bins_by = "rxy"
             bins_area = "annulus"
@@ -38,28 +40,31 @@ class RadialProfile(SpatialProfile):
 
         super().__init__(
             sim,
-            weight = weight,
-            bins_by = bins_by,
-            bins_area = bins_area,
-            bins_type = bins_type,
-            nbins = nbins,
-            bin_min = bin_min,
-            bin_max = bin_max,
-            bins_set = bins_set,
-            **kwargs
+            weight=weight,
+            bins_by=bins_by,
+            bins_area=bins_area,
+            bins_type=bins_type,
+            nbins=nbins,
+            bin_min=bin_min,
+            bin_max=bin_max,
+            bins_set=bins_set,
+            **kwargs,
         )
+
 
 @SpatialProfile.profile_property
 def density(pro: SpatialProfile) -> SimNpPrArray:
     return pro["mass"]["sum"] / pro["binsize"]
 
+
 @SpatialProfile.profile_property
 def mass_enc(pro: SpatialProfile) -> SimNpPrArray:
     return pro["mass"]["sum"].cumsum()
 
+
 @SpatialProfile.profile_property
 def beta(pro: SpatialProfile) -> SimNpPrArray:
-    """ This parameter quantifies the system's degree of radial anisotropy.
+    """This parameter quantifies the system's degree of radial anisotropy.
     If all orbits are circular, beta = -infinity; if all orbits are radial, beta = 1.
     beta > 0, are radially biased; beta < 0, are tangentially biased.
     as defined in Binney & Tremaine 2008, eq. (4.61).
@@ -69,8 +74,8 @@ def beta(pro: SpatialProfile) -> SimNpPrArray:
     If assuming the system is spherically symmetric, so that V_r^2 = sigma_r^2 + mean_r^2 = sigma_r^2, and similarly for vtheta and vphi.
     Here we use the formula that includes both the mean and dispersion of the velocity, which is important for systems with significant rotation.
     """
-    if pro.bins.bins_by not in ["r",]:
+    if pro.bins.bins_by not in ["r"]:
         logger.warning("Beta parameter is useful for spherical systems. Consider using RadialProfile with ndim=3")
     # we can also calculate using (refer to pynbody's calculation of velocity dispersion):
     # 1.5 - (pro['vx']["disp"] ** 2 + pro['vy']["disp"] ** 2 + pro['vz']["disp"] ** 2) / pro['vr']["disp"] ** 2 / 2
-    return 1 - (pro["vphi"]["rms"]**2 + pro["vtheta"]["rms"]**2)/(2*pro["vr"]["rms"]**2)
+    return 1 - (pro["vphi"]["rms"] ** 2 + pro["vtheta"]["rms"] ** 2) / (2 * pro["vr"]["rms"] ** 2)

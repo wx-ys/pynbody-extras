@@ -52,11 +52,11 @@ Quick example
 
 >>> # Given a :class:`~pynbodyext.profiles.profile.ProfileBase` instance `prof`
 >>> # with bins and access to `prof.sim[...]`:
->>> v_rad = ProfileArray(prof, name="vr")            # mean radial velocity per bin
->>> v_rad = prof["vr"]                               # mean radial velocity per bin
->>> v_med = v_rad["median"]                          # median per bin, recomputed
->>> v_p16 = v_rad["p16"]                             # weighted/unweighted 16th percentile
->>> v_disp = v_rad["dispersion"]                     # dispersion (sqrt(E[v^2] - E[v]^2))
+>>> v_rad = ProfileArray(prof, name="vr")  # mean radial velocity per bin
+>>> v_rad = prof["vr"]  # mean radial velocity per bin
+>>> v_med = v_rad["median"]  # median per bin, recomputed
+>>> v_p16 = v_rad["p16"]  # weighted/unweighted 16th percentile
+>>> v_disp = v_rad["dispersion"]  # dispersion (sqrt(E[v^2] - E[v]^2))
 
 New statistics
 --------------
@@ -80,18 +80,12 @@ from pynbodyext.util._type import SimNpArray
 if TYPE_CHECKING:
     from .profile import ProfileBase
 
-__all__ = [
-    "ProfileArray",
-    "StatisticBase",
-    "Mean",
-    "Percentile",
-    "RMS",
-    "Median",
-    "Dispersion",
-]
+__all__ = ["ProfileArray", "StatisticBase", "Mean", "Percentile", "RMS", "Median", "Dispersion"]
+
 
 class _ProfileArrayStatAccessor:
     """Lightweight view object to access statistics as arr.stat['key']."""
+
     def __init__(self, owner: "ProfileArray") -> None:
         if not owner._check_base_for_stats():
             raise RuntimeError("Cannot compute statistics on this ProfileArray")
@@ -115,6 +109,7 @@ class _ProfileArrayStatAccessor:
 
     def _ipython_key_completions_(self) -> list[str]:
         return self._owner.keys()
+
 
 class ProfileArray(SimArray):
     """
@@ -177,9 +172,9 @@ class ProfileArray(SimArray):
     - Compute basic statistics per bin:
 
       >>> # you can also use prof["vr"] to access the radial velocity profile
-      >>> v_r = ProfileArray(prof, name="vr")     # mean per bin
-      >>> vr_med = v_r["median"]             # median per bin
-      >>> vr_p84 = v_r["p84"]                # 84th percentile per bin
+      >>> v_r = ProfileArray(prof, name="vr")  # mean per bin
+      >>> vr_med = v_r["median"]  # median per bin
+      >>> vr_p84 = v_r["p84"]  # 84th percentile per bin
 
     - Per-bin array as input:
 
@@ -187,23 +182,20 @@ class ProfileArray(SimArray):
       >>> vr_mean = ProfileArray(prof, name="vr", array=precomputed, mode="mean")
     """
 
-    __slots__ = ["_profile","_name","_source","_arr", "_mode","_is_view"]
-    _registry: list[type["StatisticBase"]] = [] # Registered statistic calculators
+    __slots__ = ["_profile", "_name", "_source", "_arr", "_mode", "_is_view"]
+    _registry: list[type["StatisticBase"]] = []  # Registered statistic calculators
 
-    _profile: Optional["ProfileBase"]   # The owning profile that defines bins, weights, and access to per-particle simulation arrays
-    _name: str                          # The name of the per-particle field in the profile's simulation
-    _source: Literal["per_particle", "per_bin"] # Indicates whether the array is per-particle or per-bin
-    _arr: SimNpArray | None           # The underlying array data, either per-particle or per-bin
-    _mode: str | None                   # The statistic key used for computation or labeling
-    _is_view: bool                      # Indicates if this is a view of another ProfileArray
+    _profile: Optional[
+        "ProfileBase"
+    ]  # The owning profile that defines bins, weights, and access to per-particle simulation arrays
+    _name: str  # The name of the per-particle field in the profile's simulation
+    _source: Literal["per_particle", "per_bin"]  # Indicates whether the array is per-particle or per-bin
+    _arr: SimNpArray | None  # The underlying array data, either per-particle or per-bin
+    _mode: str | None  # The statistic key used for computation or labeling
+    _is_view: bool  # Indicates if this is a view of another ProfileArray
 
-
-    def __new__(cls,
-        profile: "ProfileBase",
-        *,
-        name: str,
-        array: SimNpArray | None = None,
-        mode: str | None = None,
+    def __new__(
+        cls, profile: "ProfileBase", *, name: str, array: SimNpArray | None = None, mode: str | None = None
     ) -> "ProfileArray":
         """
         Allocate and construct a new :class:`~pynbodyext.profiles.proarray.ProfileArray` instance.
@@ -257,25 +249,12 @@ class ProfileArray(SimArray):
         obj._is_view = False
         return obj
 
-
-    def __init__(
-        self,
-        profile: "ProfileBase",
-        *,
-        name: str,
-        array: SimNpArray | None = None,
-        mode: str | None = None,
-        ):
+    def __init__(self, profile: "ProfileBase", *, name: str, array: SimNpArray | None = None, mode: str | None = None):
         """Initialize the instance (no-op; all logic lives in __new__)."""
         # Intentionally empty: initialization handled in __new__.
 
     @classmethod
-    def _compute(
-        cls,
-        profile: "ProfileBase",
-        arr: SimNpArray | str,
-        compute_mode: str,
-        ) -> tuple[SimArray, str]:
+    def _compute(cls, profile: "ProfileBase", arr: SimNpArray | str, compute_mode: str) -> tuple[SimArray, str]:
         """
         Compute a per-bin statistic array for the given source.
 
@@ -316,10 +295,9 @@ class ProfileArray(SimArray):
         if is_dask_array(arr_pp):
             arr_pp = arr_pp.compute()
         if is_dask_array(weights):
-            weights = weights.compute() # type: ignore
+            weights = weights.compute()  # type: ignore
 
-
-        for i,ind in enumerate(profile.binind):
+        for i, ind in enumerate(profile.binind):
             if len(ind) == 0:
                 vals[i] = np.nan
                 continue
@@ -328,11 +306,10 @@ class ProfileArray(SimArray):
             vals[i] = calculator(sub, w)
 
         res_val = vals.view(SimArray)
-        if isinstance(arr_pp, (SimArray,IndexedSimArray)):
+        if isinstance(arr_pp, (SimArray, IndexedSimArray)):
             res_val.units = arr_pp.units
             res_val.sim = arr_pp.sim
         return res_val, calculator.key
-
 
     @classmethod
     def get_statistic(cls, key: str) -> Union["StatisticBase", None]:
@@ -398,7 +375,7 @@ class ProfileArray(SimArray):
             self._profile = getattr(obj, "_profile", None)
             self._name = getattr(obj, "_name", "None")
             self._source = getattr(obj, "_source", "per_bin")
-            self._arr = getattr(obj,"_arr", None)
+            self._arr = getattr(obj, "_arr", None)
             self._mode = getattr(obj, "_mode", None)
             self._is_view = True
 
@@ -422,18 +399,13 @@ class ProfileArray(SimArray):
             ``True`` if additional statistics can be computed.
         """
         if self._profile is None:
-            warnings.warn(
-                "Statistics are only available on the base ProfileData.",
-                stacklevel=2,
-            )
+            warnings.warn("Statistics are only available on the base ProfileData.", stacklevel=2)
             return False
         if self._source == "per_bin":
-            warnings.warn(
-                "Statistics are only available on the base ProfileData.",
-                stacklevel=2,
-            )
+            warnings.warn("Statistics are only available on the base ProfileData.", stacklevel=2)
             return False
         return True
+
     @property
     def profile(self) -> Union["ProfileBase", None]:
         """
@@ -446,13 +418,10 @@ class ProfileArray(SimArray):
         """Set the owning profile."""
         self._profile = value
 
-
     @overload
-    def __getitem__(self, item: str | slice | np.ndarray) -> "ProfileArray":
-        ...
+    def __getitem__(self, item: str | slice | np.ndarray) -> "ProfileArray": ...
     @overload
-    def __getitem__(self, item: int) -> np.dtype:
-        ...
+    def __getitem__(self, item: int) -> np.dtype: ...
     def __getitem__(self, item: str | int | slice | np.ndarray) -> Union["ProfileArray", np.dtype]:
         """
         Overloaded indexing.
@@ -539,7 +508,7 @@ class ProfileArray(SimArray):
         str
         """
         x = SimArray.__repr__(self)
-        flag = ", '" + str(self._source)+"::" + str(self._name)
+        flag = ", '" + str(self._source) + "::" + str(self._name)
         if self._mode is not None:
             flag += "::" + str(self._mode)
         if self._is_view:
@@ -566,10 +535,12 @@ class StatisticBase:
       that fall into a single bin.
     - Implementations should return :data:`numpy.nan` when an empty bin is given.
     """
+
     example_name: str | None = None
+
     def __init_subclass__(cls) -> None:
         """Register subclasses for discovery."""
-        if getattr(cls,"example_name", None) is None:
+        if getattr(cls, "example_name", None) is None:
             warnings.warn(
                 f"StatisticBase subclass {cls.__name__} missing example_name attribute, would be good to add one for clarity.",
                 DeprecationWarning,
@@ -577,7 +548,7 @@ class StatisticBase:
             )
         ProfileArray._registry.append(cls)
 
-    def __init__(self, key:str):
+    def __init__(self, key: str):
         """
         Parameters
         ----------
@@ -586,11 +557,7 @@ class StatisticBase:
         """
         self.key = key
 
-    def __call__(
-        self,
-        arr: SimNpArray,
-        weight: SimNpArray | None,
-    )-> float | int | np.floating:
+    def __call__(self, arr: SimNpArray, weight: SimNpArray | None) -> float | int | np.floating:
         """
         Evaluate the statistic for a single bin.
 
@@ -607,8 +574,9 @@ class StatisticBase:
             The per-bin statistic value.
         """
         raise NotImplementedError
+
     @classmethod
-    def valid(cls, key:str)-> Union["StatisticBase", None]:
+    def valid(cls, key: str) -> Union["StatisticBase", None]:
         """
         Return an instance of this statistic if ``key`` matches, else ``None``.
 
@@ -629,14 +597,13 @@ class StatisticBase:
         else:
             return None
 
+
 class Mean(StatisticBase):
     """Weighted or unweighted arithmetic mean per bin."""
+
     example_name: str = "mean"
-    def __call__(
-        self,
-        arr: SimNpArray,
-        weight: SimNpArray | None,
-    )-> float | int | np.floating:
+
+    def __call__(self, arr: SimNpArray, weight: SimNpArray | None) -> float | int | np.floating:
         if weight is not None:
             return (arr * weight).sum() / weight.sum()
         else:
@@ -649,14 +616,13 @@ class Mean(StatisticBase):
         else:
             return None
 
+
 class Sum(StatisticBase):
     """Unweighted sum of per-particle values per bin."""
+
     example_name: str = "sum"
-    def __call__(
-        self,
-        arr: SimNpArray,
-        weight: SimNpArray | None,
-    )-> float | int | np.floating:
+
+    def __call__(self, arr: SimNpArray, weight: SimNpArray | None) -> float | int | np.floating:
         return arr.sum()
 
     @classmethod
@@ -666,14 +632,13 @@ class Sum(StatisticBase):
         else:
             return None
 
+
 class Sum_w(StatisticBase):
     """Weighted sum of per-particle values per bin."""
+
     example_name: str = "sum_w"
-    def __call__(
-        self,
-        arr: SimNpArray,
-        weight: SimNpArray | None,
-    )-> float | int | np.floating:
+
+    def __call__(self, arr: SimNpArray, weight: SimNpArray | None) -> float | int | np.floating:
         if weight is not None:
             return (arr * weight).sum()
         else:
@@ -686,31 +651,28 @@ class Sum_w(StatisticBase):
         else:
             return None
 
+
 class Percentile(StatisticBase):
     """
     Weighted or unweighted percentile per bin.
 
     Keys of the form ``"pXX"`` (e.g., ``"p16"``, ``"p50"``, ``"p84"``) are recognized.
     """
+
     example_name: str = "p16"
+
     def __init__(self, key: str, percentile: int):
         super().__init__(key)
         self.percentile = percentile
 
-
-    def __call__(
-        self,
-        arr: SimNpArray,
-        weight: SimNpArray | None,
-    )-> float | int | np.floating:
-
+    def __call__(self, arr: SimNpArray, weight: SimNpArray | None) -> float | int | np.floating:
         if len(arr) == 0:
             return np.nan
         else:
             indices = np.argsort(arr)
             arr_sorted = arr[indices]
             if weight is None:
-                weight_cumsum = np.linspace(0,1,len(arr_sorted))
+                weight_cumsum = np.linspace(0, 1, len(arr_sorted))
             else:
                 weight_sorted = weight[indices]
 
@@ -719,7 +681,7 @@ class Percentile(StatisticBase):
                 weight_cumsum -= weight_cumsum[0]
                 weight_cumsum /= weight_cumsum[-1]
 
-            return np.interp(self.percentile/100, weight_cumsum, arr_sorted)
+            return np.interp(self.percentile / 100, weight_cumsum, arr_sorted)
 
     @classmethod
     def valid(cls, key: str) -> Union["StatisticBase", None]:
@@ -742,12 +704,10 @@ class Percentile(StatisticBase):
 
 class RMS(StatisticBase):
     """Root-mean-square (quadratic mean) of values per bin."""
+
     example_name: str = "rms"
-    def __call__(
-        self,
-        arr: SimNpArray,
-        weight: SimNpArray | None,
-    )-> float | int | np.floating:
+
+    def __call__(self, arr: SimNpArray, weight: SimNpArray | None) -> float | int | np.floating:
         if len(arr) == 0:
             return np.nan
         if weight is not None:
@@ -762,15 +722,13 @@ class RMS(StatisticBase):
         else:
             return None
 
+
 class Median(StatisticBase):
     """Median per bin. Equivalent to ``p50``."""
-    example_name: str = "median"
-    def __call__(
-        self,
-        arr: SimNpArray,
-        weight: SimNpArray | None,
-    )-> float | int | np.floating:
 
+    example_name: str = "median"
+
+    def __call__(self, arr: SimNpArray, weight: SimNpArray | None) -> float | int | np.floating:
         return Percentile(self.key, 50)(arr, weight)
 
     @classmethod
@@ -779,6 +737,7 @@ class Median(StatisticBase):
             return cls("median")
         else:
             return None
+
 
 class Abs(StatisticBase):
     """
@@ -792,24 +751,21 @@ class Abs(StatisticBase):
     - ``"abs_sum"`` → sum of absolute values
     - ``"abs_sum_w"`` → weighted sum of absolute values
     """
+
     example_name: str = "abs"
 
     def __init__(self, key: str, substat: "StatisticBase"):
         super().__init__(key)
         self._substat = substat
 
-    def __call__(
-        self,
-        arr: SimNpArray,
-        weight: SimNpArray | None,
-    ) -> float | int | np.floating:
+    def __call__(self, arr: SimNpArray, weight: SimNpArray | None) -> float | int | np.floating:
         return self._substat(np.abs(arr), weight)
 
     @classmethod
     def valid(cls, key: str) -> Union["StatisticBase", None]:
         k = key.lower()
         # accept "abs" and alias to "abs_mean"
-        if k in ["abs","abs_"]:
+        if k in ["abs", "abs_"]:
             subkey = "mean"
         elif k.startswith("abs_"):
             subkey = k[4:]
@@ -821,19 +777,18 @@ class Abs(StatisticBase):
         if sub is None:
             # Don't claim keys we can't actually compute
             return None
-        standard_key = "abs_"+sub.key
+        standard_key = "abs_" + sub.key
         return cls(standard_key, sub)
+
 
 class Dispersion(StatisticBase):
     """
     Velocity-like dispersion per bin, computed as ``sqrt(E[v^2] - E[v]^2)`` (weighted if provided).
     """
+
     example_name: str = "disp"
-    def __call__(
-        self,
-        arr: SimNpArray,
-        weight: SimNpArray | None,
-    )-> float | int | np.floating:
+
+    def __call__(self, arr: SimNpArray, weight: SimNpArray | None) -> float | int | np.floating:
         if len(arr) == 0:
             return np.nan
         if weight is not None:
@@ -854,7 +809,7 @@ class Dispersion(StatisticBase):
 
     @classmethod
     def valid(cls, key: str) -> Union["StatisticBase", None]:
-        if key.lower() in ["dispersion","disp"]:
+        if key.lower() in ["dispersion", "disp"]:
             return cls("disp")
         else:
             return None

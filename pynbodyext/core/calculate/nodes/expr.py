@@ -75,20 +75,13 @@ def make_unary_op(op_name: str, operand: PropertyBase[Any]) -> PropertyBase[Any]
 
 
 def make_clip_op(
-    value: PropertyBase[Any],
-    *,
-    vmin: object | None = None,
-    vmax: object | None = None,
+    value: PropertyBase[Any], *, vmin: object | None = None, vmax: object | None = None
 ) -> PropertyBase[Any]:
     """Create a symbolic ``numpy.clip`` property expression."""
     return OpProperty("clip", [value, as_property(vmin), as_property(vmax)])
 
 
-def make_associative_op(
-    op_name: str,
-    left: PropertyBase[Any],
-    right: PropertyBase[Any],
-) -> PropertyBase[Any]:
+def make_associative_op(op_name: str, left: PropertyBase[Any], right: PropertyBase[Any]) -> PropertyBase[Any]:
     """Create an associative operation and fold constant operands."""
     operands: list[PropertyBase[Any]] = []
 
@@ -181,7 +174,7 @@ class CalculatorValueProperty(PropertyBase[TValue], Generic[TValue]):
         super().__init__(name=name)
         self.calculator = calculator
 
-    def declared_dependencies(self) -> list[CalculatorBase[Any,Any]]:
+    def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:
         return [self.calculator]
 
     def _repr_fields(self) -> list[tuple[str | None, Any]]:
@@ -204,6 +197,7 @@ class CalculatorValueProperty(PropertyBase[TValue], Generic[TValue]):
         with ctx.phase(self, "calculate"):
             return ctx.public_value(self.calculator, input)
 
+
 _OP_TREE_SYMBOLS = {
     "add": "+",
     "mul": "*",
@@ -221,21 +215,18 @@ _OP_TREE_SYMBOLS = {
     "abs": "abs",
     "clip": "clip",
 }
+
+
 class OpProperty(PropertyBase[Any]):
     """Symbolic property operation evaluated by the execution engine."""
 
     node_kind = BuiltinKinds.OP
 
-    def __init__(
-        self,
-        op_name: str,
-        operands: list[PropertyBase[Any]],
-        *,
-        name: str | None = None,
-    ) -> None:
+    def __init__(self, op_name: str, operands: list[PropertyBase[Any]], *, name: str | None = None) -> None:
         super().__init__(name=name)
         self.op_name = op_name
         self.operands = operands
+
     @property
     def tree_label(self) -> str:
         symbol = _OP_TREE_SYMBOLS.get(self.op_name, self.op_name)
@@ -244,8 +235,8 @@ class OpProperty(PropertyBase[Any]):
     def signature_payload(self) -> Mapping[str, Any] | None:
         return {"op_name": self.op_name}
 
-    def declared_dependencies(self) -> list[CalculatorBase[Any,Any]]:
-        deps: list[CalculatorBase[Any,Any]] = []
+    def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:
+        deps: list[CalculatorBase[Any, Any]] = []
         deps.extend(self.operands)
         return deps
 
@@ -272,11 +263,7 @@ class OpProperty(PropertyBase[Any]):
             "eq": operator.eq,
             "ne": operator.ne,
         }
-        unary_map: dict[str, Callable[[Any], Any]] = {
-            "neg": operator.neg,
-            "pos": lambda x: +x,
-            "abs": operator.abs,
-        }
+        unary_map: dict[str, Callable[[Any], Any]] = {"neg": operator.neg, "pos": lambda x: +x, "abs": operator.abs}
 
         with ctx.phase(self, "calculate"):
             if self.op_name in unary_map:

@@ -111,11 +111,7 @@ def dynamic_value_signature(value: Any) -> Any:
         signature = value.item() if isinstance(value, np.generic) else value
     elif isinstance(value, np.ndarray):
         if value.size <= 16:
-            signature = (
-                "array",
-                tuple(value.shape),
-                tuple(np.asarray(value).ravel().tolist()),
-            )
+            signature = ("array", tuple(value.shape), tuple(np.asarray(value).ravel().tolist()))
         else:
             signature = ("array", tuple(value.shape), str(value.dtype), id(value))
     elif isinstance(value, Mapping):
@@ -198,7 +194,8 @@ def _call_dynamic_callable(value: Any, resolver: ValueResolver) -> Any:
         return value(sim)
 
     required_positional = [
-        parameter for parameter in parameters
+        parameter
+        for parameter in parameters
         if parameter.kind in (Parameter.POSITIONAL_ONLY, Parameter.POSITIONAL_OR_KEYWORD)
         and parameter.default is Parameter.empty
     ]

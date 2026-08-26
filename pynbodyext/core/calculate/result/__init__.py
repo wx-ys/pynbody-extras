@@ -56,15 +56,7 @@ def __getattr__(name: str) -> Any:
         from . import exceptions
 
         return getattr(exceptions, name)
-    if name in {
-        "ErrorInfo",
-        "PerfSummary",
-        "PhaseRecord",
-        "ProvenanceInfo",
-        "Result",
-        "ResultNode",
-        "ValueSummary",
-    }:
+    if name in {"ErrorInfo", "PerfSummary", "PhaseRecord", "ProvenanceInfo", "Result", "ResultNode", "ValueSummary"}:
         from . import result
 
         return getattr(result, name)

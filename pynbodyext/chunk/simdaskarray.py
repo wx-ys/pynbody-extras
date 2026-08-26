@@ -13,14 +13,29 @@ from pynbody.array import SimArray
 
 # Methods that do not alter units (mirror unyt_dask_array)
 _USE_UNARY_DECORATOR = {
-    "min", "max", "sum", "mean", "std", "cumsum",
-    "squeeze", "rechunk", "clip", "view", "swapaxes",
-    "round", "copy", "repeat", "astype", "reshape", "topk",
+    "min",
+    "max",
+    "sum",
+    "mean",
+    "std",
+    "cumsum",
+    "squeeze",
+    "rechunk",
+    "clip",
+    "view",
+    "swapaxes",
+    "round",
+    "copy",
+    "repeat",
+    "astype",
+    "reshape",
+    "topk",
 }
 
 
 def _is_iterable(obj):
     return isinstance(obj, (tuple, list))
+
 
 def _extract_sidecar(obj):
     if _is_iterable(obj):
@@ -33,23 +48,29 @@ def _extract_sidecar(obj):
             return obj
     return obj._sidecar if isinstance(obj, SimDaskArray) else obj
 
+
 def _extract_dask(obj):
     if _is_iterable(obj):
         return [_extract_dask(o) for o in obj]
     return obj.to_dask() if isinstance(obj, SimDaskArray) else obj
+
 
 def _extract_plain_numpy(obj):
     if _is_iterable(obj):
         return [_extract_plain_numpy(o) for o in obj]
     return obj.view(np.ndarray) if isinstance(obj, SimArray) else obj
 
+
 def _wrap_unary_preserving_units(dask_func, current_sim_dask):
     """Wrap a Dask unary op so the result keeps the same sidecar/units."""
+
     @wraps(dask_func)
     def wrapper(*args, **kwargs):
         da_out = dask_func(*args, **kwargs)
         return _create_with_sidecar(da_out, current_sim_dask._sidecar)
+
     return wrapper
+
 
 def _post_ufunc(dask_superfunc, sidecar_result):
     def wrapper(*args, **kwargs):
@@ -58,6 +79,7 @@ def _post_ufunc(dask_superfunc, sidecar_result):
         if isinstance(sidecar_result, SimArray) and sidecar_result.units is not None:
             return _create_with_sidecar(dask_result, sidecar_result)
         return dask_result
+
     return wrapper
 
 
@@ -103,14 +125,13 @@ def _prep_ufunc(ufunc, *inputs, extract_dask=False, **kwargs):
                     dask_inputs[i] = mod_si
 
         sidecar_result = SimArray(
-            [1.0],
-            units=out_units,
-            sim=sidecar_inputs[0].sim if hasattr(sidecar_inputs[0], "sim") else None,
+            [1.0], units=out_units, sim=sidecar_inputs[0].sim if hasattr(sidecar_inputs[0], "sim") else None
         )
 
         return tuple(dask_inputs), sidecar_result
 
     return None
+
 
 def _finalize_to_sim(results, unit_like):
     # Finalize dask compute result to SimArray or SimArray scalar
@@ -132,6 +153,7 @@ def _finalize_to_sim(results, unit_like):
         out._name = name
         return out
 
+
 def _create_with_sidecar(dask_array, sidecar_simarray):
     # Wrap a dask Array with SimDaskArray and copy unit state from sidecar
     if isinstance(dask_array, SimDaskArray):
@@ -141,7 +163,6 @@ def _create_with_sidecar(dask_array, sidecar_simarray):
     out = SimDaskArray(*args)
     out._set_sidecar(sidecar_simarray)
     return out
-
 
 
 # Put near the other helpers
@@ -163,6 +184,7 @@ def _op_to_np(func_name):
         "__abs__": np.abs,
     }.get(func_name)
 
+
 def _wrap_binary_op_with_units(the_func):
     # Ensure dunder ops return SimDaskArray with correct units
     def wrapper(self, *args, **kwargs):
@@ -174,9 +196,7 @@ def _wrap_binary_op_with_units(the_func):
 
         # Prepare unit result using the sidecars (and align units if compatible)
         ufunc_args = (self,) + args
-        args_for_dask, sidecar_result = _prep_ufunc(
-            npufunc, *ufunc_args, extract_dask=True, **kwargs
-        )
+        args_for_dask, sidecar_result = _prep_ufunc(npufunc, *ufunc_args, extract_dask=True, **kwargs)
 
         # Remove the first argument (self) for the actual operator call
         args_for_call = list(args_for_dask)
@@ -190,13 +210,15 @@ def _wrap_binary_op_with_units(the_func):
             return _create_with_sidecar(dask_result, sidecar_result)
         else:
             return dask_result
+
     return wrapper
+
 
 class SimDaskArray(DaskArray):
     """Dask Array subclass that tracks pynbody SimArray units and sim context."""
 
-
     _sidecar: SimArray
+
     def __new__(cls, dask_graph, name, chunks, dtype=None, meta=None, shape=None):
         obj = super().__new__(cls, dask_graph, name, chunks, dtype, meta, shape)
         # Default sidecar: dimensionless SimArray of length-1
@@ -215,7 +237,7 @@ class SimDaskArray(DaskArray):
         state = {
             "_sidecar": self._sidecar,
             "units": self.units,
-            #"name": self.name,
+            # "name": self.name,
         }
         return SimDaskArray, args, state
 
@@ -276,10 +298,8 @@ class SimDaskArray(DaskArray):
     def flags(self):
         return self._sidecar.flags
 
-
     in_units = SimArray.in_units
     """ Return a new SimDaskArray in the specified units. """
-
 
     def convert_units(self, new_units):
         new = self.in_units(new_units)
@@ -289,11 +309,8 @@ class SimDaskArray(DaskArray):
         self._meta = new._meta
         self.units = new.units
 
-
     set_units_like = SimArray.set_units_like
     set_default_units = SimArray.set_default_units
-
-
 
     def __repr__(self):
         base = super().__repr__().replace("dask.array", "SimDaskArray")
@@ -323,7 +340,7 @@ class SimDaskArray(DaskArray):
 
     def __array_function__(self, func, types, args, kwargs):
         prep = _prep_ufunc(func, *args, extract_dask=True, **kwargs)
-        if prep is None: # No unit handling available
+        if prep is None:  # No unit handling available
             return super().__array_function__(func, types, args, kwargs)
         args, sidecar_res = prep
         types = [type(i) for i in args]
@@ -353,7 +370,7 @@ class SimDaskArray(DaskArray):
         if "axis" in kwargs and kwargs["axis"] is not None:
             axis = kwargs["axis"]
             power = self.shape[axis]
-            unit = self.units ** power
+            unit = self.units**power
         else:
             unit = self.units
         return _create_with_sidecar(dask_res, SimArray([1.0], units=unit, sim=self.sim))
@@ -426,8 +443,10 @@ class SimDaskArray(DaskArray):
 
 # Dirty-bit support for SimDaskArray, mirroring SimArray._dirty_fn but using pb_name
 
+
 def _dirty_fn_dask(method):
     """Mark underlying SimDaskArray as dirty when mutating SimDaskArray in-place."""
+
     def wrapped(a, *args, **kwargs):
         # a is SimDaskArray
         sim = getattr(a, "sim", None)
@@ -441,12 +460,24 @@ def _dirty_fn_dask(method):
     wrapped.__name__ = method.__name__
     return wrapped
 
+
 _dirty_methods = [
-    "__setitem__", "__setslice__",
-    "__irshift__", "__imod__", "__iand__", "__ifloordiv__",
-    "__ilshift__", "__imul__", "__ior__", "__ixor__",
-    "__isub__", "__invert__", "__iadd__", "__itruediv__",
-    "__idiv__", "__ipow__",
+    "__setitem__",
+    "__setslice__",
+    "__irshift__",
+    "__imod__",
+    "__iand__",
+    "__ifloordiv__",
+    "__ilshift__",
+    "__imul__",
+    "__ior__",
+    "__ixor__",
+    "__isub__",
+    "__invert__",
+    "__iadd__",
+    "__itruediv__",
+    "__idiv__",
+    "__ipow__",
 ]
 
 for name in _dirty_methods:
@@ -454,6 +485,7 @@ for name in _dirty_methods:
         setattr(SimDaskArray, name, _dirty_fn_dask(getattr(SimDaskArray, name)))
 
 # Factories
+
 
 def sim_from_dask(dask_array, units=None, sim=None, name=None, family=None):
     """Wrap a plain dask Array into SimDaskArray with specified units/sim/name."""
@@ -467,6 +499,7 @@ def sim_from_dask(dask_array, units=None, sim=None, name=None, family=None):
     out._set_sidecar(sidecar)
     return out
 
+
 def sim_from_delayed(delayed_obj, shape, dtype, chunks, units=None, sim=None, name=None, family=None):
     """Construct SimDaskArray via dask.array.from_delayed."""
     base_da = da.from_delayed(delayed_obj, shape=shape, dtype=dtype)
@@ -474,8 +507,10 @@ def sim_from_delayed(delayed_obj, shape, dtype, chunks, units=None, sim=None, na
         base_da = base_da.rechunk(chunks)
     return sim_from_dask(base_da, units=units, sim=sim, name=name, family=family)
 
+
 # Reduction helper (optional), similar to unyt.reduce_with_units
 _ALLOWED_REDUCTIONS = {"median", "diagonal", "nanmean", "nanstd", "nanmin", "nanmax", "nansum"}
+
 
 def reduce_with_units(dask_func: Any, sim_dask_arr: SimDaskArray, *args: Any, **kwargs: Any) -> SimDaskArray:
     """Call a dask.array reduction function and preserve units when appropriate."""
