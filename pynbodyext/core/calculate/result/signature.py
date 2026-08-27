@@ -677,6 +677,13 @@ class _Decoder:
         )
 
     @staticmethod
+    def decode_scoped(payload: dict[str, Any]) -> Any:
+        """Decode a plain calculator wrapped with a scope (see ``calculator_to_signature``)."""
+        base = _Decoder.decode_value(payload["base"])
+        base.scope = _Decoder.decode_scope(payload["scope"])
+        return base
+
+    @staticmethod
     def decode_combined(payload: dict[str, Any]) -> Any:
         from pynbodyext.core.calculate.nodes.base import CombinedCalculator
 
@@ -783,6 +790,7 @@ _Decoder._VALUE_DECODERS = {
 }
 _Decoder._SPECIAL_DECODERS = {
     "bound": _Decoder.decode_bound,
+    "scoped": _Decoder.decode_scoped,
     "combined": _Decoder.decode_combined,
     "transform_chain": _Decoder.decode_transform_chain,
     "filter_op": _Decoder.decode_filter_op,
@@ -801,7 +809,7 @@ def calculator_to_signature(
     calculator: Any, *, inline_array_bytes: int = DEFAULT_INLINE_ARRAY_BYTES, _path: str = "calculator"
 ) -> CalculatorSignature:
     """Return a structured signature for a calculator graph."""
-    from pynbodyext.core.calculate.nodes.base import CalculatorBase
+    from pynbodyext.core.calculate.nodes.base import BoundCalculator, CalculatorBase
 
     if not isinstance(calculator, CalculatorBase):
         raise TypeError(f"expected CalculatorBase, got {type(calculator)!r}")
@@ -812,6 +820,14 @@ def calculator_to_signature(
             encoded = _Encoder.encode_dataclass(calculator, _path, inline_array_bytes)  # type: ignore[unreachable]
         else:
             encoded = _Encoder.encode_generic(calculator, _path, inline_array_bytes)
+
+    # A non-empty scope on a plain calculator must be part of its identity so a
+    # scoped clone gets a different cache key than the unscoped one.  (The legacy
+    # BoundCalculator already encodes its scope as a "bound" node.)
+    scope_spec = getattr(calculator, "scope", None)
+    if scope_spec is not None and not scope_spec.is_empty and not isinstance(calculator, BoundCalculator):
+        scope_e = _Encoder.encode_scope(scope_spec, f"{_path}.scope", inline_array_bytes)
+        encoded = _merge_encoded({"node": "scoped", "base": encoded.value, "scope": scope_e.value}, [encoded, scope_e])
 
     return CalculatorSignature(
         payload=encoded.value, constructible=encoded.constructible, non_constructible_paths=encoded.paths

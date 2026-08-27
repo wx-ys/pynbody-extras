@@ -195,7 +195,7 @@ class _BinNodeBase(CalculatorBase[BinNDResult, BinNDResult]):
         >>> result.cache_report()["queries"] >= 1
         True
         """
-        cl = cast("TBinNode", self._clone())
+        cl = self._clone()
         cl.active = tuple(keys)  # type: ignore[attr-defined]
         return cl
 
