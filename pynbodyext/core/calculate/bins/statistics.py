@@ -79,6 +79,84 @@ _PIPELINE_TRANSFORMS: dict[str, Callable[[np.ndarray], np.ndarray]] = {
 }
 
 
+class StatRegistry:
+    """Registry of registered :class:`BinStatisticBase` subclasses."""
+
+    def __init__(self, classes: list[type[BinStatisticBase]] | None = None) -> None:
+        self._classes = classes if classes is not None else []
+
+    def register(self, cls: type[BinStatisticBase]) -> None:
+        self._classes.append(cls)
+
+    def get(self, key: str) -> BinStatisticBase | None:
+        for cls in reversed(self._classes):
+            inst = cls.valid(key)
+            if inst is not None:
+                return inst
+        return None
+
+    def keys(self) -> list[str]:
+        return [cls.example_name for cls in self._classes if cls.example_name is not None]
+
+
+class PipelineParser:
+    """Registry of element-wise transforms and dot-notation query parsing."""
+
+    def __init__(self, transforms: dict[str, Callable[[np.ndarray], np.ndarray]]) -> None:
+        self._transforms = transforms
+
+    def known(self, token: str) -> bool:
+        return token in self._transforms
+
+    def register(self, name: str, func: Callable[[np.ndarray], np.ndarray], *, overwrite: bool = False) -> None:
+        if not overwrite and name in self._transforms:
+            raise KeyError(f"Pipeline transform {name!r} is already registered.")
+        self._transforms[name] = func
+
+    def apply(self, arr: np.ndarray, transforms: list[str]) -> np.ndarray:
+        out = arr
+        for t in transforms:
+            fn = self._transforms.get(t)
+            if fn is None:
+                raise KeyError(f"Unknown pipeline transform {t!r}. Known transforms: {sorted(self._transforms)}.")
+            out = fn(out)
+        return out
+
+    def parse(self, key: str) -> tuple[str, list[str], BinStatisticBase, str | None] | None:
+        weight_field: str | None = None
+        core_key = key
+        if "@" in key:
+            core_key, weight_field = key.rsplit("@", 1)
+            if not weight_field:
+                return None
+
+        if "." not in core_key:
+            return None
+        parts = core_key.split(".")
+        if len(parts) < 2:
+            return None
+
+        terminal_token = parts[-1]
+        stat = get_statistic(terminal_token)
+        if stat is None:
+            return None
+
+        field = parts[0]
+        transforms = parts[1:-1]
+        for t in transforms:
+            if not self.known(t):
+                return None
+
+        return field, transforms, stat, weight_field
+
+    def transform_keys(self) -> list[str]:
+        return sorted(self._transforms.keys())
+
+
+STAT_REGISTRY = StatRegistry(_REGISTRY)
+PIPELINE_PARSER = PipelineParser(_PIPELINE_TRANSFORMS)
+
+
 def register_pipeline_transform(
     name: str, func: Callable[[np.ndarray], np.ndarray], *, overwrite: bool = False
 ) -> None:
@@ -96,9 +174,7 @@ def register_pipeline_transform(
     overwrite:
         If ``False`` (default), raise :exc:`KeyError` if *name* is already registered.
     """
-    if not overwrite and name in _PIPELINE_TRANSFORMS:
-        raise KeyError(f"Pipeline transform {name!r} is already registered.")
-    _PIPELINE_TRANSFORMS[name] = func
+    PIPELINE_PARSER.register(name, func, overwrite=overwrite)
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +208,7 @@ class BinStatisticBase:
                 "add one for completions to work correctly.",
                 stacklevel=2,
             )
-        _REGISTRY.append(cls)
+        STAT_REGISTRY.register(cls)
 
     def __init__(self, key: str) -> None:
         self.key = key
@@ -181,11 +257,7 @@ class BinStatisticBase:
 
 def get_statistic(key: str) -> BinStatisticBase | None:
     """Return the first registered statistic matching *key*, or ``None``."""
-    for cls in reversed(_REGISTRY):
-        inst = cls.valid(key)
-        if inst is not None:
-            return inst
-    return None
+    return STAT_REGISTRY.get(key)
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +266,7 @@ def get_statistic(key: str) -> BinStatisticBase | None:
 
 
 def _known_transform_token(token: str) -> bool:
-    return token in _PIPELINE_TRANSFORMS
+    return PIPELINE_PARSER.known(token)
 
 
 def parse_pipeline_key(key: str) -> tuple[str, list[str], BinStatisticBase, str | None] | None:
@@ -211,44 +283,12 @@ def parse_pipeline_key(key: str) -> tuple[str, list[str], BinStatisticBase, str 
     Returns ``None`` if the key has no ``"."`` or the suffix is not a
     recognised statistic.
     """
-    # Split off optional weight suffix: "field.stat@weight_field"
-    weight_field: str | None = None
-    core_key = key
-    if "@" in key:
-        core_key, weight_field = key.rsplit("@", 1)
-        if not weight_field:
-            return None  # bare "@" with no weight field is invalid
-
-    if "." not in core_key:
-        return None
-    parts = core_key.split(".")
-    if len(parts) < 2:
-        return None
-
-    terminal_token = parts[-1]
-    stat = get_statistic(terminal_token)
-    if stat is None:
-        return None
-
-    field = parts[0]
-    transforms = parts[1:-1]
-
-    for t in transforms:
-        if not _known_transform_token(t):
-            return None
-
-    return field, transforms, stat, weight_field
+    return PIPELINE_PARSER.parse(key)
 
 
 def apply_pipeline(arr: np.ndarray, transforms: list[str]) -> np.ndarray:
     """Apply named element-wise transforms to *arr*."""
-    out = arr
-    for t in transforms:
-        fn = _PIPELINE_TRANSFORMS.get(t)
-        if fn is None:
-            raise KeyError(f"Unknown pipeline transform {t!r}. Known transforms: {sorted(_PIPELINE_TRANSFORMS)}.")
-        out = fn(out)
-    return out
+    return PIPELINE_PARSER.apply(arr, transforms)
 
 
 # ---------------------------------------------------------------------------
@@ -492,10 +532,10 @@ class BinNDStatAccessor:
         return self._owner.stat_explicit(field, statistic, weight=weight, transforms=transforms)
 
     def keys(self) -> list[str]:
-        return [cls.example_name for cls in _REGISTRY if cls.example_name is not None]
+        return STAT_REGISTRY.keys()
 
     def transform_keys(self) -> list[str]:
-        return sorted(_PIPELINE_TRANSFORMS.keys())
+        return PIPELINE_PARSER.transform_keys()
 
     def _ipython_key_completions_(self) -> list[str]:
         return self.keys()
