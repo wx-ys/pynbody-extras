@@ -85,6 +85,34 @@ class BinsRegistry:
 
         return PIPELINE_PARSER
 
+    @property
+    def algorithms(self) -> Any:
+        """The bin-algorithm registry (``{name: (values, nbins, vmin, vmax) -> edges}``)."""
+        from .axes import BIN_ALGORITHMS
+
+        return BIN_ALGORITHMS
+
+    @property
+    def measures(self) -> Any:
+        """The axis-measure registry (keyed by axis alias / prop string)."""
+        from .axes import _AXIS_MEASURE_REGISTRY
+
+        return _AXIS_MEASURE_REGISTRY
+
+    @property
+    def measure_types(self) -> Any:
+        """The named axis-measure-type registry (``spherical_shell``, ``annulus``, ...)."""
+        from .axes import _AXIS_MEASURE_TYPE_REGISTRY
+
+        return _AXIS_MEASURE_TYPE_REGISTRY
+
+    @property
+    def axis_properties(self) -> Any:
+        """The dynamic axis-property registry (name -> evaluator callable)."""
+        from .axes import BinAxis
+
+        return BinAxis._axis_properties
+
     def register_derived(
         self,
         fn: Callable[[Any], Any] | str | None = None,
