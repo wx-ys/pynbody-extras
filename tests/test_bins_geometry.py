@@ -26,3 +26,25 @@ def test_measure_override_is_per_instance():
     b = Bin1D("r", vmin=0, vmax=6, nbins=3)(sim)
     b.set_axis_measure_type("r", "linear")
     assert not np.allclose(a["measure"], b["measure"])
+
+
+def test_model_subresult_tree():
+    from pynbodyext.core.calculate.bins.model import BinResultModel
+
+    sim = pynbody.new(gas=2, dm=4)
+    sim["x"] = np.array([0, 1, 2, 3, 4, 5], dtype=float)
+    sim["mass"] = np.array([1, 2, 3, 4, 5, 6], dtype=float)
+    bins = Bin1D("x", vmin=0, vmax=6, nbins=3)(sim)
+
+    root = bins.model
+    gas = root.gas
+    assert isinstance(gas, BinResultModel)
+    assert gas.parent is root
+    assert gas.owner is bins.gas
+    np.testing.assert_allclose(gas["count"], [2, 0, 0])
+
+    mask = np.array([True, True, False, False, False, False])
+    sub = root[mask]
+    assert isinstance(sub, BinResultModel)
+    assert sub is bins[mask]._model
+    assert sub.parent is root

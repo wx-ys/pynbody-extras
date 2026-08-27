@@ -86,8 +86,10 @@ class BinResultModel:
             raise RuntimeError("BinResultModel is not bound to a BinNDResult.")
         return self._owner
 
-    def __getitem__(self, key: str) -> Any:
-        return self._require_owner()._resolve_query(key)
+    def __getitem__(self, key: Any) -> Any:
+        result = self._require_owner()[key]
+        sub = getattr(result, "_model", None)
+        return sub if sub is not None else result
 
     @property
     def axis(self) -> Any:
@@ -127,20 +129,20 @@ class BinResultModel:
 
     @property
     def gas(self) -> Any:
-        return self._require_owner().gas
+        return self._require_owner().gas._model
 
     @property
     def dm(self) -> Any:
-        return self._require_owner().dm
+        return self._require_owner().dm._model
 
     @property
     def star(self) -> Any:
-        return self._require_owner().star
+        return self._require_owner().star._model
 
     @property
     def g(self) -> Any:
-        return self._require_owner().g
+        return self._require_owner().g._model
 
     @property
     def s(self) -> Any:
-        return self._require_owner().s
+        return self._require_owner().s._model
