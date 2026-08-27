@@ -199,17 +199,17 @@ class TransformBase(RuntimeCalculatorBase[TransformResult[HandleT], HandleT], Ge
 
     def revert(self, policy: RevertPolicy | str | bool = RevertPolicy.ALWAYS) -> TransformBase[HandleT]:
         """Return a copy with a different revert policy."""
-        return cast("TransformBase[HandleT]", self._clone(revert_policy=normalize_revert_policy(policy)))
+        return self._clone(revert_policy=normalize_revert_policy(policy))
 
     def measure_with(self, filt: FilterBase | None) -> TransformBase[HandleT]:
         """Return a copy that measures transform parameters on ``filt``."""
-        return cast("TransformBase[HandleT]", self._clone(measure_filter=filt))
+        return self._clone(measure_filter=filt)
 
-    def with_filter(self, filt: FilterBase) -> TransformBase[HandleT]:  # type: ignore[override]
+    def with_filter(self, filt: FilterBase) -> TransformBase[HandleT]:
         """Measure this transform on a filtered view without narrowing downstream sim."""
         return self.measure_with(filt)
 
-    def filter(self, filt: FilterBase) -> TransformBase[HandleT]:  # type: ignore[override]
+    def filter(self, filt: FilterBase) -> TransformBase[HandleT]:
         """Alias for measure_with() on transforms."""
         return self.measure_with(filt)
 

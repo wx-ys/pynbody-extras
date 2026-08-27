@@ -98,6 +98,7 @@ from typing import (
     Any,
     ClassVar,
     Generic,
+    Self,
     TypeVar,
     TypeVarTuple,
     Unpack,
@@ -349,6 +350,8 @@ class _CalculatorSignatureMixin:
 class _CalculatorGraphMixin:
     """Parameter declaration and dependency-traversal for a calculator node."""
 
+    scope: ScopeSpec
+
     # Declared here (not only on ``CalculatorBase``) so this mixin is
     # self-contained for static analysis.  ``CalculatorBase`` provides the
     # concrete value.
@@ -434,7 +437,9 @@ class _CalculatorGraphMixin:
 
     def dependencies(self) -> list[CalculatorBase[Any, Any]]:
         """Return all calculator dependencies, including dynamic parameters."""
-        return _merge_dependencies(self.declared_dependencies(), self.dynamic_param_dependencies())
+        return _merge_dependencies(
+            self.declared_dependencies(), self.dynamic_param_dependencies(), self.scope.dependencies()
+        )
 
     def children(self) -> list[CalculatorBase[Any, Any]]:
         """Return child nodes shown in graph displays."""
@@ -961,67 +966,64 @@ class _CalculatorComposeMixin(Generic[TRaw, TPublic]):
         """Placeholder overridden by ``CalculatorBase.kind``."""
         raise NotImplementedError
 
-    def named(self, name: str) -> CalculatorBase[TRaw, TPublic]:
+    def named(self: Self, name: str) -> Self:
         """Return a copy that records this node under ``name``."""
         return self._clone(name=name)
 
-    def record(self, policy: RecordPolicy) -> CalculatorBase[TRaw, TPublic]:
+    def record(self: Self, policy: RecordPolicy) -> Self:
         """Return a copy with a different result recording policy."""
         return self._clone(record_policy=policy)
 
-    def with_filter(self, filt: FilterBase) -> BoundCalculator[Any, TRaw, TPublic]:
+    def with_filter(self: Self, filt: FilterBase) -> Self:
         """Return a calculator evaluated on the subset selected by ``filt``."""
-        return BoundCalculator(base=cast("CalculatorBase[Any, Any]", self), scope=self.scope.with_filter(filt))
+        return self._clone(scope=self.scope.with_filter(filt))
 
-    def filter(self, filt: FilterBase) -> BoundCalculator[Any, TRaw, TPublic]:
+    def filter(self: Self, filt: FilterBase) -> Self:
         """Alias for :meth:`with_filter`."""
         return self.with_filter(filt)
 
-    def with_transformation(
-        self, transform: TransformBase[Any], *, revert: bool = True
-    ) -> BoundCalculator[Any, TRaw, TPublic]:
+    def with_transformation(self: Self, transform: TransformBase[Any], *, revert: bool = True) -> Self:
         """Return a calculator evaluated after a pre-transform."""
-        return BoundCalculator(
-            base=cast("CalculatorBase[Any, Any]", self), scope=self.scope.with_transform(transform, revert=revert)
-        )
+        return self._clone(scope=self.scope.with_transform(transform, revert=revert))
 
-    def transform(self, transform: TransformBase[Any], *, revert: bool = True) -> BoundCalculator[Any, TRaw, TPublic]:
+    def transform(self: Self, transform: TransformBase[Any], *, revert: bool = True) -> Self:
         """Return a calculator evaluated after applying ``transform``."""
         return self.with_transformation(transform, revert=revert)
 
-    def keep(self, name: str, policy: RecordPolicy = RecordPolicy.FULL) -> CalculatorBase[TRaw, TPublic]:
+    def keep(self: Self, name: str, policy: RecordPolicy = RecordPolicy.FULL) -> Self:
         """Name the node and retain its value in the returned result."""
         return self._clone(name=name, record_policy=policy)
 
-    def _with_options(self, **changes: Any) -> CalculatorBase[TRaw, TPublic]:
+    def _with_options(self: Self, **changes: Any) -> Self:
         opts = copy.copy(self.default_options)
         for key, value in changes.items():
             setattr(opts, key, value)
         return self._clone(default_options=opts)
 
-    def with_cache(self, enabled: bool = True) -> CalculatorBase[TRaw, TPublic]:
+    def with_cache(self: Self, enabled: bool = True) -> Self:
         """Return a copy with a default cache override."""
         return self._with_options(cache=enabled)
 
-    def with_perf(self, *, time: bool = True, memory: bool = False) -> CalculatorBase[TRaw, TPublic]:
+    def with_perf(self: Self, *, time: bool = True, memory: bool = False) -> Self:
         """Return a copy with performance collection defaults."""
         return self._with_options(perf_time=time, perf_memory=memory)
 
     def with_progress(
-        self, progress: bool | ProgressVerbosity | ProgressSink | list[ProgressSink] | tuple[ProgressSink, ...] = True
-    ) -> CalculatorBase[TRaw, TPublic]:
+        self: Self,
+        progress: bool | ProgressVerbosity | ProgressSink | list[ProgressSink] | tuple[ProgressSink, ...] = True,
+    ) -> Self:
         """Return a copy with a default progress reporting option."""
         return self._with_options(progress=progress)
 
-    def with_observer(self, enabled: bool = True) -> CalculatorBase[TRaw, TPublic]:
+    def with_observer(self: Self, enabled: bool = True) -> Self:
         """Return a copy with diagnostic field-access observation enabled or disabled."""
         return self._with_options(observe=enabled)
 
-    def with_backend(self, name: str) -> CalculatorBase[TRaw, TPublic]:
+    def with_backend(self: Self, name: str) -> Self:
         """Return a copy with a default backend label."""
         return self._with_options(backend=name)
 
-    def with_record_policy(self, policy: RecordPolicy) -> CalculatorBase[TRaw, TPublic]:
+    def with_record_policy(self: Self, policy: RecordPolicy) -> Self:
         """Alias for :meth:`record`."""
         return self.record(policy)
 
@@ -1064,11 +1066,11 @@ class _CalculatorComposeMixin(Generic[TRaw, TPublic]):
     def __rpow__(self, other: object) -> CalculatorBase[Any, Any]:
         return self._as_value_property().__rpow__(other)
 
-    def _clone(self, **changes: Any) -> CalculatorBase[TRaw, TPublic]:
+    def _clone(self: Self, **changes: Any) -> Self:
         clone = copy.copy(self)
         for key, value in changes.items():
             setattr(clone, key, value)
-        return cast("CalculatorBase[TRaw, TPublic]", clone)
+        return clone
 
     @overload
     def __and__(self, other: CombinedCalculator[Unpack[Us]]) -> CombinedCalculator[TPublic, Unpack[Us]]: ...

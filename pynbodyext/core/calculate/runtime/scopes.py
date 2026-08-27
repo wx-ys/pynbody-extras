@@ -234,18 +234,21 @@ class Scope:
         return Scope.from_spec(self.spec.compose(child_spec))
 
     def apply(self, calculator: CalculatorBase[Any, Any]) -> CalculatorBase[Any, Any]:
-        """Apply this scope to ``calculator`` and return a bound calculator."""
-        from pynbodyext.core.calculate.nodes.base import BoundCalculator
+        """Apply this scope to ``calculator`` and return a same-type calculator.
 
-        if isinstance(calculator, BoundCalculator):
-            return BoundCalculator(
-                base=calculator.base,
-                scope=self.spec.compose(calculator.scope),
-                name=calculator.name,
-                record_policy=calculator.record_policy,
-                default_options=calculator.default_options,
-            )
-        return BoundCalculator(base=calculator, scope=self.spec.compose(getattr(calculator, "scope", ScopeSpec())))
+        The returned calculator is a shallow clone whose :attr:`scope` is composed
+        with this scope, so ``isinstance(result, type(calculator))`` holds.
+
+        Examples
+        --------
+        >>> scoped = Scope(filter=TemperatureAbove(1.0e5)).apply(ParamSum("mass"))
+        >>> scoped.scope.filter is not None
+        True
+        """
+        scope = self.spec.compose(getattr(calculator, "scope", ScopeSpec()))
+        if scope.is_empty:
+            return calculator
+        return calculator._clone(scope=scope)
 
     def pipeline(
         self, outputs: Mapping[str, CalculatorBase[Any, Any]], *, name: str | None = None

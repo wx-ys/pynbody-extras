@@ -458,6 +458,7 @@ class EvalEngine:
         state = _NodeExecutionState()
         ctx._node_stack.append(node_result)
         try:
+            work = self._apply_node_scope(node, ctx, work)
             state.raw_value = node.execute(ctx, work)
             state.raw_value = node.materialize(ctx, state.raw_value)
             state.public_value = node.public_value(state.raw_value)
@@ -467,6 +468,45 @@ class EvalEngine:
         finally:
             ctx._node_stack.pop()
         return state
+
+    def _apply_node_scope(self, node: CalculatorBase[Any, Any], ctx: ExecutionContext, work: NodeInput) -> NodeInput:
+        """Apply ``node.scope`` (transforms then filter) to ``work`` before execution.
+
+        Scoped composition is expressed by cloning the concrete calculator with a
+        non-empty :class:`~.runtime.scopes.ScopeSpec`; the engine applies that scope
+        right before running ``node.execute`` so the same filtering/transform logic
+        works for every calculator type without a wrapper node.
+        """
+        scope = getattr(node, "scope", None)
+        if scope is None or scope.is_empty:
+            return work
+        from pynbodyext.core.calculate.nodes.base import BoundCalculator
+
+        if isinstance(node, BoundCalculator):
+            # Legacy wrapper applies its own scope inside ``execute``; the engine
+            # must not double-apply it.
+            return work
+
+        transform = scope.as_transform()
+        if transform is not None:
+            from pynbodyext.core.calculate.runtime.input import TransformResult
+
+            with ctx.phase(node, "transform"):
+                transform_result = ctx.raw_value(transform, work)
+                if not isinstance(transform_result, TransformResult):
+                    raise TypeError("transform nodes must return TransformResult")
+                work = work.with_transform(transform_result)
+
+        if scope.filter is not None:
+            from pynbodyext.core.calculate.runtime.input import FilterResult
+
+            with ctx.phase(node, "filter"):
+                filter_result = ctx.raw_value(scope.filter, work)
+                if not isinstance(filter_result, FilterResult):
+                    raise TypeError("filter nodes must return FilterResult")
+                work = work.with_selection(filter_result)
+
+        return work
 
     # ------------------------------------------------------------------
 
@@ -654,6 +694,7 @@ class EvalEngine:
         with ctx.node_scope(node_result, node):
             with ctx.observe_node_access(node_result, node):
                 try:
+                    work = self._apply_node_scope(node, ctx, work)
                     state.raw_value = node.execute(ctx, work)
                     with observation_phase("materialize"):
                         state.raw_value = node.materialize(ctx, state.raw_value)
