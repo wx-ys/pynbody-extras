@@ -106,8 +106,8 @@ def _cache_key_for_stat(field: str, transforms: tuple[str, ...], stat_key: str, 
     return PipelineStatKey(field, transforms, stat_key, weight_token)
 
 
-def _wrap(provider: Any, values: Any, *, name: str, field: str | None = None, mode: str | None = None) -> BinsArray:
-    return BinsArray(provider, values, name=name, field=field, mode=mode)
+def _wrap(owner: Any, values: Any, *, name: str, field: str | None = None, mode: str | None = None) -> BinsArray:
+    return BinsArray(owner, values, name=name, field=field, mode=mode)
 
 
 def weight_cache_token(weight: str | Callable[[Any], Any] | Any | None) -> Any:
@@ -130,8 +130,9 @@ def callable_cache_token(query: Any) -> Any:
 class StatPipeline:
     """Compute a per-bin statistic (vectorised fast path, then per-bin fallback)."""
 
-    def __init__(self, provider: Any, cache: QueryCache) -> None:
-        self._provider = provider
+    def __init__(self, model: Any, owner: Any, cache: QueryCache) -> None:
+        self._model = model
+        self._owner = owner
         self._cache = cache
 
     def compute(
@@ -145,7 +146,7 @@ class StatPipeline:
     ) -> BinsArray:
         from .statistics import apply_pipeline
 
-        provider = self._provider
+        model = self._model
         weight_token = weight_cache_token(weight)
         stat_key_str = terminal_stat.key
         key = _cache_key_for_stat(field, tuple(transforms), stat_key_str, weight_token)
@@ -153,35 +154,35 @@ class StatPipeline:
         if cached is not None:
             return cached
 
-        values = provider.sim[field]
+        values = model.sim[field]
         weights = None
         if isinstance(weight, str):
-            weights = provider.sim[weight]
+            weights = model.sim[weight]
         elif callable(weight):
-            weights = weight(provider.sim)
+            weights = weight(model.sim)
         elif weight is not None:
             weights = weight
 
-        valid_mask = provider._valid_mask
+        valid_mask = model.valid_mask
         if valid_mask.any():
             v_valid = np.asarray(values[valid_mask], dtype=float)
             v_valid = apply_pipeline(v_valid, transforms)
             w_valid = None if weights is None else np.asarray(weights[valid_mask], dtype=float)
-            bins_valid = provider._particle_bin[valid_mask]
-            vec = terminal_stat.vectorized_call(v_valid, bins_valid, w_valid, provider.nbins)
+            bins_valid = model.particle_bin[valid_mask]
+            vec = terminal_stat.vectorized_call(v_valid, bins_valid, w_valid, model.nbins)
         else:
             vec = None
 
         if vec is not None:
             out = vec
         else:
-            out = np.full(provider.nbins, np.nan, dtype=float)
-            for index in range(provider.nbins):
-                start = int(provider._bin_indptr[index])
-                stop = int(provider._bin_indptr[index + 1])
+            out = np.full(model.nbins, np.nan, dtype=float)
+            for index in range(model.nbins):
+                start = int(model.bin_indptr[index])
+                stop = int(model.bin_indptr[index + 1])
                 if start == stop:
                     continue
-                particle_indices = provider._bin_data[start:stop]
+                particle_indices = model.bin_data[start:stop]
                 sub = np.asarray(values[particle_indices], dtype=float)
                 sub = apply_pipeline(sub, transforms)
                 sub_weights = None if weights is None else np.asarray(weights[particle_indices], dtype=float)
@@ -190,7 +191,7 @@ class StatPipeline:
         name = query_key or (
             f"{field}.{'.'.join(transforms)}.{stat_key_str}" if transforms else f"{field}.{stat_key_str}"
         )
-        result = _wrap(provider, out, name=name, field=field, mode=stat_key_str)
+        result = _wrap(self._owner, out, name=name, field=field, mode=stat_key_str)
         if isinstance(values, (SimArray, IndexedSimArray)):
             result.units = values.units
             result.sim = values.sim
@@ -203,8 +204,8 @@ class DensityResolver:
 
     _SUFFIX = ".density"
 
-    def __init__(self, provider: Any, cache: QueryCache, resolve_query: Callable[[str], BinsArray]) -> None:
-        self._provider = provider
+    def __init__(self, owner: Any, cache: QueryCache, resolve_query: Callable[[str], BinsArray]) -> None:
+        self._owner = owner
         self._cache = cache
         self._resolve_query = resolve_query
 
@@ -223,7 +224,6 @@ class DensityResolver:
         return f"{base_field}.sum.density"
 
     def resolve(self, key: str, base_field: str) -> BinsArray:
-        provider = self._provider
         if base_field == "density":
             base_field = "mass"
 
@@ -247,7 +247,7 @@ class DensityResolver:
         with np.errstate(divide="ignore", invalid="ignore"):
             result_arr = numerator / denominator
 
-        result = _wrap(provider, result_arr, name=canonical_key, field=base_field, mode="density")
+        result = _wrap(self._owner, result_arr, name=canonical_key, field=base_field, mode="density")
         self._cache.put(cache_key, result)
         return result
 
@@ -255,8 +255,9 @@ class DensityResolver:
 class ApplyComposer:
     """Evaluate a query (callable or calculator) per bin into a :class:`BinsArray`."""
 
-    def __init__(self, provider: Any, cache: QueryCache, diagnostics: Any) -> None:
-        self._provider = provider
+    def __init__(self, model: Any, owner: Any, cache: QueryCache, diagnostics: Any) -> None:
+        self._model = model
+        self._owner = owner
         self._cache = cache
         self._diagnostics = diagnostics
 
@@ -268,7 +269,7 @@ class ApplyComposer:
         empty: float = np.nan,
         vectorized: bool = False,
     ) -> BinsArray:
-        provider = self._provider
+        model = self._model
         cache_key = ApplyKey(callable_cache_token(query), name, empty, vectorized)
         cached = self._cache.get(cache_key)
         if cached is not None:
@@ -277,31 +278,31 @@ class ApplyComposer:
         if vectorized:
             if isinstance(query, CalculatorBase):
                 raise TypeError("vectorized=True requires a plain callable, not a CalculatorBase.")
-            raw = query(provider.sim, provider._particle_bin)  # type: ignore[call-arg]
+            raw = query(model.sim, model.particle_bin)  # type: ignore[call-arg]
             values = np.asarray(raw, dtype=float)
-            if values.shape != (provider.nbins,):
-                raise TypeError(f"Vectorized apply callable must return shape ({provider.nbins},), got {values.shape}.")
+            if values.shape != (model.nbins,):
+                raise TypeError(f"Vectorized apply callable must return shape ({model.nbins},), got {values.shape}.")
         else:
             values = self._value_nonvectorized(query)
 
         result_name = str(name or getattr(query, "name", None) or getattr(query, "__name__", "apply"))
-        result = _wrap(provider, values, name=result_name)
+        result = _wrap(self._owner, values, name=result_name)
         self._cache.put(cache_key, result)
         self._diagnostics.record("apply", name=name, query=repr(query), vectorized=vectorized)
         return result
 
     def _value_nonvectorized(self, query: Callable[[Any], Any] | CalculatorBase[Any, Any]) -> np.ndarray:
-        provider = self._provider
-        outputs: list[np.ndarray | None] = [None] * provider.nbins
+        model = self._model
+        outputs: list[np.ndarray | None] = [None] * model.nbins
         sample_shape: tuple[int, ...] | None = None
         if isinstance(query, CalculatorBase):
             with query.batch(_BATCH_RUN_OPTIONS) as run_one:
-                for index in range(provider.nbins):
-                    start = int(provider._bin_indptr[index])
-                    stop = int(provider._bin_indptr[index + 1])
+                for index in range(model.nbins):
+                    start = int(model.bin_indptr[index])
+                    stop = int(model.bin_indptr[index + 1])
                     if start == stop:
                         continue
-                    sub = provider.sim[provider._bin_data[start:stop]]
+                    sub = model.sim[model.bin_data[start:stop]]
                     arr = np.asarray(run_one(sub))
                     if sample_shape is None:
                         sample_shape = arr.shape
@@ -311,12 +312,12 @@ class ApplyComposer:
                         )
                     outputs[index] = arr
         else:
-            for index in range(provider.nbins):
-                start = int(provider._bin_indptr[index])
-                stop = int(provider._bin_indptr[index + 1])
+            for index in range(model.nbins):
+                start = int(model.bin_indptr[index])
+                stop = int(model.bin_indptr[index + 1])
                 if start == stop:
                     continue
-                sub = provider.sim[provider._bin_data[start:stop]]
+                sub = model.sim[model.bin_data[start:stop]]
                 arr = np.asarray(query(sub))
                 if sample_shape is None:
                     sample_shape = arr.shape
@@ -330,16 +331,17 @@ class ApplyComposer:
 
 
 class BinQueryService:
-    """Orchestrates query resolution over a provider (result or model)."""
+    """Orchestrates query resolution over a model, using the owner for extensions."""
 
-    def __init__(self, provider: Any, diagnostics: Any, *, extensions: Any = None) -> None:
-        self._provider = provider
+    def __init__(self, model: Any, owner: Any, diagnostics: Any, *, extensions: Any = None) -> None:
+        self._model = model
+        self._owner = owner
         self._diagnostics = diagnostics
         self._extensions = extensions if extensions is not None else BIN_RESULT_EXTENSIONS
         self._cache = QueryCache()
-        self._stat = StatPipeline(provider, self._cache)
-        self._density = DensityResolver(provider, self._cache, self.resolve)
-        self._apply = ApplyComposer(provider, self._cache, diagnostics)
+        self._stat = StatPipeline(model, owner, self._cache)
+        self._density = DensityResolver(owner, self._cache, self._owner._resolve_query)
+        self._apply = ApplyComposer(model, owner, self._cache, diagnostics)
 
     @property
     def num_cached_arr(self) -> int:
@@ -361,14 +363,10 @@ class BinQueryService:
         return sorted(keys)
 
     def property_keys(self) -> list[str]:
-        return self._extensions.property_keys(self._provider)
+        return self._extensions.property_keys(self._owner)
 
     def resolve(self, key: str) -> BinsArray:
-        provider = self._provider
-        scope = self._extensions.query_scope(provider, key)
-        if not provider.is_root and scope in provider._SHARED_SCOPES:
-            return provider.root._query_service.resolve(key)
-
+        scope = self._extensions.query_scope(self._owner, key)
         parsed = self._extensions.parse_pipeline_key(key)
         if parsed is not None:
             field, transforms, terminal_stat, weight_field = parsed
@@ -391,10 +389,10 @@ class BinQueryService:
         return arr
 
     def wrap(self, values: Any, *, name: str, field: str | None = None, mode: str | None = None) -> BinsArray:
-        return _wrap(self._provider, values, name=name, field=field, mode=mode)
+        return _wrap(self._owner, values, name=name, field=field, mode=mode)
 
     def compute_query(self, key: str, *, scope: str) -> BinsArray:
-        spec = self._extensions.get_derived_spec(self._provider, key)
+        spec = self._extensions.get_derived_spec(self._owner, key)
         if spec is not None:
             return self.compute_derived(spec)
         raise KeyError(
@@ -404,13 +402,13 @@ class BinQueryService:
         )
 
     def compute_derived(self, spec: BinDerivedSpec) -> BinsArray:
-        provider = self._provider
-        values = spec.func(provider)
+        owner = self._owner
+        values = spec.func(owner)
         result = values if isinstance(values, BinsArray) else self.wrap(values, name=spec.name)
-        if result.shape[: provider.ndim] != provider.shape_bins:
+        if result.shape[: owner.ndim] != owner.shape_bins:
             raise ValueError(
                 f"Derived query {spec.name!r} returned shape {result.shape!r}; "
-                f"leading dimensions must match the bin grid {provider.shape_bins!r}."
+                f"leading dimensions must match the bin grid {owner.shape_bins!r}."
             )
         return result
 
@@ -456,12 +454,8 @@ class BinQueryService:
         return callable_cache_token(query)
 
     def cache_report(self) -> dict[str, Any]:
-        provider = self._provider
-        return {
-            "queries": self._cache.num_cached,
-            "subresults": provider.nsubs,
-            "total_queries": provider.total_cached_arr,
-        }
+        owner = self._owner
+        return {"queries": self._cache.num_cached, "subresults": owner.nsubs, "total_queries": owner.total_cached_arr}
 
     def query_report(self) -> list[dict[str, Any]]:
         return list(self._diagnostics.diagnostics)
