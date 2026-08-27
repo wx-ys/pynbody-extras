@@ -41,6 +41,34 @@ class _BinNodeBase(CalculatorBase[BinNDResult, BinNDResult]):
 
     @staticmethod
     def register_bin_algorithm(name: str, func: Any = None, *, overwrite: bool = False) -> Any:
+        """Register a custom bin-edge algorithm for this node family.
+
+        Resolves to :func:`pynbodyext.core.calculate.bins.axes.register_bin_algorithm`.
+        The algorithm is ``f(values, nbins, vmin, vmax) -> ndarray`` returning
+        ``nbins + 1`` monotonic edges.
+
+        Parameters
+        ----------
+        name : str
+            Key used by ``Bin1D(mode=...)``.
+        func : callable, optional
+            The algorithm; omit to use as a decorator.
+        overwrite : bool, default: False
+            Whether to replace an existing algorithm.
+
+        Returns
+        -------
+        callable
+            The algorithm (direct call) or a decorator.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> @Bin1D.register_bin_algorithm("centroid_edges", overwrite=True)
+        ... def centroid_edges(values, nbins, vmin, vmax):
+        ...     return np.linspace(vmin, vmax, nbins + 1)
+        >>> bins = Bin1D("r", vmin=0, vmax=6, nbins=3, mode="centroid_edges")(sim)
+        """
         return register_bin_algorithm(name, func, overwrite=overwrite)
 
     register_algorithm = register_bin_algorithm
@@ -49,6 +77,34 @@ class _BinNodeBase(CalculatorBase[BinNDResult, BinNDResult]):
     def register_axis_property(
         name: str | AxisPropertyFunc, func: AxisPropertyFunc | None = None, *, overwrite: bool = False
     ) -> AxisPropertyFunc | Callable[[AxisPropertyFunc], AxisPropertyFunc]:
+        """Register a dynamic axis property accessible as ``bins.axis.<name>``.
+
+        The property function receives a :class:`BinAxis` and returns an array
+        shaped like the axis (``len == nbins``).  Resolves to
+        :meth:`BinAxis.register_property`.
+
+        Parameters
+        ----------
+        name : str
+            Property name (attribute/``dir`` key on the axis accessor).
+        func : callable, optional
+            ``f(axis) -> array``; omit to use as a decorator.
+        overwrite : bool, default: False
+            Whether to replace an existing property.
+
+        Returns
+        -------
+        callable
+            The property function or a decorator.
+
+        Examples
+        --------
+        >>> @Bin1D.register_axis_property("midpoint", overwrite=True)
+        ... def midpoint(axis):
+        ...     return axis.mins + 0.5 * axis.widths
+        >>> bins.axis.r.midpoint.tolist()
+        [1.0, 3.0, 5.0]
+        """
         return BinAxis.register_property(cast("Any", name), cast("Any", func), overwrite=overwrite)
 
     axis_property = register_axis_property
@@ -62,6 +118,35 @@ class _BinNodeBase(CalculatorBase[BinNDResult, BinNDResult]):
         condition: Callable[[Any], bool] | None = None,
         overwrite: bool = False,
     ) -> Callable[[Any], Any] | Callable[[Callable[[Any], Any]], Callable[[Any], Any]]:
+        """Register a derived per-bin property on this node's results.
+
+        Equivalent to ``BinNDResult.derived``.  The decorated function receives
+        the :class:`BinNDResult` (or its data model) and returns a per-bin array.
+        A ``condition`` (e.g. ``has_axis({"x"})``) gates availability.
+
+        Parameters
+        ----------
+        fn : callable or str, optional
+            The function (or name when used as a factory).
+        name : str, optional
+            Registration name (defaults to ``fn.__name__``).
+        scope : {"derived", "geometry", "particles"}, default: "derived"
+            Query scope.
+        condition : callable, optional
+            ``lambda result -> bool`` gating availability.
+        overwrite : bool, default: False
+            Whether to replace an existing property.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> @Bin1D.derived("x_span", condition=has_axis({"x"}), overwrite=True)
+        ... def x_span(result):
+        ...     axis = result.find_axis({"x"})
+        ...     return np.full(result.nbins, float(axis.maxs[-1] - axis.mins[0]))
+        >>> "x_span" in Bin1D("x", vmin=0, vmax=6, nbins=3)(sim).keys()
+        True
+        """
         return BinNDResult.derived(
             cast("Any", fn), name=cast("Any", name), scope=scope, condition=condition, overwrite=overwrite
         )
@@ -76,6 +161,14 @@ class _BinNodeBase(CalculatorBase[BinNDResult, BinNDResult]):
         return deps
 
     def __matmul__(self, other: Bin1D | BinND) -> BinND:
+        """Compose axes into an :class:`BinND` product (``@`` operator).
+
+        Examples
+        --------
+        >>> bins = Bin1D("x", vmin=0, vmax=6, nbins=3) @ Bin1D("y", vmin=0, vmax=3, nbins=3)
+        >>> bins(sim).shape_bins
+        (3, 3)
+        """
         if isinstance(other, BinND):
             return BinND((*self._axes_for_concat(), *other.axes_specs))
         if isinstance(other, Bin1D):
@@ -83,6 +176,25 @@ class _BinNodeBase(CalculatorBase[BinNDResult, BinNDResult]):
         return NotImplemented
 
     def with_active(self: TBinNode, keys: Iterable[Any]) -> TBinNode:
+        """Mark queries that should be resolved (and cached) during the run.
+
+        Parameters
+        ----------
+        keys : iterable of str or callable
+            Query keys (e.g. ``"mass.sum"``) or callables to pre-resolve.
+
+        Returns
+        -------
+        Bin1D or BinND
+            A copy of this node with ``active`` queries set.
+
+        Examples
+        --------
+        >>> calc = Bin1D("x", vmin=0, vmax=6, nbins=3).with_active(["count", "mass.sum"])
+        >>> result = calc(sim)
+        >>> result.cache_report()["queries"] >= 1
+        True
+        """
         cl = cast("TBinNode", self._clone())
         cl.active = tuple(keys)  # type: ignore[attr-defined]
         return cl
