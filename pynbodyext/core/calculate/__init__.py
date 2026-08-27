@@ -191,7 +191,7 @@ from .bins import (
 from .diagnostics.observer import AccessEvent, AccessObservation
 from .diagnostics.perf import PerfCollector
 from .diagnostics.trace import TraceCollector, TraceEvent
-from .nodes.base import BoundCalculator, CalculatorBase, CombinedCalculator
+from .nodes.base import CalculatorBase, CombinedCalculator
 from .nodes.expr import ConstantProperty, LambdaProperty, OpProperty
 from .nodes.filters import AndFilter, FilterBase, NotFilter, OrFilter
 from .nodes.pipeline import Pipeline
@@ -239,7 +239,6 @@ __all__ = [
     "has_axis",
     "has_axes",
     "RuntimeCalculatorBase",
-    "BoundCalculator",
     "CombinedCalculator",
     "EvalEngine",
     "CalculatorError",

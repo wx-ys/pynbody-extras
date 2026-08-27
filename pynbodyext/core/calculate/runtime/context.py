@@ -345,15 +345,6 @@ class ExecutionContext:
             raise RuntimeError("phase() requires an active node scope")
 
         node_name = node.log_label
-        if node.__class__.__name__ == "BoundCalculator":
-            if phase_name == "filter":
-                node_name = f"{node.log_label}.scope"
-            elif phase_name == "transform":
-                node_name = f"{node.log_label}.scope"
-            elif phase_name == "calculate":
-                node_name = f"{node.log_label}.scope"
-            elif phase_name == "revert":
-                node_name = f"{node.log_label}.scope"
         depth = len(self._node_stack) - 1
 
         self._progress_sink.on_phase_start(

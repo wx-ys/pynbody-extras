@@ -140,7 +140,6 @@ from pynbodyext.core.calculate.result.enums import (
     RecordPolicy,
     normalize_kind,
 )
-from pynbodyext.core.calculate.runtime.input import FilterResult, NodeInput, TransformResult
 from pynbodyext.core.calculate.runtime.options import RunOptions
 from pynbodyext.core.calculate.runtime.scopes import ScopeSpec
 
@@ -151,6 +150,7 @@ if TYPE_CHECKING:
     from pynbodyext.core.calculate.result.signature import CalculatorSignature
     from pynbodyext.core.calculate.runtime.context import ExecutionContext
     from pynbodyext.core.calculate.runtime.engine import EvalEngine
+    from pynbodyext.core.calculate.runtime.input import NodeInput
     from pynbodyext.core.calculate.runtime.progress import ProgressSink, ProgressVerbosity
     from pynbodyext.core.calculate.runtime.sim_identity import SimIdentityProvider
     from pynbodyext.core.calculate.store.base import ResultStore
@@ -163,7 +163,6 @@ T = TypeVar("T")
 U = TypeVar("U")
 Ts = TypeVarTuple("Ts")
 Us = TypeVarTuple("Us")
-TBase = TypeVar("TBase", bound="CalculatorBase[Any, Any]")
 TCalc = TypeVar("TCalc", bound="CalculatorBase[Any, Any]")
 
 TRaw = TypeVar("TRaw")
@@ -196,8 +195,6 @@ def _tree_kind_label(kind: str, *, compact: bool) -> str:
 
 
 def _tree_input_node(node: CalculatorBase[Any, Any]) -> CalculatorBase[Any, Any]:
-    if isinstance(node, BoundCalculator):
-        return node.base
     return node
 
 
@@ -1246,177 +1243,6 @@ class _BatchCaller(Generic[TPublic]):
             _precomputed_node_sig=self._node_sig,
             _precomputed_structured_sig=self._structured_sig,
         )
-
-
-class BoundCalculator(CalculatorBase[TRaw, TPublic], Generic[TBase, TRaw, TPublic]):
-    """Calculator wrapper that applies a scope before running a base node.
-
-    ``BoundCalculator`` is created by methods such as
-    :meth:`CalculatorBase.filter`, :meth:`CalculatorBase.transform`, and
-    :meth:`Scope.apply`.  The concrete wrapped calculator type is preserved on
-    :attr:`base`, so scoped calculators can still expose original dataclass
-    fields through ``scoped.base`` in static analysis.
-    """
-
-    node_kind = BuiltinKinds.CALCULATOR
-
-    def __init__(
-        self,
-        *,
-        base: TBase,
-        pre_filter: FilterBase | None = None,
-        pre_transform: TransformBase[Any] | None = None,
-        revert_transform: bool = True,
-        scope: ScopeSpec | None = None,
-        name: str | None = None,
-        record_policy: RecordPolicy | None = None,
-        default_options: RunOptions | None = None,
-    ) -> None:
-        super().__init__(
-            name=name or base.name,
-            record_policy=record_policy or base.record_policy,
-            default_options=default_options or base.default_options,
-        )
-        self.base = base
-        if scope is None:
-            scope = ScopeSpec(filter=pre_filter)
-            if pre_transform is not None:
-                scope = scope.with_transform(pre_transform, revert=revert_transform)
-        self.scope = scope
-        self.pre_filter = scope.filter
-        self.pre_transform = scope.as_transform()
-        self.revert_transform = scope.should_revert
-        if self.pre_transform is not None:
-            self.cacheable = False
-
-    @property
-    def kind(self) -> NodeKind:
-        """Kind inherited from the wrapped base calculator."""
-        return self.base.kind
-
-    @property
-    def log_label(self) -> str:
-        """Use the wrapped calculator label instead of the wrapper class name."""
-        return self.name or self.base.log_label
-
-    @property
-    def tree_label(self) -> str:
-        return self.log_label
-
-    def children(self) -> list[CalculatorBase[Any, Any]]:
-        """Display children for graph views.
-
-        The wrapper node already represents ``base`` itself, so tree displays
-        should expand the base children directly instead of showing an extra
-        nested copy of the base node.
-        """
-        children = list(self.base.children())
-        if self.pre_filter is not None:
-            children.append(self.pre_filter)
-        if self.pre_transform is not None:
-            children.append(self.pre_transform)
-        return children
-
-    def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:
-        deps: list[CalculatorBase[Any, Any]] = [self.base]
-        if self.pre_filter is not None:
-            deps.append(self.pre_filter)
-        if self.pre_transform is not None:
-            deps.append(self.pre_transform)
-        return deps
-
-    def _repr_fields(self) -> list[tuple[str | None, Any]]:
-        fields: list[tuple[str | None, Any]] = [("base", self.base)]
-        if self.pre_filter is not None:
-            fields.append(("filter", self.pre_filter))
-        if self.pre_transform is not None:
-            fields.append(("transform", self.pre_transform))
-            fields.append(("revert", self.revert_transform))
-        if self.name is not None and self.name != self.base.name:
-            fields.append(("name", self.name))
-        if self.record_policy is not None and self.record_policy != self.base.record_policy:
-            fields.append(("record", display_value(self.record_policy)))
-        return fields
-
-    def materialize(self, ctx: ExecutionContext, value: TRaw) -> TRaw:
-        return self.base.materialize(ctx, value)
-
-    def public_value(self, value: TRaw) -> TPublic:
-        return self.base.public_value(value)
-
-    def materialize_public(self, ctx: ExecutionContext, value: TPublic) -> TPublic:
-        return self.base.materialize_public(ctx, value)
-
-    def execute(self, ctx: ExecutionContext, input: NodeInput) -> TRaw:
-        work = input
-        transform_result: TransformResult[Any] | None = None
-
-        if self.pre_transform is not None:
-            with ctx.phase(self, "transform"):
-                transform_result = ctx.raw_value(self.pre_transform, work)
-                if not isinstance(transform_result, TransformResult):
-                    raise TypeError("transform nodes must return TransformResult")
-                work = work.with_transform(transform_result)
-
-        if self.pre_filter is not None:
-            with ctx.phase(self, "filter"):
-                filter_result = ctx.raw_value(self.pre_filter, work)
-                if not isinstance(filter_result, FilterResult):
-                    raise TypeError("filter nodes must return FilterResult")
-                work = work.with_selection(filter_result)
-
-        try:
-            with ctx.phase(self, "calculate"):
-                return ctx.raw_value(self.base, work)
-        finally:
-            if transform_result is not None and self.revert_transform and transform_result.revertible:
-                with ctx.phase(self, "revert"):
-                    assert self.pre_transform is not None
-                    cleanup = getattr(self.pre_transform, "cleanup", None)
-                    if cleanup is None:
-                        raise TypeError("transform nodes must provide cleanup()")
-                    cleanup(ctx, transform_result.handle)
-
-    def filter(self, filt: FilterBase) -> BoundCalculator[TBase, TRaw, TPublic]:
-        return self.with_filter(filt)
-
-    def transform(self, transform: TransformBase[Any], *, revert: bool = True) -> BoundCalculator[TBase, TRaw, TPublic]:
-        return self.with_transformation(transform, revert=revert)
-
-    def with_filter(self, filt: FilterBase) -> BoundCalculator[TBase, TRaw, TPublic]:
-        """Compose another filter into this bound calculator."""
-        return BoundCalculator(
-            base=self.base,
-            scope=self.scope.with_filter(filt),
-            name=self.name,
-            record_policy=self.record_policy,
-            default_options=self.default_options,
-        )
-
-    def with_transformation(
-        self, transform: TransformBase[Any], *, revert: bool = True
-    ) -> BoundCalculator[TBase, TRaw, TPublic]:
-        """Compose another transform into this bound calculator."""
-        return BoundCalculator(
-            base=self.base,
-            scope=self.scope.with_transform(transform, revert=revert),
-            name=self.name,
-            record_policy=self.record_policy,
-            default_options=self.default_options,
-        )
-
-    def cleanup(self, ctx: ExecutionContext, handle: Any) -> None:
-        """Delegate transform cleanup to the wrapped base calculator when available."""
-        cleanup = getattr(self.base, "cleanup", None)
-        if cleanup is not None:
-            cleanup(ctx, handle)
-
-    def is_revertible(self, handle: Any) -> bool:
-        """Delegate transform revertibility checks to the wrapped base calculator."""
-        is_revertible = getattr(self.base, "is_revertible", None)
-        if is_revertible is not None:
-            return bool(is_revertible(handle))
-        return hasattr(handle, "revert")
 
 
 class CombinedCalculator(CalculatorBase[tuple[Unpack[Ts]], tuple[Unpack[Ts]]], Generic[Unpack[Ts]]):

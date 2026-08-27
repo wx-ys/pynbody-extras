@@ -173,15 +173,6 @@ class ResultQuery:
         resolved = ResultQuery.resolve_node(result, node)
         children = ResultQuery.children_of(result, resolved)
 
-        if (
-            resolved.calculator_type == "BoundCalculator"
-            and children
-            and children[0].label == resolved.label
-            and children[0].kind == resolved.kind
-        ):
-            base_node = children[0]
-            return ResultQuery.children_of(result, base_node) + children[1:]
-
         return children
 
     @staticmethod
