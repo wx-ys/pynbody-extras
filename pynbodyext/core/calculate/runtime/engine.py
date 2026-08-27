@@ -338,7 +338,7 @@ class EvalEngine:
         if not node.dependencies():
             return self._run_minimal(node, sim, options)
 
-        # Full light path: BoundCalculator, nested-calculator Param deps, etc.
+        # Full light path: nested-calculator Param deps, etc.
         ctx = ExecutionContext(sim=sim, sim_signature=(), run_id="", options=options, engine=self)
         work = NodeInput(sim_raw=sim, sim_current=sim)
         try:
@@ -396,7 +396,7 @@ class EvalEngine:
         :meth:`_execute_node_body_light` which bypasses ``node_scope``
         (skips per-node progress events and log-event appends).
 
-        Dependencies of *node* (e.g. child nodes for ``BoundCalculator``) are
+        Dependencies of *node* (e.g. scope filter/transform or child nodes) are
         still evaluated through the normal :meth:`evaluate` path so that
         filters and transforms work correctly.
         """
@@ -480,13 +480,6 @@ class EvalEngine:
         scope = getattr(node, "scope", None)
         if scope is None or scope.is_empty:
             return work
-        from pynbodyext.core.calculate.nodes.base import BoundCalculator
-
-        if isinstance(node, BoundCalculator):
-            # Legacy wrapper applies its own scope inside ``execute``; the engine
-            # must not double-apply it.
-            return work
-
         transform = scope.as_transform()
         if transform is not None:
             from pynbodyext.core.calculate.runtime.input import TransformResult

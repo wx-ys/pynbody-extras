@@ -454,7 +454,7 @@ class _Encoder:
     @staticmethod
     def encode_special(calculator: Any, path: str, inline_bytes: int) -> _Encoded | None:
         """Encode known special calculator types; returns None for unknown types."""
-        from pynbodyext.core.calculate.nodes.base import BoundCalculator, CombinedCalculator
+        from pynbodyext.core.calculate.nodes.base import CombinedCalculator
         from pynbodyext.core.calculate.nodes.expr import (
             CalculatorValueProperty,
             ConstantProperty,
@@ -467,12 +467,7 @@ class _Encoder:
         ts, ts_children = _Encoder.transform_state(calculator, inline_bytes, path)
         encoded: _Encoded | None = None
 
-        if isinstance(calculator, BoundCalculator):
-            base = _Encoder.encode_calculator_value(calculator.base, f"{path}.base", inline_bytes)
-            scope = _Encoder.encode_scope(calculator.scope, f"{path}.scope", inline_bytes)
-            encoded = _merge_encoded({"node": "bound", "base": base.value, "scope": scope.value}, [base, scope])
-
-        elif isinstance(calculator, CombinedCalculator):
+        if isinstance(calculator, CombinedCalculator):
             items = [
                 _Encoder.encode_calculator_value(item, f"{path}.items[{i}]", inline_bytes)
                 for i, item in enumerate(calculator.items)
@@ -669,13 +664,6 @@ class _Decoder:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def decode_bound(payload: dict[str, Any]) -> Any:
-        from pynbodyext.core.calculate.nodes.base import BoundCalculator
-
-        return BoundCalculator(
-            base=_Decoder.decode_value(payload["base"]), scope=_Decoder.decode_scope(payload["scope"])
-        )
-
     @staticmethod
     def decode_scoped(payload: dict[str, Any]) -> Any:
         """Decode a plain calculator wrapped with a scope (see ``calculator_to_signature``)."""
@@ -789,7 +777,6 @@ _Decoder._VALUE_DECODERS = {
     "unsupported": _Decoder.unsupported,
 }
 _Decoder._SPECIAL_DECODERS = {
-    "bound": _Decoder.decode_bound,
     "scoped": _Decoder.decode_scoped,
     "combined": _Decoder.decode_combined,
     "transform_chain": _Decoder.decode_transform_chain,
@@ -809,7 +796,7 @@ def calculator_to_signature(
     calculator: Any, *, inline_array_bytes: int = DEFAULT_INLINE_ARRAY_BYTES, _path: str = "calculator"
 ) -> CalculatorSignature:
     """Return a structured signature for a calculator graph."""
-    from pynbodyext.core.calculate.nodes.base import BoundCalculator, CalculatorBase
+    from pynbodyext.core.calculate.nodes.base import CalculatorBase
 
     if not isinstance(calculator, CalculatorBase):
         raise TypeError(f"expected CalculatorBase, got {type(calculator)!r}")
@@ -821,11 +808,10 @@ def calculator_to_signature(
         else:
             encoded = _Encoder.encode_generic(calculator, _path, inline_array_bytes)
 
-    # A non-empty scope on a plain calculator must be part of its identity so a
-    # scoped clone gets a different cache key than the unscoped one.  (The legacy
-    # BoundCalculator already encodes its scope as a "bound" node.)
+    # A non-empty scope on a calculator must be part of its identity so a scoped
+    # clone gets a different cache key than the unscoped one.
     scope_spec = getattr(calculator, "scope", None)
-    if scope_spec is not None and not scope_spec.is_empty and not isinstance(calculator, BoundCalculator):
+    if scope_spec is not None and not scope_spec.is_empty:
         scope_e = _Encoder.encode_scope(scope_spec, f"{_path}.scope", inline_array_bytes)
         encoded = _merge_encoded({"node": "scoped", "base": encoded.value, "scope": scope_e.value}, [encoded, scope_e])
 

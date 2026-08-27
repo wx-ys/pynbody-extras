@@ -1,6 +1,6 @@
 """Calculator node authoring primitives and role-specific node classes."""
 
-from .base import BoundCalculator, CalculatorBase, CombinedCalculator
+from .base import CalculatorBase, CombinedCalculator
 from .expr import ConstantProperty, LambdaProperty, OpProperty
 from .filters import AndFilter, FilterBase, NotFilter, OrFilter
 from .pipeline import Pipeline
@@ -11,7 +11,6 @@ from .transforms import TransformBase, TransformChain, TransformPlan, TransformS
 __all__ = [
     "CalculatorBase",
     "RuntimeCalculatorBase",
-    "BoundCalculator",
     "CombinedCalculator",
     "PropertyBase",
     "FilterBase",
