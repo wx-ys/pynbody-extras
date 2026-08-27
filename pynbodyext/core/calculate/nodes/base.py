@@ -1089,7 +1089,7 @@ class _CalculatorComposeMixin(Generic[TRaw, TPublic]):
         return CombinedCalculator(cast("CalculatorBase[Any, Any]", self), other)
 
 
-@dataclass_transform(field_specifiers=(Param,))
+@dataclass_transform(field_specifiers=(Param, Param.static))
 class CalculatorBase(
     _CalculatorSignatureMixin,
     _CalculatorGraphMixin,
@@ -1140,7 +1140,7 @@ class CalculatorBase(
     def dataclass(cls, target: None = None, **dataclass_kwargs: Any) -> Callable[[type[TCalc]], type[TCalc]]: ...
 
     @classmethod
-    @dataclass_transform(field_specifiers=(Param,))
+    @dataclass_transform(field_specifiers=(Param, Param.static))
     def dataclass(
         cls, target: type[TCalc] | None = None, **dataclass_kwargs: Any
     ) -> type[TCalc] | Callable[[type[TCalc]], type[TCalc]]:
