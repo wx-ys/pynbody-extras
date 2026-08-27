@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
     from pynbodyext.core.calculate.runtime.context import ExecutionContext
     from pynbodyext.core.calculate.runtime.input import NodeInput
+    from pynbodyext.util._type import UnitLike
 
 
 TBinNode = TypeVar("TBinNode", bound="_BinNodeBase")
@@ -93,8 +94,8 @@ class _BinNodeBase(CalculatorBase[BinNDResult, BinNDResult]):
 @CalculatorBase.dataclass
 class Bin1D(_BinNodeBase):
     prop: Param[Any]
-    vmin: Param[float | None] = Param(default=None)
-    vmax: Param[float | None] = Param(default=None)
+    vmin: Param[float | UnitLike | None] = Param(default=None)
+    vmax: Param[float | UnitLike | None] = Param(default=None)
     nbins: Param[int | None] = Param(default=None)
 
     mode: str = Param.static(default="linear", kw_only=False)

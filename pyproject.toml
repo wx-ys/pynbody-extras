@@ -159,6 +159,7 @@ convention = "numpy"
 # ======================================================================================
 [tool.mypy]
 python_version = "3.11"
+plugins = ["pynbodyext/_mypy_plugin.py"]
 
 ignore_missing_imports = true
 
