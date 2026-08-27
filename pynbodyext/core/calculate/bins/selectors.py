@@ -1,3 +1,5 @@
+"""Normalisation and validation of bin-index selectors."""
+
 from __future__ import annotations
 
 from collections.abc import Sequence

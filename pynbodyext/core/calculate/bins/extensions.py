@@ -1,3 +1,5 @@
+"""Registry of extendable derived properties and pipeline transforms."""
+
 from __future__ import annotations
 
 from collections import defaultdict

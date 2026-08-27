@@ -173,6 +173,12 @@ def register_pipeline_transform(
         A callable ``(np.ndarray) -> np.ndarray`` applied element-wise.
     overwrite:
         If ``False`` (default), raise :exc:`KeyError` if *name* is already registered.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> register_pipeline_transform("double", lambda a: a * 2)
+    >>> bins["mass.double.sum"]  # per-bin sum of doubled mass
     """
     PIPELINE_PARSER.register(name, func, overwrite=overwrite)
 

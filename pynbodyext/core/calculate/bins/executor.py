@@ -1,3 +1,5 @@
+"""Execution of :class:`BinND` into a binned result."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
