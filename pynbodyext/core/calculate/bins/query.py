@@ -402,13 +402,15 @@ class BinQueryService:
         )
 
     def compute_derived(self, spec: BinDerivedSpec) -> BinsArray:
-        owner = self._owner
-        values = spec.func(owner)
+        model = self._model
+        # Derived property callbacks operate on the data model; they reach the
+        # result-level read API (bins[...], .gas, .centers) through the model.
+        values = spec.func(model)
         result = values if isinstance(values, BinsArray) else self.wrap(values, name=spec.name)
-        if result.shape[: owner.ndim] != owner.shape_bins:
+        if result.shape[: model.ndim] != model.shape_bins:
             raise ValueError(
                 f"Derived query {spec.name!r} returned shape {result.shape!r}; "
-                f"leading dimensions must match the bin grid {owner.shape_bins!r}."
+                f"leading dimensions must match the bin grid {model.shape_bins!r}."
             )
         return result
 

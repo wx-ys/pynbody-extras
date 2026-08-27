@@ -11,10 +11,13 @@ if TYPE_CHECKING:
 
 
 class BinResultModel:
-    """Immutable-ish holder of the per-run binning data.
+    """Holder of the per-run binning data plus a read-only result view.
 
-    Holds no query/cache/geometry logic; services (``BinGeometry``,
-    ``BinQueryService``, ``BinSubresultService``) operate on it.
+    The raw fields are the source of truth for the data services
+    (``BinGeometry``, ``StatPipeline``, ``ApplyComposer``).  The result-level
+    read-only accessors (``__getitem__``, ``.gas``, ``.centers``, …) delegate to
+    the owning :class:`~.result.BinNDResult` so derived properties can operate on
+    the model without reaching into the facade.
     """
 
     def __init__(
@@ -30,6 +33,7 @@ class BinResultModel:
         calculator: Any,
         scope_signature: Any,
         parent: BinResultModel | None = None,
+        owner: Any = None,
     ) -> None:
         self.sim = sim
         self.source_sim = source_sim
@@ -43,6 +47,7 @@ class BinResultModel:
         self.calculator = calculator
         self.scope_signature = scope_signature
         self.parent = parent
+        self._owner = owner
 
     @property
     def is_root(self) -> bool:
@@ -66,3 +71,76 @@ class BinResultModel:
         if mask is None:
             return 0
         return int(np.count_nonzero(~mask))
+
+    # ------------------------------------------------------------------
+    # Result-level read-only accessors (delegate to the owning result)
+    # so derived properties can operate on the model.
+    # ------------------------------------------------------------------
+
+    @property
+    def owner(self) -> Any:
+        return self._owner
+
+    def _require_owner(self) -> Any:
+        if self._owner is None:
+            raise RuntimeError("BinResultModel is not bound to a BinNDResult.")
+        return self._owner
+
+    def __getitem__(self, key: str) -> Any:
+        return self._require_owner()._resolve_query(key)
+
+    @property
+    def axis(self) -> Any:
+        return self._require_owner().axis
+
+    @property
+    def centers(self) -> Any:
+        return self._require_owner().centers
+
+    @property
+    def mins(self) -> Any:
+        return self._require_owner().mins
+
+    @property
+    def maxs(self) -> Any:
+        return self._require_owner().maxs
+
+    @property
+    def widths(self) -> Any:
+        return self._require_owner().widths
+
+    @property
+    def edges(self) -> Any:
+        return self._require_owner().edges
+
+    def find_axis(self, aliases: set[str]) -> Any:
+        return self._require_owner().find_axis(aliases)
+
+    def multi_index_array(self) -> np.ndarray:
+        return self._require_owner().multi_index_array()
+
+    def _resolve_axis_measure(self, axis: Any) -> np.ndarray:
+        return self._require_owner()._resolve_axis_measure(axis)
+
+    def families(self) -> Any:
+        return self._require_owner().families()
+
+    @property
+    def gas(self) -> Any:
+        return self._require_owner().gas
+
+    @property
+    def dm(self) -> Any:
+        return self._require_owner().dm
+
+    @property
+    def star(self) -> Any:
+        return self._require_owner().star
+
+    @property
+    def g(self) -> Any:
+        return self._require_owner().g
+
+    @property
+    def s(self) -> Any:
+        return self._require_owner().s

@@ -114,6 +114,7 @@ class BinNDResult(BinPlotMixin):
             calculator=calculator,
             scope_signature=scope_signature,
             parent=parent._model if parent is not None else None,
+            owner=self,
         )
 
         self._diagnostics = BinsResultEngine()
@@ -606,10 +607,10 @@ def _bin_measure(bins: BinNDResult) -> np.ndarray:
 
 @BinNDResult.derived("count", scope="particles")
 def _count(bins: BinNDResult) -> np.ndarray:
-    valid_mask = bins._valid_mask
+    valid_mask = bins.valid_mask
     if not valid_mask.any():
         return np.zeros(bins.nbins, dtype=int)
-    return np.bincount(bins._particle_bin[valid_mask], minlength=bins.nbins).astype(int)
+    return np.bincount(bins.particle_bin[valid_mask], minlength=bins.nbins).astype(int)
 
 
 @BinNDResult.derived(
