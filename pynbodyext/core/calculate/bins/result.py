@@ -117,10 +117,10 @@ class BinNDResult(BinPlotMixin):
         )
 
         self._diagnostics = BinsResultEngine()
-        self._query_service = BinQueryService(self, self._diagnostics)
+        self._query_service = BinQueryService(self._model, self, self._diagnostics, extensions=type(self)._extensions)
         self._subresults = BinSubresultStore(self)
         self._measure_resolver = BinMeasureResolver()
-        self._geometry = BinGeometry(self, self._measure_resolver)
+        self._geometry = BinGeometry(self._model, self._measure_resolver)
 
         # Subscribe to global measure-type redefinitions (e.g.
         # BinAxis.register_measure_type(..., overwrite=True)) so that
@@ -354,6 +354,11 @@ class BinNDResult(BinPlotMixin):
         return self.get_subresult(sub, _cache_key=("family", family.name))
 
     def _resolve_query(self, key: str) -> BinsArray:
+        # Shared-scope queries (axis/geometry) are computed once on the root and
+        # reused by subresults; the service itself is model-pure.
+        scope = type(self)._extensions.query_scope(self, key)
+        if not self.is_root and scope in self._SHARED_SCOPES:
+            return self.root._resolve_query(key)
         return self._query_service.resolve(key)
 
     def multi_index_array(self) -> np.ndarray:
