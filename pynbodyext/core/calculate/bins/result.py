@@ -80,42 +80,65 @@ class BinNDResult(BinPlotMixin):
     def __init__(
         self,
         *,
-        sim: Any,
-        source_sim: Any,
-        axes: tuple[BinAxis, ...],
-        bin_data: np.ndarray,
-        bin_indptr: np.ndarray,
-        particle_bin: np.ndarray,
-        valid_mask: np.ndarray,
-        calculator: BinND,
+        model: BinResultModel | None = None,
+        sim: Any = None,
+        source_sim: Any = None,
+        axes: tuple[BinAxis, ...] | None = None,
+        bin_data: np.ndarray | None = None,
+        bin_indptr: np.ndarray | None = None,
+        particle_bin: np.ndarray | None = None,
+        valid_mask: np.ndarray | None = None,
+        calculator: BinND | None = None,
         scope_signature: Any = None,
         parent: BinNDResult | None = None,
     ) -> None:
-        self.sim = sim
-        self.source_sim = source_sim
-        self._axes = axes
-        self.shape_bins = tuple(axis.nbins for axis in axes)
-        self.ndim = len(axes)
-        self._bin_data = bin_data
-        self._bin_indptr = bin_indptr
-        self._particle_bin = particle_bin
-        self._valid_mask = valid_mask
-        self._calculator = calculator
-        self._scope_signature = scope_signature
-        self._parent = parent
-        self._model = BinResultModel(
-            sim=sim,
-            source_sim=source_sim,
-            axes=axes,
-            bin_data=bin_data,
-            bin_indptr=bin_indptr,
-            particle_bin=particle_bin,
-            valid_mask=valid_mask,
-            calculator=calculator,
-            scope_signature=scope_signature,
-            parent=parent._model if parent is not None else None,
-            owner=self,
-        )
+        if model is not None:
+            # Spawn-layer model-ification: the executor builds the model first
+            # and the façade wraps it (bind the owner back-reference here).
+            self._model = model
+            model._owner = self
+            self.sim = model.sim
+            self.source_sim = model.source_sim
+            self._axes = model.axes
+            self.shape_bins = model.shape_bins
+            self.ndim = model.ndim
+            self._bin_data = model.bin_data
+            self._bin_indptr = model.bin_indptr
+            self._particle_bin = model.particle_bin
+            self._valid_mask = model.valid_mask
+            self._calculator = model.calculator
+            self._scope_signature = model.scope_signature
+            self._parent = model.parent.owner if model.parent is not None else None
+        else:
+            assert sim is not None and axes is not None
+            assert bin_data is not None and bin_indptr is not None
+            assert particle_bin is not None and valid_mask is not None
+            assert calculator is not None
+            self.sim = sim
+            self.source_sim = source_sim
+            self._axes = axes
+            self.shape_bins = tuple(axis.nbins for axis in axes)
+            self.ndim = len(axes)
+            self._bin_data = bin_data
+            self._bin_indptr = bin_indptr
+            self._particle_bin = particle_bin
+            self._valid_mask = valid_mask
+            self._calculator = calculator
+            self._scope_signature = scope_signature
+            self._parent = parent
+            self._model = BinResultModel(
+                sim=sim,
+                source_sim=source_sim,
+                axes=axes,
+                bin_data=bin_data,
+                bin_indptr=bin_indptr,
+                particle_bin=particle_bin,
+                valid_mask=valid_mask,
+                calculator=calculator,
+                scope_signature=scope_signature,
+                parent=parent._model if parent is not None else None,
+                owner=self,
+            )
 
         self._diagnostics = BinsResultEngine()
         self._query_service = BinQueryService(self._model, self, self._diagnostics, extensions=type(self)._extensions)
@@ -158,7 +181,7 @@ class BinNDResult(BinPlotMixin):
 
     @property
     def unassigned_count(self) -> int:
-        return int(np.count_nonzero(~self._valid_mask))
+        return self._model.unassigned_count
 
     @property
     def count(self) -> BinsArray:
