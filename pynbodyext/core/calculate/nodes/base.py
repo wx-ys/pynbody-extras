@@ -1095,8 +1095,8 @@ class CalculatorBase(
     _CalculatorGraphMixin,
     _CalculatorLoggingMixin,
     _CalculatorDisplayMixin,
-    _CalculatorRunMixin,
-    _CalculatorComposeMixin,
+    _CalculatorRunMixin[TRaw, TPublic],
+    _CalculatorComposeMixin[TRaw, TPublic],
     Generic[TRaw, TPublic],
     ABC,
 ):
