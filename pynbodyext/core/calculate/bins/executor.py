@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from .axis_materializer import AxisMaterializer
+from .model import BinResultModel
 from .result import BinNDResult, SubBinNDResult
 
 if TYPE_CHECKING:
@@ -78,8 +79,7 @@ class BinExecutor:
         parent: BinNDResult | None = None,
     ) -> BinNDResult:
         assignment = self.assign_particles(axes, values, len(sim))
-        cls = BinNDResult if parent is None else SubBinNDResult
-        return cls(
+        model = BinResultModel(
             sim=sim,
             source_sim=sim if source_sim is None else source_sim,
             axes=axes,
@@ -89,8 +89,11 @@ class BinExecutor:
             valid_mask=assignment.valid_mask,
             calculator=self._calculator,
             scope_signature=scope_signature,
-            parent=parent,
+            parent=parent._model if parent is not None else None,
+            owner=None,
         )
+        cls = BinNDResult if parent is None else SubBinNDResult
+        return cls(model=model)
 
     def spawn_result(self, parent: BinNDResult, subset: Any) -> SubBinNDResult:
         values = tuple(
