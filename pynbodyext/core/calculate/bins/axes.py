@@ -1,3 +1,11 @@
+"""Bin axis definitions, edge-generation algorithms, and axis registries.
+
+This module provides the :class:`BinAxis` value object (per-axis bin edges,
+centers, widths, and physical measure), the :class:`BinAxisAccessor` used by
+``bins.axis[...]``, the built-in edge algorithms (:func:`register_bin_algorithm`,
+``BIN_ALGORITHMS``), and the extensible axis-property / measure registries.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -77,6 +85,34 @@ def register_bin_algorithm(name: str, func: BinAlgorithm, *, overwrite: bool = F
 def register_bin_algorithm(
     name: str, func: BinAlgorithm | None = None, *, overwrite: bool = False
 ) -> BinAlgorithm | Callable[[BinAlgorithm], BinAlgorithm]:
+    """Register a custom bin-edge algorithm.
+
+    The algorithm must be ``f(values, nbins, vmin, vmax) -> ndarray`` returning
+    ``nbins + 1`` strictly increasing edges.  Works as a decorator or as a direct
+    call.
+
+    Parameters
+    ----------
+    name : str
+        Key used by ``Bin1D(mode=...)``.
+    func : callable, optional
+        The algorithm.  Omit to use as a decorator.
+    overwrite : bool, default: False
+        Whether to replace an existing algorithm with the same name.
+
+    Returns
+    -------
+    callable
+        The algorithm (when called directly) or a decorator.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> @register_bin_algorithm("centroid_edges", overwrite=True)
+    ... def centroid_edges(values, nbins, vmin, vmax):
+    ...     return np.linspace(vmin, vmax, nbins + 1)
+    """
+
     def decorator(algorithm: BinAlgorithm) -> BinAlgorithm:
         if not overwrite and name in BIN_ALGORITHMS:
             raise KeyError(f"Bin algorithm {name!r} is already registered.")
@@ -113,12 +149,19 @@ def axis_matches(axis: BinAxis, names: set[str]) -> bool:
 class BinAxisAccessor:
     """Accessor returned by ``bins.axis`` for convenient axis lookup.
 
-    Supports attribute access by alias, string subscript, and integer subscript::
+    Supports attribute access by alias, string subscript, and integer subscript.
+    It also iterates over all axes and offers :meth:`set_axis_measure_type`.
 
-        bins.axis.r  # axis with alias "r"
-        bins.axis["r"]  # same
-        bins.axis[0]  # first axis
-        list(bins.axis)  # iterate over all axes
+    Examples
+    --------
+    >>> import pynbody
+    >>> sim = pynbody.new(dm=6)
+    >>> sim["r"] = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5]
+    >>> bins = Bin1D("r", vmin=0, vmax=6, nbins=3)(sim)
+    >>> bins.axis.r.centers.tolist()
+    [1.0, 3.0, 5.0]
+    >>> bins.axis["r"] is bins.axis[0]
+    True
     """
 
     def __init__(self, axes: tuple[BinAxis, ...], owner: Any = None) -> None:
@@ -199,6 +242,31 @@ def has_axes(*groups: set[str]) -> BinDerivedCondition:
 
 @dataclass(frozen=True)
 class BinAxis:
+    """A single binning axis (edges, centers, widths, and measure).
+
+    Parameters
+    ----------
+    alias : str
+        Short name used to look up the axis (e.g. ``"r"``).
+    prop : str, callable, or CalculatorBase
+        The source property/field used to assign particles.
+    mins, maxs : array-like
+        Lower/upper edge arrays; ``len(mins) == nbins``.
+    include_rightmost : bool, default: True
+        Whether the rightmost edge is inside the last bin.
+    units : str or UnitBase, optional
+        Units for the axis values.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> axis = BinAxis("r", "r", mins=np.array([0.0, 2.0, 4.0]), maxs=np.array([2.0, 4.0, 6.0]))
+    >>> axis.nbins
+    3
+    >>> axis.centers.tolist()
+    [1.0, 3.0, 5.0]
+    """
+
     alias: str
     prop: Any
     mins: np.ndarray

@@ -1,3 +1,5 @@
+"""Materialise :class:`BinAxis` objects from a simulation and a :class:`Bin1D` spec."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

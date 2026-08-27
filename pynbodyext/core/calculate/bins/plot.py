@@ -48,6 +48,18 @@ class BinPlotMixin:
             Matplotlib axes object.  A new figure/axes is created if ``None``.
         kind:
             Plot style: ``"plot"`` (default) or ``"scatter"``.
+
+        Returns
+        -------
+        list[Line2D] or PathCollection
+            The matplotlib artists returned by ``ax.plot`` / ``ax.scatter``.
+
+        Examples
+        --------
+        >>> bins.plot("r", "mass.sum")  # profile of mass.sum vs bin centers
+        >>> import matplotlib.pyplot as plt
+        >>> fig, ax = plt.subplots()
+        >>> lines = bins.plot("r", "density", ax=ax, kind="scatter")
         """
         import matplotlib.pyplot as plt
 
@@ -79,6 +91,22 @@ class BinPlotMixin:
             String query for the field to display.
         ax:
             Matplotlib axes object.  A new figure/axes is created if ``None``.
+
+        Returns
+        -------
+        AxesImage
+            The returned ``ax.imshow`` artist.
+
+        Raises
+        ------
+        ValueError
+            If the result does not have exactly two bin axes.
+
+        Examples
+        --------
+        >>> import matplotlib.pyplot as plt
+        >>> fig, ax = plt.subplots()
+        >>> im = bins2d.imshow("mass.sum", ax=ax)
         """
         import matplotlib.pyplot as plt
 

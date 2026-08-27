@@ -1,3 +1,12 @@
+"""Calculator nodes for 1-D / N-D binning.
+
+This module defines :class:`Bin1D` (a single binning axis) and :class:`BinND`
+(a Cartesian product of :class:`Bin1D` axes).  They are :class:`CalculatorBase`
+subclasses, so they compose with the rest of the calculator framework via
+``@`` (join axes), ``with_active``, ``.run``/``.__call__``, and the scoped
+transform/filter helpers.
+"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar, TypeVar, cast
@@ -93,6 +102,49 @@ class _BinNodeBase(CalculatorBase[BinNDResult, BinNDResult]):
 
 @CalculatorBase.dataclass
 class Bin1D(_BinNodeBase):
+    """A single binning axis.
+
+    Parameters
+    ----------
+    prop : str, callable, or CalculatorBase
+        Field name (or callable / calculator) whose values are binned.
+    vmin, vmax : float or str, optional
+        Lower/upper bound, optionally a unit string such as ``"30 kpc"``.
+    nbins : int, optional
+        Number of bins.  Ignored when ``edges`` or ``lows``/``highs`` are given.
+    mode : {"linear", "lin", "log", "equaln", "quantile"}, default: "linear"
+        Edge-generation algorithm for the ``vmin``/``vmax``/``nbins`` path.
+    edges : array-like, optional
+        Explicit bin edges (overrides ``vmin``/``vmax``/``nbins``).
+    lows, highs : array-like, optional
+        Explicit lower/upper bounds per bin (overrides ``vmin``/``vmax``/``nbins``).
+    alias : str, optional
+        Short alias used by ``bins.axis.<alias>`` and dictionaries.
+    include_rightmost : bool, default: True
+        Whether the rightmost edge is included in the last bin.
+    out_of_range : {"drop"}, default: "drop"
+        How out-of-range particles are handled.
+    units : str or UnitBase, optional
+        Units attached to the axis values.
+
+    Examples
+    --------
+    >>> import pynbody
+    >>> sim = pynbody.new(dm=6)
+    >>> sim["r"] = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5]
+    >>> sim["mass"] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+    >>> bins = Bin1D("r", vmin=0, vmax=6, nbins=3)(sim)
+    >>> bins["count"].tolist()
+    [2, 2, 2]
+    >>> bins["mass.sum"].tolist()
+    [3.0, 7.0, 11.0]
+
+    Bins can also be constructed from explicit edges or unit ranges::
+
+    >>> bins = Bin1D("r", edges=[0, 2, 4, 6])(sim)
+    >>> bins = Bin1D("r", vmin=0, vmax="30 kpc", nbins=10)(sim)
+    """
+
     prop: Param[Any]
     vmin: Param[float | UnitLike | None] = Param(default=None)
     vmax: Param[float | UnitLike | None] = Param(default=None)
@@ -127,6 +179,29 @@ class Bin1D(_BinNodeBase):
 
 @CalculatorBase.dataclass
 class BinND(_BinNodeBase):
+    """An N-dimensional binned result from a product of :class:`Bin1D` axes.
+
+    Usually created with the ``@`` operator rather than directly::
+
+        axes = Bin1D("x", vmin=0, vmax=6, nbins=3) @ Bin1D("y", vmin=0, vmax=3, nbins=3)
+
+    Parameters
+    ----------
+    axes_specs : tuple of Bin1D
+        The per-axis specifications, in C order (last axis varies fastest).
+
+    Examples
+    --------
+    >>> import pynbody
+    >>> sim = pynbody.new(dm=6)
+    >>> sim["x"] = [0, 1, 2, 3, 4, 5]
+    >>> sim["y"] = [0, 0, 1, 1, 2, 2]
+    >>> bins = Bin1D("x", vmin=0, vmax=6, nbins=3) @ Bin1D("y", vmin=0, vmax=3, nbins=3)
+    >>> result = bins(sim)
+    >>> result.shape_bins
+    (3, 3)
+    """
+
     axes_specs: tuple[Bin1D, ...]
 
     def __post_init__(self) -> None:

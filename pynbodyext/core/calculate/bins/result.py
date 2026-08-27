@@ -1,3 +1,13 @@
+"""Binned-result objects and derived properties.
+
+This module defines :class:`BinNDResult` (and its sub-result :class:`SubBinNDResult`),
+the object returned by :class:`~.nodes.Bin1D`/:class:`~.nodes.BinND`.  It exposes
+string queries (``bins["mass.sum"]``), pipeline-statistics access (``bins.stat``),
+per-bin :meth:`~BinNDResult.apply`, geometry helpers (``centers``/``measure``/``axis``),
+family sub-results (``gas``/``dm``/``star``), and the derived-property registry
+(``BinNDResult.derived``).
+"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar, overload
@@ -69,6 +79,41 @@ class _CSRBinsView:
 
 
 class BinNDResult(BinPlotMixin):
+    """A binned (1-D / N-D) result over a simulation snapshot.
+
+    Returned by calling :class:`~.nodes.Bin1D` or :class:`~.nodes.BinND` on a
+    simulation, or by :meth:`run`.  Supports string queries to compute per-bin
+    quantities, family/mask sub-results, and axis geometry.
+
+    Examples
+    --------
+    >>> import pynbody
+    >>> sim = pynbody.new(dm=6)
+    >>> sim["r"] = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5]
+    >>> sim["mass"] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+    >>> bins = Bin1D("r", vmin=0, vmax=6, nbins=3)(sim)
+    >>> bins.shape_bins
+    (3,)
+    >>> bins["count"].tolist()
+    [2, 2, 2]
+    >>> bins["mass.sum"].tolist()
+    [3.0, 7.0, 11.0]
+    >>> bins.centers.tolist()
+    [1.0, 3.0, 5.0]
+
+    Sub-results are selected with a bool mask or family::
+
+    >>> mask = sim["r"] > 3.0
+    >>> sub = bins[mask]
+    >>> sub["count"].tolist()
+    [0, 0, 2]
+
+    A query computes a per-bin statistic against the axis measure::
+
+    >>> bins["density"].shape_bins
+    (3,)
+    """
+
     _SHARED_SCOPES: ClassVar[set[str]] = {"axis", "geometry"}
     _extensions: ClassVar[BinExtensionRegistry] = BIN_RESULT_EXTENSIONS
     _model: BinResultModel
@@ -320,6 +365,23 @@ class BinNDResult(BinPlotMixin):
     @overload
     def __getitem__(self, key: CalculatorBase) -> BinsArray: ...
     def __getitem__(self, key: Any) -> SubBinNDResult | BinsArray:
+        """Resolve a per-bin query or a sub-result selector.
+
+        String keys compute per-bin quantities (pipeline statistics, derived
+        properties, geometry, or density).  Non-string keys that are a bool mask,
+        pynbody :class:`Filter`, or :class:`Family` return a
+        :class:`SubBinNDResult`.  Callables/calculators are evaluated per-bin via
+        :meth:`apply`.
+
+        Examples
+        --------
+        >>> bins["count"]  # per-bin particle counts -> BinsArray
+        >>> bins["mass.sum"]  # per-bin mass -> BinsArray
+        >>> bins["density"]  # per-bin mass density -> BinsArray
+        >>> mask = sim["r"] > 3.0
+        >>> sub = bins[mask]  # SubBinNDResult over a particle subset
+        >>> bins["vr.mean@mass"]  # mass-weighted per-bin mean of vr
+        """
         if isinstance(key, str):
             # Axis properties like "r.center" must be accessed via bins.axis("r").center
             # String queries only handle: geometry/derived properties and pipeline stat queries
@@ -349,6 +411,14 @@ class BinNDResult(BinPlotMixin):
 
     @property
     def gas(self) -> SubBinNDResult:
+        """Sub-result over the ``gas`` family.
+
+        Examples
+        --------
+        >>> gas = bins.gas
+        >>> gas["count"].tolist()
+        [2, 0, 0]
+        """
         return self._family_subresult("gas")
 
     @property
@@ -389,6 +459,28 @@ class BinNDResult(BinPlotMixin):
         return self._geometry.multi_index_array()
 
     def find_axis(self, aliases: set[str]) -> BinAxis:
+        """Fetch an axis by a set of accepted aliases / prop names.
+
+        Parameters
+        ----------
+        aliases : set[str]
+            Accepted alias or prop strings for the desired axis.
+
+        Returns
+        -------
+        BinAxis
+            The matching axis.
+
+        Raises
+        ------
+        KeyError
+            If no axis matches ``aliases``.
+
+        Examples
+        --------
+        >>> bins.find_axis({"r"}).centers.tolist()
+        [1.0, 3.0, 5.0]
+        """
         return self._geometry.find_axis(aliases)
 
     def _stat_pipeline(
@@ -412,11 +504,29 @@ class BinNDResult(BinPlotMixin):
         """Explicitly compute a per-bin statistic.
 
         Equivalent to ``bins["field.stat"]`` but accepts optional transforms and
-        weight.  Example::
+        weight.
 
-            bins.stat_explicit("mass", "sum")
-            bins.stat_explicit("vz", "mean", transforms=["abs"])
-            bins.stat_explicit("mass", "mean", weight="mass")
+        Parameters
+        ----------
+        field : str
+            Simulation field name.
+        statistic : str
+            Statistic name (``"sum"``, ``"mean"``, ``"median"``, ``"p16"``, ...).
+        weight : str or callable, optional
+            Optional per-particle weight field / callable.
+        transforms : list[str], optional
+            Optional element-wise transforms (``"abs"``, ``"log"``, ...).
+
+        Returns
+        -------
+        BinsArray
+            The per-bin statistic.
+
+        Examples
+        --------
+        >>> bins.stat_explicit("mass", "sum")
+        >>> bins.stat_explicit("vz", "mean", transforms=["abs"])
+        >>> bins.stat_explicit("mass", "mean", weight="mass")
         """
         return self._query_service.stat_explicit(field, statistic, weight=weight, transforms=transforms)
 
@@ -447,6 +557,16 @@ class BinNDResult(BinPlotMixin):
             path bypasses the per-bin loop entirely and is much faster for large grids.
 
             Signature: ``query(sim, particle_bin) -> np.ndarray``
+
+        Returns
+        -------
+        BinsArray
+            The per-bin result, one row/entry per bin.
+
+        Examples
+        --------
+        >>> bins.apply(lambda sub: sub["vz"].mean())  # per-bin mean of vz
+        >>> bins.apply(lambda sim, pb: np.bincount(pb, minlength=bins.nbins), vectorized=True)  # fast vectorized count
         """
         return self._query_service.apply(query, name=name, empty=empty, vectorized=vectorized)
 
@@ -485,6 +605,13 @@ class BinNDResult(BinPlotMixin):
             :meth:`BinAxis.register_measure_type`.  Built-in types include
             ``"spherical_shell"``, ``"annulus"``, and ``"linear"``.
             Pass ``None`` to clear a previously set override.
+
+        Examples
+        --------
+        >>> bins.set_axis_measure_type("r", "linear")  # bin widths instead of shell volume
+        >>> bins.set_axis_measure_type("r", None)  # revert to the default measure
+        >>> bins["measure"].shape_bins
+        (3,)
         """
         from .axes import _AXIS_MEASURE_TYPE_REGISTRY as _types
 
@@ -578,6 +705,36 @@ class BinNDResult(BinPlotMixin):
         condition: BinDerivedCondition | None = None,
         overwrite: bool = False,
     ) -> Any:
+        """Register a derived per-bin property.
+
+        The decorated function receives the :class:`BinNDResult` (or its data
+        model) and returns a per-bin array/``BinsArray`` whose leading dimensions
+        match the bin grid.  A ``condition`` can gate availability per result
+        (e.g. ``has_axis({"x"})``).
+
+        Parameters
+        ----------
+        fn : callable or str, optional
+            The function (or its name when used as a factory).
+        name : str, optional
+            Registration name (defaults to ``fn.__name__``).
+        scope : {"derived", "geometry", "particles"}, default: "derived"
+            Query scope; ``geometry``/``axis`` results are shared with sub-results.
+        condition : callable, optional
+            ``lambda result -> bool`` gating availability.
+        overwrite : bool, default: False
+            Whether to replace an existing property with the same name.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> @Bin1D.derived("x_span", condition=has_axis({"x"}), overwrite=True)
+        ... def x_span(result):
+        ...     axis = result.find_axis({"x"})
+        ...     return np.full(result.nbins, float(axis.maxs[-1] - axis.mins[0]))
+        >>> "x_span" in Bin1D("x", vmin=0, vmax=6, nbins=3)(sim).keys()
+        True
+        """
         return cls._extensions.register_derived(
             cls, fn, name=name, scope=scope, condition=condition, overwrite=overwrite
         )
