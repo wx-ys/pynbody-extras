@@ -367,7 +367,7 @@ class BinQueryService:
         provider = self._provider
         scope = self._extensions.query_scope(provider, key)
         if not provider.is_root and scope in provider._SHARED_SCOPES:
-            return provider.root._query_engine.resolve(key)
+            return provider.root._query_service.resolve(key)
 
         parsed = self._extensions.parse_pipeline_key(key)
         if parsed is not None:
