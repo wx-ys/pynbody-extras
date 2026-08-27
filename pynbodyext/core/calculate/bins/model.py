@@ -9,6 +9,7 @@ import numpy as np
 if TYPE_CHECKING:
     from .arrays import BinsArray
     from .axes import BinAxis, BinAxisAccessor
+    from .result import BinNDResult
 
 
 class BinResultModel:
@@ -34,7 +35,7 @@ class BinResultModel:
         calculator: Any,
         scope_signature: Any,
         parent: BinResultModel | None = None,
-        owner: Any = None,
+        owner: BinNDResult | None = None,
     ) -> None:
         self.sim = sim
         self.source_sim = source_sim
@@ -79,10 +80,10 @@ class BinResultModel:
     # ------------------------------------------------------------------
 
     @property
-    def owner(self) -> Any:
+    def owner(self) -> BinNDResult | None:
         return self._owner
 
-    def _require_owner(self) -> Any:
+    def _require_owner(self) -> BinNDResult:
         if self._owner is None:
             raise RuntimeError("BinResultModel is not bound to a BinNDResult.")
         return self._owner
