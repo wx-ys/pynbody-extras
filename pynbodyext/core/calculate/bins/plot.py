@@ -3,6 +3,7 @@
 Extracted from result.py to reduce the size of the god class.
 ``BinNDResult`` inherits from :class:`BinPlotMixin`; no public API changes.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -34,15 +35,7 @@ class _BinQueryable(Protocol):
 class BinPlotMixin:
     """Provides ``plot`` and ``imshow`` methods for :class:`~.result.BinNDResult`."""
 
-    def plot(
-        self: _BinQueryable,
-        x: str,
-        y: str,
-        ax: Any = None,
-        *,
-        kind: str | None = None,
-        **kwargs: Any,
-    ) -> Any:
+    def plot(self: _BinQueryable, x: str, y: str, ax: Any = None, *, kind: str | None = None, **kwargs: Any) -> Any:
         """Plot a 1-D profile.
 
         Parameters
@@ -55,6 +48,18 @@ class BinPlotMixin:
             Matplotlib axes object.  A new figure/axes is created if ``None``.
         kind:
             Plot style: ``"plot"`` (default) or ``"scatter"``.
+
+        Returns
+        -------
+        list[Line2D] or PathCollection
+            The matplotlib artists returned by ``ax.plot`` / ``ax.scatter``.
+
+        Examples
+        --------
+        >>> bins.plot("r", "mass.sum")  # profile of mass.sum vs bin centers
+        >>> import matplotlib.pyplot as plt
+        >>> fig, ax = plt.subplots()
+        >>> lines = bins.plot("r", "density", ax=ax, kind="scatter")
         """
         import matplotlib.pyplot as plt
 
@@ -72,12 +77,7 @@ class BinPlotMixin:
             return ax.plot(x_values, y_arr, **kwargs)
         raise ValueError(f"Unknown plot kind {plot_kind!r}; use 'plot' or 'scatter'.")
 
-    def imshow(
-        self: _BinQueryable,
-        field: str,
-        ax: Any = None,
-        **kwargs: Any,
-    ) -> Any:
+    def imshow(self: _BinQueryable, field: str, ax: Any = None, **kwargs: Any) -> Any:
         """Show a 2-D bin grid as an image.
 
         Requires exactly two axes.  The first axis maps to the x-direction and
@@ -91,13 +91,29 @@ class BinPlotMixin:
             String query for the field to display.
         ax:
             Matplotlib axes object.  A new figure/axes is created if ``None``.
+
+        Returns
+        -------
+        AxesImage
+            The returned ``ax.imshow`` artist.
+
+        Raises
+        ------
+        ValueError
+            If the result does not have exactly two bin axes.
+
+        Examples
+        --------
+        >>> import matplotlib.pyplot as plt
+        >>> fig, ax = plt.subplots()
+        >>> im = bins2d.imshow("mass.sum", ax=ax)
         """
         import matplotlib.pyplot as plt
 
         if self.ndim != 2:
             raise ValueError("imshow requires exactly 2 bin axes.")
         if ax is None:
-            _, ax = plt.subplots(figsize = kwargs.pop("figsize", (5, 5)))
+            _, ax = plt.subplots(figsize=kwargs.pop("figsize", (5, 5)))
 
         grid = np.asarray(self[field]).reshape(self.shape_bins)
         return ax.imshow(grid.T, origin="lower", aspect="auto", extent=self.axis.extent, **kwargs)

@@ -1,3 +1,5 @@
+"""Cache and spawning of :class:`SubBinNDResult` sub-results."""
+
 from __future__ import annotations
 
 import hashlib

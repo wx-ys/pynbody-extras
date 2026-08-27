@@ -52,7 +52,8 @@ class ResultQuery:
             return [
                 node
                 for node in result.nodes.values()
-                if query in {
+                if query
+                in {
                     node.name,
                     node.display_name,
                     node.calculator_type,
@@ -124,8 +125,7 @@ class ResultQuery:
             return None
         if len(parents) != 1:
             raise ValueError(
-                f"Node {resolved.node_id!r} has {len(parents)} parents; "
-                "use parents_of() for shared dependencies."
+                f"Node {resolved.node_id!r} has {len(parents)} parents; use parents_of() for shared dependencies."
             )
         return parents[0]
 
@@ -172,15 +172,6 @@ class ResultQuery:
     def display_children_of(result: Result[Any], node: str | ResultNode) -> list[ResultNode]:
         resolved = ResultQuery.resolve_node(result, node)
         children = ResultQuery.children_of(result, resolved)
-
-        if (
-            resolved.calculator_type == "BoundCalculator"
-            and children
-            and children[0].label == resolved.label
-            and children[0].kind == resolved.kind
-        ):
-            base_node = children[0]
-            return ResultQuery.children_of(result, base_node) + children[1:]
 
         return children
 
@@ -288,11 +279,7 @@ class ResultQuery:
 
     @staticmethod
     def _visible_tree_nodes(
-        result: Result[Any],
-        start: ResultNode,
-        *,
-        max_depth: int | None = None,
-        max_children: int | None = None,
+        result: Result[Any], start: ResultNode, *, max_depth: int | None = None, max_children: int | None = None
     ) -> tuple[list[ResultNode], int]:
         visible: list[ResultNode] = []
         hidden_ids: set[str] = set()
@@ -341,10 +328,7 @@ class ResultQuery:
 
     @staticmethod
     def _cache_suffix(
-        node: ResultNode,
-        cache_events: dict[str, dict[str, int]],
-        *,
-        hit_occurrence: bool = False,
+        node: ResultNode, cache_events: dict[str, dict[str, int]], *, hit_occurrence: bool = False
     ) -> str:
         if hit_occurrence:
             return "hit"
@@ -419,10 +403,7 @@ class ResultQuery:
 
         if include_observer:
             access_text = format_observation_access(
-                result.observation_of(node),
-                read_items=3,
-                dirty_items=3,
-                delete_items=2,
+                result.observation_of(node), read_items=3, dirty_items=3, delete_items=2
             )
             if access_text:
                 parts.append(access_text)

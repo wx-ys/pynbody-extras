@@ -1,9 +1,14 @@
+"""The :class:`BinsArray` per-bin result array (a :class:`SimArray` subclass)."""
+
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from pynbody.array import SimArray
+
+if TYPE_CHECKING:
+    from .result import BinNDResult
 
 
 class BinsArray(SimArray):
@@ -14,11 +19,26 @@ class BinsArray(SimArray):
     available via ``np.asarray(arr).ravel()``.
 
     Use :meth:`grid` or :meth:`reshape_bins` for an explicit ND view.
+
+    Examples
+    --------
+    >>> import pynbody
+    >>> sim = pynbody.new(dm=6)
+    >>> sim["r"] = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5]
+    >>> sim["mass"] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+    >>> bins = Bin1D("r", vmin=0, vmax=6, nbins=3)(sim)
+    >>> mass_sum = bins["mass.sum"]
+    >>> mass_sum.shape_bins
+    (3,)
+    >>> mass_sum.axis_aliases
+    ('r',)
+    >>> mass_sum.grid.tolist()
+    [3.0, 7.0, 11.0]
     """
 
     __slots__ = ["_bins", "_name", "_field", "_mode", "_shape_bins", "_axis_aliases", "_provenance"]
 
-    _bins: Any
+    _bins: Any  # set by __new__; kept Any for numpy __array_finalize__ quirks
     _name: str | None
     _field: str | None
     _mode: str | None
@@ -28,7 +48,7 @@ class BinsArray(SimArray):
 
     def __new__(
         cls,
-        bins: Any,
+        bins: BinNDResult,
         values: Any,
         *,
         name: str | None = None,
@@ -76,7 +96,7 @@ class BinsArray(SimArray):
         self._provenance = getattr(obj, "_provenance", {})
 
     @property
-    def bins(self) -> Any:
+    def bins(self) -> BinNDResult:
         return self._bins
 
     @property
@@ -111,10 +131,69 @@ class BinsArray(SimArray):
 
     @property
     def grid(self) -> np.ndarray:
+        """Return the values reshaped to the N-D bin grid."""
         return np.asarray(self).reshape(self.shape_bins)
 
     def reshape_bins(self, copy: bool = False) -> np.ndarray:
+        """Return a view (or a copy when ``copy=True``) reshaped to the bin grid.
+
+        Parameters
+        ----------
+        copy : bool, default: False
+            Whether to return a copy.
+
+        Returns
+        -------
+        np.ndarray
+            The values reshaped to ``self.shape_bins``.
+
+        Examples
+        --------
+        >>> mass_sum.reshape_bins()
+        array([3.,  7., 11.])
+        """
         arr = np.asarray(self)
         if copy:
             arr = arr.copy()
         return arr.reshape(self.shape_bins)
+
+    def plot(self, ax: Any = None, **kwargs: Any) -> Any:
+        """Plot this 1-D per-bin array against the first axis's bin centers.
+
+        Parameters
+        ----------
+        ax:
+            Matplotlib axes object.  A new figure/axes is created if ``None``.
+        **kwargs:
+            Extra keyword arguments forwarded to :meth:`matplotlib.axes.Axes.plot`.
+
+        Returns
+        -------
+        list[Line2D]
+            The line objects returned by ``ax.plot`` (one line for a 1-D array).
+
+        Raises
+        ------
+        ValueError
+            If the owning result is not one-dimensional.
+
+        Examples
+        --------
+        >>> mass_sum.plot()  # new figure
+        >>> import matplotlib.pyplot as plt
+        >>> fig, ax = plt.subplots()
+        >>> lines = mass_sum.plot(ax=ax)
+        >>> len(lines)
+        1
+        """
+        import matplotlib.pyplot as plt
+
+        bins = self._bins
+        if bins is None or bins.ndim != 1:
+            raise ValueError("BinsArray.plot requires a one-dimensional bin result.")
+
+        if ax is None:
+            _, ax = plt.subplots()
+        x = np.asarray(bins.centers)
+        y = np.asarray(self)
+        return ax.plot(x, y, **kwargs)

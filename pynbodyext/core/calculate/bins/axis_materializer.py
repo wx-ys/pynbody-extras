@@ -1,3 +1,5 @@
+"""Materialise :class:`BinAxis` objects from a simulation and a :class:`Bin1D` spec."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,17 +9,14 @@ import numpy as np
 from pynbody import units as pynbody_units
 from pynbody.array import SimArray
 
-from .axes import (
-    BIN_ALGORITHMS,
-    BinAxis,
-    _as_1d_array,
-)
+from .axes import BIN_ALGORITHMS, BinAxis, _as_1d_array
 
 if TYPE_CHECKING:
     from pynbodyext.core.calculate.runtime.context import ExecutionContext
     from pynbodyext.core.calculate.runtime.input import NodeInput
 
     from .nodes import Bin1D
+
 
 def _finite_minmax(values: Any) -> tuple[float, float]:
     arr = np.asarray(values)
@@ -41,7 +40,7 @@ def _coerce_bound_value(value: Any, reference_values: Any, sim: Any) -> float:
             context = sim.conversion_context() if hasattr(sim, "conversion_context") else {}
             return float(value.in_units(reference_values.units, **context))
         return float(SimArray(1.0).in_units(value))
-    if isinstance(value, SimArray):
+    if getattr(value, "units", None) is not None:
         if hasattr(reference_values, "units"):
             context = sim.conversion_context() if hasattr(sim, "conversion_context") else {}
             return float(value.in_units(reference_values.units, **context))
@@ -50,12 +49,21 @@ def _coerce_bound_value(value: Any, reference_values: Any, sim: Any) -> float:
 
 
 def _coerce_edges_like(edges: Any, source: Any) -> Any:
-    if isinstance(source, SimArray) and not isinstance(edges, SimArray):
+    # Recognise any array carrying physical units, not just SimArray.  A
+    # sub-snapshot field access (e.g. ``halo["rxy"]``) returns an
+    # ``IndexedSimArray`` — a distinct class that is *not* a ``SimArray``
+    # subclass but does expose ``.units`` / ``.sim``.  Only checking
+    # ``isinstance(source, SimArray)`` silently dropped those units, so the
+    # bin edges became a plain ndarray and the derived measure/density lost
+    # their dimensionality.
+    if hasattr(source, "units") and getattr(source, "units", None) is not None and not isinstance(edges, SimArray):
         out = SimArray(edges)
         out.units = source.units
-        out.sim = source.sim
+        if hasattr(source, "sim") and source.sim is not None:
+            out.sim = source.sim
         return out
     return edges
+
 
 def infer_alias(prop: Any, alias: str | None, index: int = 0) -> str:
     if alias is not None:
@@ -65,7 +73,9 @@ def infer_alias(prop: Any, alias: str | None, index: int = 0) -> str:
     return f"dim{index}"
 
 
-def resolve_axis_values(prop: Any, sim: Any, ctx: ExecutionContext | None = None, input: NodeInput | None = None) -> Any:
+def resolve_axis_values(
+    prop: Any, sim: Any, ctx: ExecutionContext | None = None, input: NodeInput | None = None
+) -> Any:
     from pynbodyext.core.calculate.nodes.base import CalculatorBase
 
     if isinstance(prop, str):
@@ -101,7 +111,7 @@ class AxisMaterializer:
         if spec.edges is not None:
             return self._materialize_from_edges(spec, sim, source, ctx=ctx, input=input)
 
-        if spec.lows is not None or spec.highs is not None: #  type: ignore[unreachable]
+        if spec.lows is not None or spec.highs is not None:  #  type: ignore[unreachable]
             return self._materialize_from_bounds(spec, sim, source, ctx=ctx, input=input)
 
         return self._materialize_generated(spec, sim, source, ctx=ctx, input=input)
@@ -125,13 +135,7 @@ class AxisMaterializer:
         return ResolvedAxisSource(alias=alias, values=values, values_arr=values_arr)
 
     def _resolve_spec_value(
-        self,
-        spec: Bin1D,
-        name: str,
-        *,
-        sim: Any,
-        ctx: ExecutionContext | None,
-        input: NodeInput | None,
+        self, spec: Bin1D, name: str, *, sim: Any, ctx: ExecutionContext | None, input: NodeInput | None
     ) -> Any:
         if ctx is not None and input is not None and spec.has_dynamic_param(name):
             return spec.resolve_dynamic_param(ctx, input, name)
@@ -139,14 +143,7 @@ class AxisMaterializer:
             return spec.resolve_param_for_sim(sim, name)
         return getattr(spec, name)
 
-    def _build_axis(
-        self,
-        spec: Bin1D,
-        source: ResolvedAxisSource,
-        *,
-        mins: Any,
-        maxs: Any,
-    ) -> tuple[BinAxis, Any]:
+    def _build_axis(self, spec: Bin1D, source: ResolvedAxisSource, *, mins: Any, maxs: Any) -> tuple[BinAxis, Any]:
         return (
             BinAxis(
                 alias=source.alias,
@@ -170,7 +167,7 @@ class AxisMaterializer:
     ) -> tuple[BinAxis, Any]:
         if any(value is not None for value in (spec.vmin, spec.vmax, spec.nbins)):
             raise ValueError("edges cannot be mixed with vmin/vmax/nbins.")
-        if spec.lows is not None or spec.highs is not None: # type: ignore[unreachable]
+        if spec.lows is not None or spec.highs is not None:  # type: ignore[unreachable]
             raise ValueError("edges cannot be mixed with lows/highs.")
 
         edges = self._resolve_spec_value(spec, "edges", sim=sim, ctx=ctx, input=input)  # type: ignore[unreachable]

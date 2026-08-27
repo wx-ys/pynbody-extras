@@ -1,3 +1,13 @@
+"""Binned-result objects and derived properties.
+
+This module defines :class:`BinNDResult` (and its sub-result :class:`SubBinNDResult`),
+the object returned by :class:`~.nodes.Bin1D`/:class:`~.nodes.BinND`.  It exposes
+string queries (``bins["mass.sum"]``), pipeline-statistics access (``bins.stat``),
+per-bin :meth:`~BinNDResult.apply`, geometry helpers (``centers``/``measure``/``axis``),
+family sub-results (``gas``/``dm``/``star``), and the derived-property registry
+(``BinNDResult.derived``).
+"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar, overload
@@ -10,10 +20,12 @@ from pynbodyext.core.calculate.nodes.base import CalculatorBase
 from pynbodyext.core.calculate.nodes.filters import FilterBase
 
 from .accessors import BinParticlesAccessor
-from .axes import BinAxisAccessor, BinDerivedCondition, BinDerivedFunc, axis_matches
+from .axes import BinAxisAccessor, BinDerivedCondition, BinDerivedFunc, BinMeasureResolver, axis_matches
 from .extensions import BIN_RESULT_EXTENSIONS, BinExtensionRegistry
+from .geometry import BinGeometry
+from .model import BinResultModel
 from .plot import BinPlotMixin
-from .query_engine import BinQueryEngine
+from .query import BinQueryService
 from .selectors import is_int_sequence
 from .statistics import BinNDStatAccessor
 from .subresults import BinSubresultStore
@@ -67,54 +79,124 @@ class _CSRBinsView:
 
 
 class BinNDResult(BinPlotMixin):
+    """A binned (1-D / N-D) result over a simulation snapshot.
+
+    Returned by calling :class:`~.nodes.Bin1D` or :class:`~.nodes.BinND` on a
+    simulation, or by :meth:`run`.  Supports string queries to compute per-bin
+    quantities, family/mask sub-results, and axis geometry.
+
+    Examples
+    --------
+    >>> import pynbody
+    >>> sim = pynbody.new(dm=6)
+    >>> sim["r"] = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5]
+    >>> sim["mass"] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+    >>> bins = Bin1D("r", vmin=0, vmax=6, nbins=3)(sim)
+    >>> bins.shape_bins
+    (3,)
+    >>> bins["count"].tolist()
+    [2, 2, 2]
+    >>> bins["mass.sum"].tolist()
+    [3.0, 7.0, 11.0]
+    >>> bins.centers.tolist()
+    [1.0, 3.0, 5.0]
+
+    Sub-results are selected with a bool mask or family::
+
+    >>> mask = sim["r"] > 3.0
+    >>> sub = bins[mask]
+    >>> sub["count"].tolist()
+    [0, 0, 2]
+
+    A query computes a per-bin statistic against the axis measure::
+
+    >>> bins["density"].shape_bins
+    (3,)
+    """
+
     _SHARED_SCOPES: ClassVar[set[str]] = {"axis", "geometry"}
     _extensions: ClassVar[BinExtensionRegistry] = BIN_RESULT_EXTENSIONS
+    _model: BinResultModel
+    _query_service: BinQueryService
+    _geometry: BinGeometry
+    _measure_resolver: BinMeasureResolver
+    _subresults: BinSubresultStore
 
     def __init__(
         self,
         *,
-        sim: Any,
-        source_sim: Any,
-        axes: tuple[BinAxis, ...],
-        bin_data: np.ndarray,
-        bin_indptr: np.ndarray,
-        particle_bin: np.ndarray,
-        valid_mask: np.ndarray,
-        calculator: BinND,
+        model: BinResultModel | None = None,
+        sim: Any = None,
+        source_sim: Any = None,
+        axes: tuple[BinAxis, ...] | None = None,
+        bin_data: np.ndarray | None = None,
+        bin_indptr: np.ndarray | None = None,
+        particle_bin: np.ndarray | None = None,
+        valid_mask: np.ndarray | None = None,
+        calculator: BinND | None = None,
         scope_signature: Any = None,
         parent: BinNDResult | None = None,
     ) -> None:
-        self.sim = sim
-        self.source_sim = source_sim
-        self._axes = axes
-        self.shape_bins = tuple(axis.nbins for axis in axes)
-        self.ndim = len(axes)
-        self._bin_data = bin_data
-        self._bin_indptr = bin_indptr
-        self._particle_bin = particle_bin
-        self._valid_mask = valid_mask
-        self._calculator = calculator
-        self._scope_signature = scope_signature
-        self._parent = parent
-
-        self._multi_index_cache: np.ndarray | None = None
-
-        # Per-instance axis measure overrides.  Keys are axis aliases; values
-        # are measure type *names* (str) that resolve through the global
-        # _AXIS_MEASURE_TYPE_REGISTRY.  When set, these take precedence over
-        # the global _AXIS_MEASURE_REGISTRY for this instance.
-        self._axis_measure_overrides: dict[str, str] = {}
+        if model is not None:
+            # Spawn-layer model-ification: the executor builds the model first
+            # and the façade wraps it (bind the owner back-reference here).
+            self._model = model
+            model._owner = self
+            self.sim = model.sim
+            self.source_sim = model.source_sim
+            self._axes = model.axes
+            self.shape_bins = model.shape_bins
+            self.ndim = model.ndim
+            self._bin_data = model.bin_data
+            self._bin_indptr = model.bin_indptr
+            self._particle_bin = model.particle_bin
+            self._valid_mask = model.valid_mask
+            self._calculator = model.calculator
+            self._scope_signature = model.scope_signature
+            self._parent = model.parent.owner if model.parent is not None else None
+        else:
+            assert sim is not None and axes is not None
+            assert bin_data is not None and bin_indptr is not None
+            assert particle_bin is not None and valid_mask is not None
+            assert calculator is not None
+            self.sim = sim
+            self.source_sim = source_sim
+            self._axes = axes
+            self.shape_bins = tuple(axis.nbins for axis in axes)
+            self.ndim = len(axes)
+            self._bin_data = bin_data
+            self._bin_indptr = bin_indptr
+            self._particle_bin = particle_bin
+            self._valid_mask = valid_mask
+            self._calculator = calculator
+            self._scope_signature = scope_signature
+            self._parent = parent
+            self._model = BinResultModel(
+                sim=sim,
+                source_sim=source_sim,
+                axes=axes,
+                bin_data=bin_data,
+                bin_indptr=bin_indptr,
+                particle_bin=particle_bin,
+                valid_mask=valid_mask,
+                calculator=calculator,
+                scope_signature=scope_signature,
+                parent=parent._model if parent is not None else None,
+                owner=self,
+            )
 
         self._diagnostics = BinsResultEngine()
-        self._query_engine = BinQueryEngine(self, self._diagnostics)
+        self._query_service = BinQueryService(self._model, self, self._diagnostics, extensions=type(self)._extensions)
         self._subresults = BinSubresultStore(self)
+        self._measure_resolver = BinMeasureResolver()
+        self._geometry = BinGeometry(self._model, self._measure_resolver)
 
         # Subscribe to global measure-type redefinitions (e.g.
         # BinAxis.register_measure_type(..., overwrite=True)) so that
         # cached density entries are invalidated when a named type changes.
         from .axes import _measure_change_subscribers
-        _measure_change_subscribers.add(self)
 
+        _measure_change_subscribers.add(self)
 
     @property
     def root(self) -> BinNDResult:
@@ -123,6 +205,16 @@ class BinNDResult(BinPlotMixin):
     @property
     def is_root(self) -> bool:
         return self._parent is None
+
+    @property
+    def model(self) -> BinResultModel:
+        """The underlying :class:`BinResultModel` data container for this result."""
+        return self._model
+
+    @property
+    def parent(self) -> BinNDResult | None:
+        """The parent result this subresult was derived from, or ``None`` for a root."""
+        return self._parent
 
     @property
     def nbins(self) -> int:
@@ -134,7 +226,7 @@ class BinNDResult(BinPlotMixin):
 
     @property
     def unassigned_count(self) -> int:
-        return int(np.count_nonzero(~self._valid_mask))
+        return self._model.unassigned_count
 
     @property
     def count(self) -> BinsArray:
@@ -148,7 +240,7 @@ class BinNDResult(BinPlotMixin):
         --------
         >>> bins.particles_at_bin[0]  # particles in the first bin
         >>> bins.particles_at_bin[1:5]  # particles in bins 1 through 4
-        >>> bins.particles_at_bin[1,3,5] # particles in bins 1, 3, and 5
+        >>> bins.particles_at_bin[1, 3, 5]  # particles in bins 1, 3, and 5
         >>> bins.particles_at_bin[:, 0]  # particles in the first bin along the second axis (for 2D or higher)
 
         """
@@ -170,9 +262,9 @@ class BinNDResult(BinPlotMixin):
 
         Examples
         --------
-        >>> bins.axis.r          # axis with alias "r"
-        >>> bins.axis["r"]       # same
-        >>> bins.axis[0]         # first axis
+        >>> bins.axis.r  # axis with alias "r"
+        >>> bins.axis["r"]  # same
+        >>> bins.axis[0]  # first axis
         >>> bins.axis.set_axis_measure_type("r", "annulus")  # per-instance override
         """
         return BinAxisAccessor(self._axes, owner=self)
@@ -180,18 +272,10 @@ class BinNDResult(BinPlotMixin):
     def _resolve_axis_measure(self, axis: BinAxis) -> np.ndarray:
         """Return the effective per-bin measure for *axis*.
 
-        Checks this instance's local ``_axis_measure_overrides`` first
-        (keyed by ``axis.alias``; values are type names resolved via the
-        global ``_AXIS_MEASURE_TYPE_REGISTRY``), then falls back to the
-        global :attr:`BinAxis.measure` property.
+        Delegates to :attr:`_measure_resolver`, which checks per-instance
+        overrides first, then the global :attr:`BinAxis.measure` property.
         """
-        type_name = self._axis_measure_overrides.get(axis.alias)
-        if type_name is not None:
-            from .axes import _AXIS_MEASURE_TYPE_REGISTRY as _types
-            func = _types.get(type_name)
-            if func is not None:
-                return func(axis)
-        return axis.measure
+        return self._geometry.axis_measure(axis)
 
     @property
     def bin_indices(self) -> _CSRBinsView:
@@ -205,7 +289,7 @@ class BinNDResult(BinPlotMixin):
 
     @property
     def num_cached_arr(self) -> int:
-        return self._query_engine.num_cached_arr
+        return self._query_service.num_cached_arr
 
     @property
     def nsubs(self) -> int:
@@ -216,34 +300,27 @@ class BinNDResult(BinPlotMixin):
         return self._subresults.total_cached_arr()
 
     @property
-    def edges(self) -> Any:
-        self._require_1d("edges")
-        return self._axes[0].edges
+    def edges(self) -> np.ndarray:
+        return self._geometry.edges
 
     @property
-    def mins(self) -> Any:
-        self._require_1d("mins")
-        return self._axes[0].mins
+    def mins(self) -> np.ndarray:
+        return self._geometry.mins
 
     @property
-    def maxs(self) -> Any:
-        self._require_1d("maxs")
-        return self._axes[0].maxs
+    def maxs(self) -> np.ndarray:
+        return self._geometry.maxs
 
     @property
-    def centers(self) -> Any:
-        self._require_1d("centers")
-        return self._axes[0].centers
+    def centers(self) -> np.ndarray:
+        return self._geometry.centers
 
     @property
-    def widths(self) -> Any:
-        self._require_1d("widths")
-        return self._axes[0].widths
+    def widths(self) -> np.ndarray:
+        return self._geometry.widths
 
     def _require_1d(self, name: str) -> None:
-        if self.ndim != 1:
-            raise AttributeError(f"{name} is ambiguous for ND bins; use bins.axis[alias].{name}.")
-
+        self._geometry._require_1d(name)
 
     def families(self) -> Any:
         return self.sim.families()
@@ -267,10 +344,10 @@ class BinNDResult(BinPlotMixin):
         return BinNDStatAccessor(self)
 
     def keys(self) -> list[str]:
-        return self._query_engine.keys()
+        return self._query_service.keys()
 
     def property_keys(self) -> list[str]:
-        return self._query_engine.property_keys()
+        return self._query_service.property_keys()
 
     def all_keys(self) -> list[str]:
         return self.keys()
@@ -288,11 +365,30 @@ class BinNDResult(BinPlotMixin):
     @overload
     def __getitem__(self, key: CalculatorBase) -> BinsArray: ...
     def __getitem__(self, key: Any) -> SubBinNDResult | BinsArray:
+        """Resolve a per-bin query or a sub-result selector.
+
+        String keys compute per-bin quantities (pipeline statistics, derived
+        properties, geometry, or density).  Non-string keys that are a bool mask,
+        pynbody :class:`Filter`, or :class:`Family` return a
+        :class:`SubBinNDResult`.  Callables/calculators are evaluated per-bin via
+        :meth:`apply`.
+
+        Examples
+        --------
+        >>> bins["count"]  # per-bin particle counts -> BinsArray
+        >>> bins["mass.sum"]  # per-bin mass -> BinsArray
+        >>> bins["density"]  # per-bin mass density -> BinsArray
+        >>> mask = sim["r"] > 3.0
+        >>> sub = bins[mask]  # SubBinNDResult over a particle subset
+        >>> bins["vr.mean@mass"]  # mass-weighted per-bin mean of vr
+        """
         if isinstance(key, str):
             # Axis properties like "r.center" must be accessed via bins.axis("r").center
             # String queries only handle: geometry/derived properties and pipeline stat queries
             return self._resolve_query(key)
-        if (isinstance(key, CalculatorBase) and not isinstance(key, FilterBase)) or (callable(key) and not isinstance(key, (str, bytes))):
+        if (isinstance(key, CalculatorBase) and not isinstance(key, FilterBase)) or (
+            callable(key) and not isinstance(key, (str, bytes))
+        ):
             return self.apply(key)
         if isinstance(key, tuple) or isinstance(key, (int, np.integer, slice)) or is_int_sequence(key):
             raise TypeError("Bin selectors must use bins.particles_at_bin[...], not BinNDResult.__getitem__.")
@@ -301,7 +397,10 @@ class BinNDResult(BinPlotMixin):
     def __getattr__(self, name: str) -> Any:
         if name in {"center", "width", "min", "max", "edges"} and self.ndim == 1:
             # Convenience shortcuts for 1D results – delegate to the axis object
-            return getattr(self._axes[0], {"center": "centers", "width": "widths", "min": "mins", "max": "maxs", "edges": "edges"}[name])
+            return getattr(
+                self._axes[0],
+                {"center": "centers", "width": "widths", "min": "mins", "max": "maxs", "edges": "edges"}[name],
+            )
         try:
             sub = getattr(self.sim, name)
         except AttributeError as exc:
@@ -312,16 +411,28 @@ class BinNDResult(BinPlotMixin):
 
     @property
     def gas(self) -> SubBinNDResult:
+        """Sub-result over the ``gas`` family.
+
+        Examples
+        --------
+        >>> gas = bins.gas
+        >>> gas["count"].tolist()
+        [2, 0, 0]
+        """
         return self._family_subresult("gas")
+
     @property
     def g(self) -> SubBinNDResult:
         return self._family_subresult("gas")
+
     @property
     def dm(self) -> SubBinNDResult:
         return self._family_subresult("dm")
+
     @property
     def star(self) -> SubBinNDResult:
         return self._family_subresult("star")
+
     @property
     def s(self) -> SubBinNDResult:
         return self._family_subresult("star")
@@ -337,20 +448,40 @@ class BinNDResult(BinPlotMixin):
         return self.get_subresult(sub, _cache_key=("family", family.name))
 
     def _resolve_query(self, key: str) -> BinsArray:
-        return self._query_engine.resolve(key)
+        # Shared-scope queries (axis/geometry) are computed once on the root and
+        # reused by subresults; the service itself is model-pure.
+        scope = type(self)._extensions.query_scope(self, key)
+        if not self.is_root and scope in self._SHARED_SCOPES:
+            return self.root._resolve_query(key)
+        return self._query_service.resolve(key)
 
     def multi_index_array(self) -> np.ndarray:
-        if self._multi_index_cache is None:
-            self._multi_index_cache = np.column_stack(
-                np.unravel_index(np.arange(self.nbins), self.shape_bins, order="C")
-            )
-        return self._multi_index_cache
+        return self._geometry.multi_index_array()
 
-    def find_axis(self, aliases: set[str]) -> Any:
-        for axis in self._axes:
-            if axis_matches(axis, aliases):
-                return axis
-        raise KeyError(f"No axis matching {sorted(aliases)!r}.")
+    def find_axis(self, aliases: set[str]) -> BinAxis:
+        """Fetch an axis by a set of accepted aliases / prop names.
+
+        Parameters
+        ----------
+        aliases : set[str]
+            Accepted alias or prop strings for the desired axis.
+
+        Returns
+        -------
+        BinAxis
+            The matching axis.
+
+        Raises
+        ------
+        KeyError
+            If no axis matches ``aliases``.
+
+        Examples
+        --------
+        >>> bins.find_axis({"r"}).centers.tolist()
+        [1.0, 3.0, 5.0]
+        """
+        return self._geometry.find_axis(aliases)
 
     def _stat_pipeline(
         self,
@@ -361,9 +492,7 @@ class BinNDResult(BinPlotMixin):
         weight: str | Callable[[Any], Any] | Any | None = None,
         query_key: str | None = None,
     ) -> BinsArray:
-        return self._query_engine.stat_pipeline(
-            field, transforms, terminal_stat, weight=weight, query_key=query_key
-        )
+        return self._query_service.stat_pipeline(field, transforms, terminal_stat, weight=weight, query_key=query_key)
 
     def stat_explicit(
         self,
@@ -375,18 +504,31 @@ class BinNDResult(BinPlotMixin):
         """Explicitly compute a per-bin statistic.
 
         Equivalent to ``bins["field.stat"]`` but accepts optional transforms and
-        weight.  Example::
+        weight.
 
-            bins.stat_explicit("mass", "sum")
-            bins.stat_explicit("vz", "mean", transforms=["abs"])
-            bins.stat_explicit("mass", "mean", weight="mass")
+        Parameters
+        ----------
+        field : str
+            Simulation field name.
+        statistic : str
+            Statistic name (``"sum"``, ``"mean"``, ``"median"``, ``"p16"``, ...).
+        weight : str or callable, optional
+            Optional per-particle weight field / callable.
+        transforms : list[str], optional
+            Optional element-wise transforms (``"abs"``, ``"log"``, ...).
+
+        Returns
+        -------
+        BinsArray
+            The per-bin statistic.
+
+        Examples
+        --------
+        >>> bins.stat_explicit("mass", "sum")
+        >>> bins.stat_explicit("vz", "mean", transforms=["abs"])
+        >>> bins.stat_explicit("mass", "mean", weight="mass")
         """
-        return self._query_engine.stat_explicit(
-            field,
-            statistic,
-            weight = weight,
-            transforms= transforms
-        )
+        return self._query_service.stat_explicit(field, statistic, weight=weight, transforms=transforms)
 
     def apply(
         self,
@@ -415,22 +557,27 @@ class BinNDResult(BinPlotMixin):
             path bypasses the per-bin loop entirely and is much faster for large grids.
 
             Signature: ``query(sim, particle_bin) -> np.ndarray``
+
+        Returns
+        -------
+        BinsArray
+            The per-bin result, one row/entry per bin.
+
+        Examples
+        --------
+        >>> bins.apply(lambda sub: sub["vz"].mean())  # per-bin mean of vz
+        >>> bins.apply(lambda sim, pb: np.bincount(pb, minlength=bins.nbins), vectorized=True)  # fast vectorized count
         """
-        return self._query_engine.apply(
-            query,
-            name=name,
-            empty=empty,
-            vectorized=vectorized,
-        )
+        return self._query_service.apply(query, name=name, empty=empty, vectorized=vectorized)
 
     def _callable_cache_token(self, query: Any) -> Any:
-        return self._query_engine.callable_cache_token(query)
+        return self._query_service.callable_cache_token(query)
 
     def cache_report(self) -> dict[str, Any]:
-        return self._query_engine.cache_report()
+        return self._query_service.cache_report()
 
     def query_report(self) -> list[dict[str, Any]]:
-        return self._query_engine.query_report()
+        return self._query_service.query_report()
 
     # ------------------------------------------------------------------
     # Axis measure type configuration
@@ -458,28 +605,32 @@ class BinNDResult(BinPlotMixin):
             :meth:`BinAxis.register_measure_type`.  Built-in types include
             ``"spherical_shell"``, ``"annulus"``, and ``"linear"``.
             Pass ``None`` to clear a previously set override.
+
+        Examples
+        --------
+        >>> bins.set_axis_measure_type("r", "linear")  # bin widths instead of shell volume
+        >>> bins.set_axis_measure_type("r", None)  # revert to the default measure
+        >>> bins["measure"].shape_bins
+        (3,)
         """
         from .axes import _AXIS_MEASURE_TYPE_REGISTRY as _types
 
         if type_name is None:
-            if alias not in self._axis_measure_overrides:
+            if self._measure_resolver.get(alias) is None:
                 return
-            del self._axis_measure_overrides[alias]
+            self._measure_resolver.set(alias, None)
         else:
             if type_name not in _types:
-                raise KeyError(
-                    f"Unknown measure type {type_name!r}. "
-                    f"Known types: {sorted(_types)}."
-                )
-            old_type = self._axis_measure_overrides.get(alias)
+                raise KeyError(f"Unknown measure type {type_name!r}. Known types: {sorted(_types)}.")
+            old_type = self._measure_resolver.get(alias)
             if old_type == type_name:
                 return  # no change — nothing to do
-            self._axis_measure_overrides[alias] = type_name
+            self._measure_resolver.set(alias, type_name)
 
         # Invalidate measure-dependent cache entries on this instance + subresults
-        n, names = self._query_engine.invalidate_measure_dependent_cache()
+        n, names = self._query_service.invalidate_measure_dependent_cache()
         for sub in self._subresults.values():
-            sn, snames = sub._query_engine.invalidate_measure_dependent_cache()
+            sn, snames = sub._query_service.invalidate_measure_dependent_cache()
             n += sn
             names.extend(snames)
 
@@ -498,32 +649,52 @@ class BinNDResult(BinPlotMixin):
         Invalidates measure-dependent cache entries on this instance and all
         subresults.  Returns ``(count, cleared_names)``.
         """
-        n, names = self._query_engine.invalidate_measure_dependent_cache()
+        n, names = self._query_service.invalidate_measure_dependent_cache()
         for sub in self._subresults.values():
-            sn, snames = sub._query_engine.invalidate_measure_dependent_cache()
+            sn, snames = sub._query_service.invalidate_measure_dependent_cache()
             n += sn
             names.extend(snames)
         return n, names
 
     @classmethod
     def register_transform(
-        cls,
-        name: str,
-        func: Callable[[np.ndarray], np.ndarray],
-        *,
-        overwrite: bool = False,
+        cls, name: str, func: Callable[[np.ndarray], np.ndarray], *, overwrite: bool = False
     ) -> None:
         cls._extensions.register_transform(name, func, overwrite=overwrite)
 
     @overload
     @classmethod
-    def register_derived(cls, fn: BinDerivedFunc, *, name: None = None, scope: str = "derived", condition: BinDerivedCondition | None = None, overwrite: bool = False) -> BinDerivedFunc: ...
+    def register_derived(
+        cls,
+        fn: BinDerivedFunc,
+        *,
+        name: None = None,
+        scope: str = "derived",
+        condition: BinDerivedCondition | None = None,
+        overwrite: bool = False,
+    ) -> BinDerivedFunc: ...
     @overload
     @classmethod
-    def register_derived(cls, fn: str, *, name: None = None, scope: str = "derived", condition: BinDerivedCondition | None = None, overwrite: bool = False) -> Callable[[BinDerivedFunc], BinDerivedFunc]: ...
+    def register_derived(
+        cls,
+        fn: str,
+        *,
+        name: None = None,
+        scope: str = "derived",
+        condition: BinDerivedCondition | None = None,
+        overwrite: bool = False,
+    ) -> Callable[[BinDerivedFunc], BinDerivedFunc]: ...
     @overload
     @classmethod
-    def register_derived(cls, fn: None = None, *, name: str | None = None, scope: str = "derived", condition: BinDerivedCondition | None = None, overwrite: bool = False) -> Callable[[BinDerivedFunc], BinDerivedFunc]: ...
+    def register_derived(
+        cls,
+        fn: None = None,
+        *,
+        name: str | None = None,
+        scope: str = "derived",
+        condition: BinDerivedCondition | None = None,
+        overwrite: bool = False,
+    ) -> Callable[[BinDerivedFunc], BinDerivedFunc]: ...
     @classmethod
     def register_derived(
         cls,
@@ -534,14 +705,40 @@ class BinNDResult(BinPlotMixin):
         condition: BinDerivedCondition | None = None,
         overwrite: bool = False,
     ) -> Any:
+        """Register a derived per-bin property.
+
+        The decorated function receives the :class:`BinNDResult` (or its data
+        model) and returns a per-bin array/``BinsArray`` whose leading dimensions
+        match the bin grid.  A ``condition`` can gate availability per result
+        (e.g. ``has_axis({"x"})``).
+
+        Parameters
+        ----------
+        fn : callable or str, optional
+            The function (or its name when used as a factory).
+        name : str, optional
+            Registration name (defaults to ``fn.__name__``).
+        scope : {"derived", "geometry", "particles"}, default: "derived"
+            Query scope; ``geometry``/``axis`` results are shared with sub-results.
+        condition : callable, optional
+            ``lambda result -> bool`` gating availability.
+        overwrite : bool, default: False
+            Whether to replace an existing property with the same name.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> @Bin1D.derived("x_span", condition=has_axis({"x"}), overwrite=True)
+        ... def x_span(result):
+        ...     axis = result.find_axis({"x"})
+        ...     return np.full(result.nbins, float(axis.maxs[-1] - axis.mins[0]))
+        >>> "x_span" in Bin1D("x", vmin=0, vmax=6, nbins=3)(sim).keys()
+        True
+        """
         return cls._extensions.register_derived(
-            cls,
-            fn,
-            name=name,
-            scope=scope,
-            condition=condition,
-            overwrite=overwrite,
+            cls, fn, name=name, scope=scope, condition=condition, overwrite=overwrite
         )
+
     derived = register_derived
     derived_property = register_derived
 
@@ -564,6 +761,7 @@ def _has_family(name: str) -> Callable[[Any], bool]:
             return False
 
     return condition
+
 
 @BinNDResult.derived("measure", scope="geometry")
 def _bin_measure(bins: BinNDResult) -> np.ndarray:
@@ -589,14 +787,77 @@ def _bin_measure(bins: BinNDResult) -> np.ndarray:
 
 @BinNDResult.derived("count", scope="particles")
 def _count(bins: BinNDResult) -> np.ndarray:
-    valid_mask = bins._valid_mask
+    valid_mask = bins.valid_mask
     if not valid_mask.any():
         return np.zeros(bins.nbins, dtype=int)
-    return np.bincount(bins._particle_bin[valid_mask], minlength=bins.nbins).astype(int)
+    return np.bincount(bins.particle_bin[valid_mask], minlength=bins.nbins).astype(int)
 
 
+@BinNDResult.derived(
+    "vcirc", condition=lambda bins: bins.ndim == 1 and any(axis_matches(axis, {"r", "rxy"}) for axis in bins.axes)
+)
+def _vcirc(bins: BinNDResult) -> np.ndarray:
+    """Per-bin circular velocity from the gravitational field.
 
+    Available on 1-D radial (``r`` / ``rxy``) profiles only.  For each bin
+    radius ``R`` the magnitude of the gravitational acceleration is evaluated
+    at a set of points on the mid-plane circle of radius ``R`` (averaging a few
+    azimuthal samples so a lumpy distribution does not bias one azimuth), then
+    ``sqrt(<|a|> * R)`` is returned.
 
+    The acceleration is computed by the gravity backend (``tree`` by default)
+    from ``sim['pos']``, ``sim['mass']`` and ``sim['smooth']`` — i.e. the
+    particles of :attr:`~BinNDResult.sim`.  For a spherically symmetric mass
+    distribution this equals ``sqrt(G * M_enc(<R) / R)``, the classic
+    circular (rotation) velocity.
+
+    Returns a :class:`pynbody.array.SimArray` in ``km s**-1``.
+    """
+    from pynbody.array import SimArray
+
+    from pynbodyext.gravity import KernelKind, calculate_acceleration
+
+    sim = bins.sim
+    centers = bins.centers
+
+    # Bin-center radii as a unit-bearing array (kpc for a physical r/rxy
+    # profile).  Keep the axis units if present so the kpc→km conversion is
+    # exact; otherwise fall back to the snapshot's position units.
+    if isinstance(centers, SimArray):
+        radii_arr = centers
+        radii = np.asarray(centers)
+    else:
+        radii = np.asarray(centers)
+        radii_arr = SimArray(radii, units=sim["pos"].units)
+
+    # Sample the mid-plane circle at each bin radius.
+    n_azimuth = 8
+    angles = np.linspace(0.0, 2.0 * np.pi, n_azimuth, endpoint=False)
+    rr = np.repeat(radii, n_azimuth)
+    aa = np.tile(angles, radii.size)
+    points = np.zeros((rr.size, 3), dtype=float)
+    points[:, 0] = rr * np.cos(aa)
+    points[:, 1] = rr * np.sin(aa)
+
+    softening = sim["smooth"] if "smooth" in sim.keys() else None
+    # A softening kernel must accompany any softening length (KernelKind.No is
+    # only valid with no softenings).  Plummer with eps=0 reduces to Newtonian,
+    # so it is exact whenever sim['smooth'] is present.
+    kernel = KernelKind.Plummer if softening is not None else KernelKind.No
+    acc = calculate_acceleration(sim, positions=points, softening=softening, method="tree", kernel=kernel, theta=0.7)
+    # |a| in km s**-2, averaged over the azimuthal samples at each radius.
+    acc_mag = np.linalg.norm(np.asarray(acc), axis=1)
+    mean_a = acc_mag.reshape(radii.size, n_azimuth).mean(axis=1)
+
+    # vcirc = sqrt(|a| * R): a is km/s**2, so R must be in km for the product
+    # to yield km**2/s**2 (and sqrt → km/s).
+    R_km = np.asarray(radii_arr.in_units("km"))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        vcirc = np.sqrt(mean_a * R_km)
+
+    out = SimArray(vcirc, units="km s**-1")
+    out.sim = sim
+    return out
 
 
 @BinNDResult.derived("density", overwrite=True)
@@ -623,7 +884,7 @@ def _number_density(bins: BinNDResult) -> np.ndarray:
 
 @BinNDResult.derived("enclosed_mass")
 def _enclosed_mass(bins: BinNDResult) -> np.ndarray:
-    return np.cumsum(bins["mass.sum"])
+    return bins["mass.sum"].cumsum()
 
 
 @BinNDResult.derived("gas_fraction", condition=_has_family("gas"))

@@ -64,6 +64,11 @@ version = {attr = "pynbodyext.__version__"}
 
 chunk = ["dask"]
 
+# Relational database result store (SQLAlchemy-backed adapter).
+store = [
+    "sqlalchemy>=2.0",
+]
+
 dev = [
     "pre-commit",
     "mypy>=1.17",
@@ -154,6 +159,7 @@ convention = "numpy"
 # ======================================================================================
 [tool.mypy]
 python_version = "3.11"
+plugins = ["pynbodyext/_mypy_plugin.py"]
 
 ignore_missing_imports = true
 

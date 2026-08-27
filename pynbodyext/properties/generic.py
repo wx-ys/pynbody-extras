@@ -1,6 +1,4 @@
-"""Some generic properties.
-"""
-
+"""Some generic properties."""
 
 from __future__ import annotations
 
@@ -16,22 +14,14 @@ if TYPE_CHECKING:
     from pynbody.snapshot import SimSnap
 
 
-__all__ = [
-    "CenPos",
-    "CenVel",
-    "AngMomVec",
-    "KappaRot",
-    "KappaRotMean",
-    "VirialRadius",
-    "SpinParam",
-    "PatternSpeed",
-]
+__all__ = ["CenPos", "CenVel", "AngMomVec", "KappaRot", "KappaRotMean", "VirialRadius", "SpinParam", "PatternSpeed"]
+
 
 @PropertyBase.dataclass
 class CenPos(PropertyBase[SimArray | np.ndarray]):
     """Center position property"""
 
-    mode : Literal["ssc", "com", "pot", "hyb"] = "ssc"
+    mode: Literal["ssc", "com", "pot", "hyb"] = "ssc"
 
     def __post_init__(self) -> None:
         if self.mode not in ("ssc", "com", "pot", "hyb"):
@@ -46,18 +36,19 @@ class CenPos(PropertyBase[SimArray | np.ndarray]):
         elif params.mode == "ssc":
             cen = cast("SimArray", shrink_sphere_center(sim))
         elif params.mode == "hyb":
-            cen = cast("SimArray", hybrid_center(sim, r = "5 kpc"))
+            cen = cast("SimArray", hybrid_center(sim, r="5 kpc"))
         else:
             raise ValueError(f"Invalid mode: {params.mode}. Expected one of ['ssc', 'com', 'pot', 'hyb'].")
         if isinstance(cen, SimArray):
             cen.sim = sim
         return cen
 
+
 @PropertyBase.dataclass
 class CenVel(PropertyBase[SimArray]):
     """Center velocity property"""
 
-    mode : Literal["com"] = "com"
+    mode: Literal["com"] = "com"
 
     def __post_init__(self) -> None:
         if self.mode != "com":
@@ -99,6 +90,7 @@ class AngMomVec(PropertyBase[SimArray]):
         angmom.units = sim["mass"].units * sim["pos"].units * sim["vel"].units
         return angmom
 
+
 @PropertyBase.dataclass
 class KappaRot(PropertyBase[float]):
     """
@@ -134,6 +126,7 @@ class KappaRot(PropertyBase[float]):
             raise ValueError(f"kappa_rot is non-finite: {value}.")
         return float(value)
 
+
 @PropertyBase.dataclass
 class KappaRotMean(PropertyBase[float]):
     """
@@ -143,11 +136,13 @@ class KappaRotMean(PropertyBase[float]):
     -----
     This is the mean of (0.5 * m * vcxy^2) / (m * ke) over given particles.
     """
+
     def calculate(self, sim: SimSnap, params: Any = None) -> float:
         krot = 0.5 * sim["vcxy"] ** 2
         ke = sim["ke"]
         ratio = krot / ke
         return float(np.mean(ratio))
+
 
 @PropertyBase.dataclass
 class VirialRadius(PropertyBase[float]):
@@ -160,7 +155,8 @@ class VirialRadius(PropertyBase[float]):
     rho_def: {"critical", "matter"}, default: "critical"
         Whether the overdensity is relative to the critical density or the mean matter density.
     """
-    overdensity: float = 178.
+
+    overdensity: float = 178.0
     rho_def: Literal["critical", "matter"] = "critical"
 
     def __post_init__(self) -> None:
@@ -169,6 +165,7 @@ class VirialRadius(PropertyBase[float]):
 
     def calculate(self, sim: SimSnap, params: Any = None) -> float:
         return virial_radius(sim, overden=params.overdensity, rho_def=params.rho_def)
+
 
 @PropertyBase.dataclass
 class SpinParam(PropertyBase[float]):
@@ -194,8 +191,8 @@ class SpinParam(PropertyBase[float]):
         """
         from pynbody.analysis.angmom import spin_parameter
 
-        spin = spin_parameter(sim)
-        return spin
+        return spin_parameter(sim)
+
 
 @PropertyBase.dataclass
 class PatternSpeed(PropertyBase[SimArray]):
@@ -211,15 +208,14 @@ class PatternSpeed(PropertyBase[SimArray]):
     """
 
     def calculate(self, sim: SimSnap, params: Any = None) -> SimArray:
-
-        Ixx = (sim["mass"]*sim["x"]*sim["x"]).sum()
-        Iyy = (sim["mass"]*sim["y"]*sim["y"]).sum()
-        Ixy = (sim["mass"]*sim["x"]*sim["y"]).sum()
+        Ixx = (sim["mass"] * sim["x"] * sim["x"]).sum()
+        Iyy = (sim["mass"] * sim["y"] * sim["y"]).sum()
+        Ixy = (sim["mass"] * sim["x"] * sim["y"]).sum()
         # I_plus = 1/2*(Ixx+Iyy)
-        I_minus = 1/2*(Ixx-Iyy)
-        d_Ixy = (sim["mass"]*(sim["x"]*sim["vy"]+sim["y"]*sim["vx"])).sum()
-        d_I_minus = (sim["mass"]*(sim["x"]*sim["vx"]-sim["y"]*sim["vy"])).sum()
+        I_minus = 1 / 2 * (Ixx - Iyy)
+        d_Ixy = (sim["mass"] * (sim["x"] * sim["vy"] + sim["y"] * sim["vx"])).sum()
+        d_I_minus = (sim["mass"] * (sim["x"] * sim["vx"] - sim["y"] * sim["vy"])).sum()
 
-        omega_Iz = 1/2*(I_minus*d_Ixy-d_I_minus*Ixy)/(I_minus*I_minus+Ixy*Ixy)
+        omega_Iz = 1 / 2 * (I_minus * d_Ixy - d_I_minus * Ixy) / (I_minus * I_minus + Ixy * Ixy)
         omega_Iz.sim = sim.ancestor
         return omega_Iz

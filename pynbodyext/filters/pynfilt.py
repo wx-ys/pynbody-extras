@@ -1,4 +1,3 @@
-
 from pynbody.filt import (
     And as _And,
     Annulus as _Annulus,
@@ -15,5 +14,18 @@ from pynbody.filt import (
     Sphere as _Sphere,
 )
 
-__all__ = ["_And", "_Annulus", "_BandPass", "_Cuboid", "_Disc", "_FamilyFilter",
-           "_Filter", "_HighPass", "_LowPass", "_Not", "_Or", "_SolarNeighborhood", "_Sphere"]
+__all__ = [
+    "_And",
+    "_Annulus",
+    "_BandPass",
+    "_Cuboid",
+    "_Disc",
+    "_FamilyFilter",
+    "_Filter",
+    "_HighPass",
+    "_LowPass",
+    "_Not",
+    "_Or",
+    "_SolarNeighborhood",
+    "_Sphere",
+]

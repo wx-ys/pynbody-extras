@@ -43,6 +43,7 @@ A band-pass style filter in the same shape as the concrete filter module::
             values = sim[params.prop]
             return (values >= params.min) & (values < params.max)
 
+
     mask = BandPass("temp", 1.0e5, 1.0e6).run(sim).value
     print(mask.sum())
 
@@ -50,9 +51,7 @@ Scoping Another Calculator
 --------------------------
 The most common use of a filter is to scope another calculator::
 
-    hot_stellar_mass = ParamSum("mass").filter(
-        FamilyFilter("star") & BandPass("temp", 1.0e5, 1.0e6)
-    )
+    hot_stellar_mass = ParamSum("mass").filter(FamilyFilter("star") & BandPass("temp", 1.0e5, 1.0e6))
     print(hot_stellar_mass.run(sim).value)
 
 Sphere-Style Example
@@ -64,16 +63,13 @@ looks like this::
     @FilterBase.dataclass
     class Sphere(FilterBase):
         radius: Param[float] = Param(field_name="pos")
-        cen: Param[tuple[float, float, float]] = Param(
-            default=(0, 0, 0),
-            field_name="pos",
-        )
+        cen: Param[tuple[float, float, float]] = Param(default=(0, 0, 0), field_name="pos")
 
         def calculate(self, sim, params=None):
             dx = sim["x"] - params.cen[0]
             dy = sim["y"] - params.cen[1]
             dz = sim["z"] - params.cen[2]
-            return dx * dx + dy * dy + dz * dz < params.radius ** 2
+            return dx * dx + dy * dy + dz * dz < params.radius**2
 
 Boolean Composition
 -------------------
@@ -130,7 +126,8 @@ if TYPE_CHECKING:
 
 MaskArray: TypeAlias = npt.NDArray[np.bool_]
 
-class FilterBase(RuntimeCalculatorBase[FilterResult, MaskArray],PynbodyFilter, ABC):
+
+class FilterBase(RuntimeCalculatorBase[FilterResult, MaskArray], PynbodyFilter, ABC):
     """Base class for calculators that produce a boolean selection mask.
 
     Subclasses usually override :meth:`build_mask`.
@@ -142,6 +139,7 @@ class FilterBase(RuntimeCalculatorBase[FilterResult, MaskArray],PynbodyFilter, A
 
     __eq__ = object.__eq__
     __hash__ = object.__hash__
+
     def public_value(self, value: FilterResult) -> MaskArray:
         return value.mask
 
@@ -179,7 +177,6 @@ class FilterBase(RuntimeCalculatorBase[FilterResult, MaskArray],PynbodyFilter, A
     def materialize_public(self, ctx: ExecutionContext, value: MaskArray) -> MaskArray:
         return value
 
-
     def apply_mask(self, sim: SimSnap, mask: Any) -> SimSnap:
         """Apply a boolean mask to a simulation object."""
         return cast("SimSnap", sim[mask])
@@ -204,13 +201,7 @@ class FilterBase(RuntimeCalculatorBase[FilterResult, MaskArray],PynbodyFilter, A
         """
         raise NotImplementedError(f"{type(self).__name__} must implement calculate(), build_mask(), or compute().")
 
-    def _build_mask_runtime(
-        self,
-        sim: SimSnap,
-        params: Any,
-        ctx: ExecutionContext,
-        input: NodeInput,
-    ) -> Any:
+    def _build_mask_runtime(self, sim: SimSnap, params: Any, ctx: ExecutionContext, input: NodeInput) -> Any:
         return self.calculate(sim, params)
 
     def compute(self, runtime: CalcRuntime, params: Any) -> Any:

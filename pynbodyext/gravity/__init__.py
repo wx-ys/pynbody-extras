@@ -12,6 +12,7 @@ Example
 >>> from pynbodyext.gravity import calculate_acceleration, KernelKind
 >>> a = calculate_acceleration(sim, method="tree", theta=0.7, softening=0.01, kernel=KernelKind.Plummer)
 """
+
 from pynbodyext.util.deps import GRAVITY_NATIVE_AVAILABLE
 
 __all__ = ["GRAVITY_NATIVE_AVAILABLE"]
@@ -22,9 +23,7 @@ if GRAVITY_NATIVE_AVAILABLE:
 
     __all__ += ["Gravity", "KernelKind", "calculate_potential", "calculate_acceleration"]
 else:
-    warning_msg = (
-        "pynbodyext.gravity: C++ extension not available; "
-        "gravity calculations will be unavailable."
-    )
+    warning_msg = "pynbodyext.gravity: C++ extension not available; gravity calculations will be unavailable."
     import warnings
+
     warnings.warn(warning_msg, ImportWarning, stacklevel=2)

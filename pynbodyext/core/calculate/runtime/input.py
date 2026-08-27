@@ -118,12 +118,7 @@ class NodeInput:
     def with_transform(self, result: TransformResult[Any]) -> NodeInput:
         """Return a copy after applying a transform result."""
         generation = result.artifacts.get("mutation_generation", self.mutation_generation)
-        return replace(
-            self,
-            transform=result,
-            sim_current=result.sim_after,
-            mutation_generation=generation,
-        )
+        return replace(self, transform=result, sim_current=result.sim_after, mutation_generation=generation)
 
     def with_selection(self, result: FilterResult) -> NodeInput:
         """Return a copy with an active filter selection."""

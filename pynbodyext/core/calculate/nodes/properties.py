@@ -37,6 +37,7 @@ A small field-summing property in the same style as
         def calculate(self, sim, params=None):
             return sim[params.parameter].sum()
 
+
     result = ParamSum("mass").run(sim)
     print(result.value)
 
@@ -57,9 +58,7 @@ A property can accept runtime-resolved parameters through :class:`Param` fields,
             key_sorted = np.asarray(key)[order]
             weight_sorted = np.asarray(weight)[order]
             cumulative = np.cumsum(weight_sorted)
-            cumulative = (
-                cumulative - cumulative[0]
-            ) / float(cumulative[-1] - cumulative[0])
+            cumulative = (cumulative - cumulative[0]) / float(cumulative[-1] - cumulative[0])
             return np.interp(params.frac, cumulative, key_sorted)
 
 This style matches the concrete property modules more closely than older
@@ -149,11 +148,7 @@ class PropertyBase(RuntimeCalculatorBase[TProp, TProp], Generic[TProp], ABC):
         return self.calculate(sim, params)
 
     def _calculate_runtime(
-        self,
-        sim: SimSnap,
-        params: Mapping[str, Any] | None,
-        ctx: ExecutionContext,
-        input: NodeInput,
+        self, sim: SimSnap, params: Mapping[str, Any] | None, ctx: ExecutionContext, input: NodeInput
     ) -> TProp:
         """Runtime calculation hook with access to context and node input."""
         return self.calculate_with_params(sim, params)
@@ -171,15 +166,10 @@ class PropertyBase(RuntimeCalculatorBase[TProp, TProp], Generic[TProp], ABC):
     def as_property(cls, other: object | None) -> PropertyBase[Any]:
         """Coerce constants and calculators into property expression nodes."""
         from .expr import as_property
+
         return as_property(other)
 
-    def _make_op(
-        self,
-        op_name: str,
-        other: object,
-        *,
-        reverse: bool = False,
-    ) -> PropertyBase[Any]:
+    def _make_op(self, op_name: str, other: object, *, reverse: bool = False) -> PropertyBase[Any]:
         from .expr import make_associative_op, make_binary_op
 
         left: PropertyBase[Any] = self
@@ -188,7 +178,7 @@ class PropertyBase(RuntimeCalculatorBase[TProp, TProp], Generic[TProp], ABC):
         if reverse:
             left, right = right, left
 
-        if op_name in ("add", "mul"):
+        if op_name in {"add", "mul"}:
             return make_associative_op(op_name, left, right)
 
         return make_binary_op(op_name, left, right)
@@ -196,6 +186,7 @@ class PropertyBase(RuntimeCalculatorBase[TProp, TProp], Generic[TProp], ABC):
     def clip(self, vmin: object | None = None, vmax: object | None = None) -> PropertyBase[TProp]:
         """Return a symbolic clipped property expression."""
         from .expr import make_clip_op
+
         return make_clip_op(self, vmin=vmin, vmax=vmax)
 
     def __add__(self, other: object) -> PropertyBase[TProp]:
@@ -206,10 +197,12 @@ class PropertyBase(RuntimeCalculatorBase[TProp, TProp], Generic[TProp], ABC):
 
     def __sub__(self, other: object) -> PropertyBase[TProp]:
         from .expr import make_binary_op
+
         return make_binary_op("sub", self, self.as_property(other))
 
     def __rsub__(self, other: object) -> PropertyBase[TProp]:
         from .expr import make_binary_op
+
         return make_binary_op("sub", self.as_property(other), self)
 
     def __mul__(self, other: object) -> PropertyBase[TProp]:
@@ -229,31 +222,38 @@ class PropertyBase(RuntimeCalculatorBase[TProp, TProp], Generic[TProp], ABC):
 
     def __truediv__(self, other: object) -> PropertyBase[Any]:
         from .expr import make_binary_op
+
         return make_binary_op("truediv", self, self.as_property(other))
 
     def __pow__(self, other: object) -> PropertyBase[Any]:
         from .expr import make_binary_op
+
         return make_binary_op("pow", self, self.as_property(other))
 
     def __rpow__(self, other: object) -> PropertyBase[Any]:
         from .expr import make_binary_op
+
         return make_binary_op("pow", self.as_property(other), self)
 
     def __neg__(self) -> PropertyBase[TProp]:
         from .expr import make_unary_op
+
         return make_unary_op("neg", self)
 
     def __pos__(self) -> PropertyBase[TProp]:
         from .expr import make_unary_op
+
         return make_unary_op("pos", self)
 
     def __abs__(self) -> PropertyBase[TProp]:
         from .expr import make_unary_op
+
         return make_unary_op("abs", self)
 
     def ne(self, other: object) -> PropertyBase[Any]:
         """Return a symbolic ``self != other`` comparison."""
         from .expr import make_binary_op
+
         return make_binary_op("ne", self, self.as_property(other))
 
     def eq_(self, other: object) -> PropertyBase[Any]:
@@ -263,26 +263,31 @@ class PropertyBase(RuntimeCalculatorBase[TProp, TProp], Generic[TProp], ABC):
         not overloaded for symbolic truth testing.
         """
         from .expr import make_binary_op
+
         return make_binary_op("eq", self, self.as_property(other))
 
     def lt(self, other: object) -> PropertyBase[Any]:
         """Return a symbolic ``self < other`` comparison."""
         from .expr import make_binary_op
+
         return make_binary_op("lt", self, self.as_property(other))
 
     def le(self, other: object) -> PropertyBase[Any]:
         """Return a symbolic ``self <= other`` comparison."""
         from .expr import make_binary_op
+
         return make_binary_op("le", self, self.as_property(other))
 
     def gt(self, other: object) -> PropertyBase[Any]:
         """Return a symbolic ``self > other`` comparison."""
         from .expr import make_binary_op
+
         return make_binary_op("gt", self, self.as_property(other))
 
     def ge(self, other: object) -> PropertyBase[Any]:
         """Return a symbolic ``self >= other`` comparison."""
         from .expr import make_binary_op
+
         return make_binary_op("ge", self, self.as_property(other))
 
     __hash__ = object.__hash__

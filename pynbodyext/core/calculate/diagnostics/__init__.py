@@ -4,13 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = [
-    "AccessEvent",
-    "AccessObservation",
-    "PerfCollector",
-    "TraceCollector",
-    "TraceEvent",
-]
+__all__ = ["AccessEvent", "AccessObservation", "PerfCollector", "TraceCollector", "TraceEvent"]
 
 
 def __getattr__(name: str) -> Any:

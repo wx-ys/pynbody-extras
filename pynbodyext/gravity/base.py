@@ -34,8 +34,7 @@ Compute accelerations for a particle set (TreeBH):
 
 Evaluate at arbitrary target points (direct summation):
 
->>> targets = np.array([[0.5, 0.5, 0.5],
-...                     [0.1, 0.2, 0.3]], dtype=np.float64)
+>>> targets = np.array([[0.5, 0.5, 0.5], [0.1, 0.2, 0.3]], dtype=np.float64)
 >>> pot = g.direct_potentials(positions=targets, threads=4)
 """
 
@@ -68,6 +67,7 @@ if TYPE_CHECKING:
 
 __all__ = ["Gravity"]
 
+
 class KernelKind(Enum):
     """Softening kernel type used by direct and TreeBH solvers.
 
@@ -75,9 +75,11 @@ class KernelKind(Enum):
     -----
     The actual kernel implementation is provided by the C++ backend.
     """
+
     No = None
     Plummer = 0
     Spline = 1
+
 
 @dataclass(eq=True, frozen=True)
 class TreeOptions:
@@ -95,12 +97,18 @@ class TreeOptions:
     kernel : KernelKind, optional
         Softening kernel kind used by the solver.
     """
+
     leaf_capacity: int = 8
     multipole_order: int = 3
     kernel: KernelKind = KernelKind.No
 
 
-def _build_tree(positions: NDArray[np.float64], masses: NDArray[np.float64], softening: NDArray[np.float64] | None, options: TreeOptions) -> _Octree:
+def _build_tree(
+    positions: NDArray[np.float64],
+    masses: NDArray[np.float64],
+    softening: NDArray[np.float64] | None,
+    options: TreeOptions,
+) -> _Octree:
     """Build an Octree for the given particle positions and masses.
 
     Parameters
@@ -117,16 +125,8 @@ def _build_tree(positions: NDArray[np.float64], masses: NDArray[np.float64], sof
     tree : _Octree
         The constructed Octree.
     """
-    tree = _Octree(
-        positions,
-        masses,
-        options.leaf_capacity,
-        options.multipole_order,
-        softening,
-        options.kernel.value,
-    )
+    tree = _Octree(positions, masses, options.leaf_capacity, options.multipole_order, softening, options.kernel.value)
     return tree
-
 
 
 class Gravity:
@@ -171,6 +171,7 @@ class Gravity:
     >>> eps[:100] = 0.05
     >>> g = Gravity(pos, mass, softening=eps, kernel=KernelKind.Spline)
     """
+
     def __init__(
         self,
         positions: NDArray[np.float64],
@@ -178,9 +179,8 @@ class Gravity:
         softening: NDArray[np.float64] | float | None = None,
         kernel: KernelKind = KernelKind.No,
         leaf_capacity: int = 8,
-        multipole_order: int = 3
+        multipole_order: int = 3,
     ) -> None:
-
         pos, mass = map(np.asarray, (positions, masses))
         if pos.ndim != 2 or pos.shape[1] != 3:
             raise ValueError("positions must be a float64 array of shape (N, 3)")
@@ -202,29 +202,15 @@ class Gravity:
         self.mass = mass
         self.softening = soft_arr
 
-        self.tree_options = TreeOptions(
-            leaf_capacity,
-            multipole_order,
-            kernel=KernelKind(kernel),
-        )
-        self._tree: None | _Octree = None # Lazy initialization
+        self.tree_options = TreeOptions(leaf_capacity, multipole_order, kernel=KernelKind(kernel))
+        self._tree: None | _Octree = None  # Lazy initialization
 
-
-    def get_tree(
-        self,
-        leaf_capacity: int = 8,
-        multipole_order: int = 3,
-        kernel: KernelKind = KernelKind.No
-    ) -> _Octree:
+    def get_tree(self, leaf_capacity: int = 8, multipole_order: int = 3, kernel: KernelKind = KernelKind.No) -> _Octree:
         """Return (and build if needed) the Octree for the requested options."""
         options = TreeOptions(leaf_capacity, multipole_order, kernel=KernelKind(kernel))
         if options == self.tree_options:
             return self.tree
-        logger.debug(
-            "Building new Octree with leaf_capacity=%d, multipole_order=%d",
-            leaf_capacity,
-            multipole_order
-        )
+        logger.debug("Building new Octree with leaf_capacity=%d, multipole_order=%d", leaf_capacity, multipole_order)
         return _build_tree(self.pos, self.mass, self.softening, options)
 
     @property
@@ -238,10 +224,7 @@ class Gravity:
         return self._tree
 
     def direct_potentials(
-        self,
-        positions: NDArray[np.float64] | None = None,
-        threads: int = 0,
-        kernel: KernelKind | None = None
+        self, positions: NDArray[np.float64] | None = None, threads: int = 0, kernel: KernelKind | None = None
     ) -> NDArray[np.float64]:
         """Compute gravitational potentials using direct summation.
 
@@ -272,8 +255,7 @@ class Gravity:
 
         Potentials at custom target points:
 
-        >>> targets = np.array([[0.0, 0.0, 0.0],
-        ...                     [1.0, 0.0, 0.0]], dtype=np.float64)
+        >>> targets = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float64)
         >>> pot_t = g.direct_potentials(positions=targets, threads=4)
 
         Temporarily override kernel without rebuilding the instance:
@@ -288,10 +270,7 @@ class Gravity:
         return _direct_potentials_at_points_py(self.pos, pos, self.mass, threads, self.softening, k.value)
 
     def direct_accelerations(
-        self,
-        positions: NDArray[np.float64] | None = None,
-        threads: int = 0,
-        kernel: KernelKind | None = None,
+        self, positions: NDArray[np.float64] | None = None, threads: int = 0, kernel: KernelKind | None = None
     ) -> NDArray[np.float64]:
         """Compute gravitational accelerations using direct summation.
 
@@ -326,12 +305,10 @@ class Gravity:
         """
         k = self.tree_options.kernel if kernel is None else KernelKind(kernel)
         if positions is None:
-            return _direct_accelerations_py(self.pos, self.mass,threads, self.softening, k.value)
+            return _direct_accelerations_py(self.pos, self.mass, threads, self.softening, k.value)
         pos = np.asarray(positions, dtype=np.float64)
         assert pos.ndim == 2 and pos.shape[1] == 3, "positions must be of shape (N, 3)"
         return _direct_accelerations_at_points_py(self.pos, pos, self.mass, threads, self.softening, k.value)
-
-
 
     def tree_potentials(
         self,
@@ -341,7 +318,7 @@ class Gravity:
         leaf_capacity: int = 8,
         multipole_order: int = 3,
         kernel: KernelKind | None = None,
-        ) -> NDArray[np.float64]:
+    ) -> NDArray[np.float64]:
         """Compute potentials using the TreeBH (Barnes–Hut) solver.
 
         Parameters
@@ -384,16 +361,12 @@ class Gravity:
         >>> pot_plum = g.tree_potentials(kernel=KernelKind.Plummer)
         """
         k = self.tree_options.kernel if kernel is None else KernelKind(kernel)
-        tree = self.get_tree(
-            leaf_capacity=leaf_capacity,
-            multipole_order=multipole_order,
-            kernel=k
-        )
+        tree = self.get_tree(leaf_capacity=leaf_capacity, multipole_order=multipole_order, kernel=k)
         if positions is None:
             return tree.compute_potentials(theta, threads)
         pos = np.asarray(positions, dtype=np.float64)
         assert pos.ndim == 2 and pos.shape[1] == 3, "positions must be of shape (N, 3)"
-        return tree.potentials_at_points(pos,theta, threads)
+        return tree.potentials_at_points(pos, theta, threads)
 
     def tree_accelerations(
         self,
@@ -403,7 +376,7 @@ class Gravity:
         leaf_capacity: int = 8,
         multipole_order: int = 3,
         kernel: KernelKind | None = None,
-        ) -> NDArray[np.float64]:
+    ) -> NDArray[np.float64]:
         """Compute accelerations using the TreeBH (Barnes–Hut) solver.
 
         Parameters
@@ -452,6 +425,3 @@ class Gravity:
         pos = np.asarray(positions, dtype=np.float64)
         assert pos.ndim == 2 and pos.shape[1] == 3, "positions must be of shape (N, 3)"
         return tree.accelerations_at_points(pos, theta, threads)
-
-
-

@@ -43,12 +43,8 @@ A simplified example in the same style as
 
         def build_handle(self, sim, target, params=None):
             cen = params.mode
-            return GenericTranslation(
-                target,
-                "pos",
-                -cen,
-                description="PosToCenter",
-            )
+            return GenericTranslation(target, "pos", -cen, description="PosToCenter")
+
 
     result = KappaRot().transform(ShiftPosTo("ssc")).run(sim)
     print(result.value)
@@ -137,6 +133,7 @@ HandleT = TypeVar("HandleT")
 
 TransformTarget: TypeAlias = SimSnap | Transformation
 
+
 @dataclass(slots=True)
 class TransformStep:
     """One step recorded inside a :class:`TransformChain` handle."""
@@ -145,10 +142,7 @@ class TransformStep:
     result: TransformResult[Any]
 
 
-class TransformBase(
-    RuntimeCalculatorBase[TransformResult[HandleT], HandleT],
-    Generic[HandleT]
-):
+class TransformBase(RuntimeCalculatorBase[TransformResult[HandleT], HandleT], Generic[HandleT]):
     """Base class for mutating calculators that return transform handles.
 
     Subclasses implement :meth:`build_handle`.  A handle may define ``revert()``
@@ -170,6 +164,7 @@ class TransformBase(
             revert_policy=getattr(self, "revert_policy", RevertPolicy.ALWAYS),
             measure_filter=getattr(self, "measure_filter", None),
         )
+
     def __init__(
         self,
         *,
@@ -189,10 +184,8 @@ class TransformBase(
             payload["move_all"] = self.move_all
         return payload or None
 
-    def declared_dependencies(self) -> list[CalculatorBase[Any,Any]]:
-        if self.measure_filter is None:
-            return []
-        return [self.measure_filter]
+    def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:
+        return [] if self.measure_filter is None else [self.measure_filter]
 
     def _repr_fields(self) -> list[tuple[str | None, Any]]:
         fields = super()._repr_fields()
@@ -206,20 +199,19 @@ class TransformBase(
 
     def revert(self, policy: RevertPolicy | str | bool = RevertPolicy.ALWAYS) -> TransformBase[HandleT]:
         """Return a copy with a different revert policy."""
-        return cast("TransformBase[HandleT]", self._clone(revert_policy=normalize_revert_policy(policy)))
+        return self._clone(revert_policy=normalize_revert_policy(policy))
 
     def measure_with(self, filt: FilterBase | None) -> TransformBase[HandleT]:
         """Return a copy that measures transform parameters on ``filt``."""
-        return cast("TransformBase[HandleT]", self._clone(measure_filter=filt))
+        return self._clone(measure_filter=filt)
 
-    def with_filter(self, filt: FilterBase) -> TransformBase[HandleT]:  # type: ignore[override]
+    def with_filter(self, filt: FilterBase) -> TransformBase[HandleT]:
         """Measure this transform on a filtered view without narrowing downstream sim."""
         return self.measure_with(filt)
 
-    def filter(self, filt: FilterBase) -> TransformBase[HandleT]:   # type: ignore[override]
+    def filter(self, filt: FilterBase) -> TransformBase[HandleT]:
         """Alias for measure_with() on transforms."""
         return self.measure_with(filt)
-
 
     def public_value(self, value: TransformResult[HandleT]) -> HandleT:
         return value.handle
@@ -232,9 +224,7 @@ class TransformBase(
         if input.transform is not None:
             return input.transform.handle
         sim = input.active_sim
-        if self.move_all and hasattr(sim, "ancestor"):
-            return sim.ancestor
-        return sim
+        return sim.ancestor if self.move_all and hasattr(sim, "ancestor") else sim
 
     def make_runtime(self, ctx: ExecutionContext, input: NodeInput) -> TransformRuntime:
         measure_input = input
@@ -270,34 +260,18 @@ class TransformBase(
         values = self.resolve_dynamic_params(ctx, input)
         return self.prepare_params(input.active_sim, values)
 
-
-    def build_handle(
-        self,
-        sim: SimSnap,
-        target: TransformTarget,
-        params: Mapping[str, Any] | None = None,
-    ) -> HandleT:
+    def build_handle(self, sim: SimSnap, target: TransformTarget, params: Mapping[str, Any] | None = None) -> HandleT:
         """Apply the transform and return a handle."""
         raise NotImplementedError(
             f"{type(self).__name__} must implement apply(), build_handle(), _build_handle_runtime(), or compute()."
         )
 
-    def apply(
-        self,
-        sim: SimSnap,
-        target: TransformTarget,
-        params: Mapping[str, Any] | None = None,
-    ) -> HandleT:
+    def apply(self, sim: SimSnap, target: TransformTarget, params: Mapping[str, Any] | None = None) -> HandleT:
         """Apply the transform and return a handle."""
         return self.build_handle(sim, target, params)
 
     def _build_handle_runtime(
-        self,
-        sim: SimSnap,
-        target: TransformTarget,
-        params: Any,
-        ctx: ExecutionContext,
-        input: NodeInput,
+        self, sim: SimSnap, target: TransformTarget, params: Any, ctx: ExecutionContext, input: NodeInput
     ) -> HandleT:
         return self.apply(sim, target, params)
 
@@ -311,22 +285,12 @@ class TransformBase(
             transform_runtime.measure_input,
         )
 
-    def sim_after_transform(
-        self,
-        sim: SimSnap,
-        target: TransformTarget,
-        handle: HandleT,
-    ) -> SimSnap:
+    def sim_after_transform(self, sim: SimSnap, target: TransformTarget, handle: HandleT) -> SimSnap:
         """Return the active simulation view after applying the transform."""
         return sim
 
     def _sim_after_transform_runtime(
-        self,
-        sim: SimSnap,
-        target: TransformTarget,
-        handle: HandleT,
-        ctx: ExecutionContext,
-        input: NodeInput,
+        self, sim: SimSnap, target: TransformTarget, handle: HandleT, ctx: ExecutionContext, input: NodeInput
     ) -> SimSnap:
         return self.sim_after_transform(sim, target, handle)
 
@@ -340,8 +304,7 @@ class TransformBase(
             transform_runtime.measure_input,
         )
         mutation_generation = transform_runtime.ctx.advance_mutation_generation(
-            f"apply {self.log_label}",
-            observed_phase="calculate",
+            f"apply {self.log_label}", observed_phase="calculate"
         )
         return TransformResult(
             handle=computed,
@@ -361,11 +324,8 @@ class TransformBase(
             from pynbodyext.core.calculate.diagnostics.observer import observation_phase
 
             with observation_phase("revert"):
-                handle.revert() # type: ignore[attr-defined]
-                ctx.advance_mutation_generation(
-                    f"revert {self.log_label}",
-                    observed_phase="revert",
-                )
+                handle.revert()  # type: ignore[attr-defined]
+                ctx.advance_mutation_generation(f"revert {self.log_label}", observed_phase="revert")
 
     @classmethod
     def chain(cls, *transforms: TransformBase[Any]) -> TransformBase[Any]:
@@ -389,8 +349,7 @@ class TransformChain(TransformBase[tuple[TransformStep, ...]]):
                 raise TypeError(f"TransformChain only accepts transform nodes, got {type(transform)!r}")
         self.transforms = tuple(transforms)
 
-
-    def declared_dependencies(self) -> list[CalculatorBase[Any,Any]]:
+    def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:
         return list(self.transforms)
 
     def _repr_fields(self) -> list[tuple[str | None, Any]]:
@@ -404,12 +363,7 @@ class TransformChain(TransformBase[tuple[TransformStep, ...]]):
         rows.append(("steps", " -> ".join(transform.log_label for transform in self.transforms)))
         return rows
 
-    def build_handle(
-        self,
-        sim: SimSnap,
-        target: TransformTarget,
-        params: Any = None,
-    ) -> tuple[TransformStep, ...]:
+    def build_handle(self, sim: SimSnap, target: TransformTarget, params: Any = None) -> tuple[TransformStep, ...]:
         raise RuntimeError("TransformChain executes child transforms directly.")
 
     def execute(self, ctx: ExecutionContext, input: NodeInput) -> TransformResult[tuple[TransformStep, ...]]:
@@ -441,7 +395,6 @@ class TransformChain(TransformBase[tuple[TransformStep, ...]]):
                 except Exception as cleanup_error:
                     ctx.log("error", f"transform cleanup failed after error: {cleanup_error}")
             raise
-
 
     def is_revertible(self, handle: tuple[TransformStep, ...]) -> bool:
         """Whether any step in the chain is revertible."""

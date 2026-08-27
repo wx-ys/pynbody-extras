@@ -66,7 +66,7 @@ If you care about execution provenance, trace order, or cache behavior, prefer
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from pynbodyext.core.calculate.diagnostics.observer import (
     AccessObservation,
@@ -76,6 +76,9 @@ from pynbodyext.core.calculate.diagnostics.observer import (
 from pynbodyext.core.calculate.display import compact_repr, mimebundle
 
 from .enums import NodeKind, NodeStatus, RecordPolicy
+
+if TYPE_CHECKING:
+    from pynbodyext.core.calculate.nodes.base import CalculatorBase
 
 T = TypeVar("T")
 
@@ -166,6 +169,7 @@ class ResultNode:
 
     def __repr__(self) -> str:
         from .repr import ResultRepr
+
         return ResultRepr.result_node_repr(self)
 
     def _repr_pretty_(self, printer: Any, cycle: bool) -> None:
@@ -173,6 +177,7 @@ class ResultNode:
 
     def _repr_html_(self) -> str:
         from .repr import ResultRepr
+
         return ResultRepr.result_node_html(self)
 
     def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, str]:
@@ -228,6 +233,11 @@ class Result(Generic[T]):
     root: ResultNode
     nodes: dict[str, ResultNode]
     named: dict[str, ResultNode] = field(default_factory=dict)
+    #: The live calculator that produced this result, when known.  Set by the
+    #: engine to the root node on a live run, and reconstructed from the stored
+    #: ``provenance.calculator_signature_text`` for a result loaded from a store.
+    #: Excluded from equality/repr so it does not change result identity.
+    calculator: CalculatorBase | None = field(default=None, compare=False, repr=False)
     observations: dict[str, AccessObservation] = field(default_factory=dict)
     provenance: ProvenanceInfo | None = None
     perf_summary: PerfSummary = field(default_factory=PerfSummary)
@@ -239,6 +249,7 @@ class Result(Generic[T]):
 
     def __repr__(self) -> str:
         from .repr import ResultRepr
+
         return ResultRepr.result_repr(self)
 
     def _repr_pretty_(self, printer: Any, cycle: bool) -> None:
@@ -246,6 +257,7 @@ class Result(Generic[T]):
 
     def _repr_html_(self) -> str:
         from .repr import ResultRepr
+
         return ResultRepr.result_html(self)
 
     def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, str]:
@@ -291,6 +303,7 @@ class Result(Generic[T]):
     def node(self, id_or_name: str) -> ResultNode:
         """Return a node by node id or registered name."""
         from .query import ResultQuery
+
         return ResultQuery.resolve_node(self, id_or_name)
 
     def has_errors(self) -> bool:
@@ -340,16 +353,11 @@ class Result(Generic[T]):
             access_suffix = ""
             if include_observer and event.event == "leave":
                 observation = self.observations.get(event.node_id)
-                access_text = format_observation_access(
-                    observation,
-                    phase=event.phase,
-                    include_reads=True,
-                )
+                access_text = format_observation_access(observation, phase=event.phase, include_reads=True)
                 if access_text:
                     access_suffix = f" {access_text}"
             lines.append(
-                f"{'  ' * event.depth}{event.node_name}{node_suffix} "
-                f"{event.phase}:{event.event}{access_suffix}"
+                f"{'  ' * event.depth}{event.node_name}{node_suffix} {event.phase}:{event.event}{access_suffix}"
             )
         return "\n".join(lines)
 
@@ -394,15 +402,12 @@ class Result(Generic[T]):
         """Return per-node pynbody field access observations."""
         if self.observations:
             return dict(self.observations)
-        return {
-            node_id: node.observation
-            for node_id, node in self.nodes.items()
-            if node.observation is not None
-        }
+        return {node_id: node.observation for node_id, node in self.nodes.items() if node.observation is not None}
 
     def observation_of(self, node: str | ResultNode) -> AccessObservation | None:
         """Return the access observation for one node, if available."""
         from .query import ResultQuery
+
         resolved = ResultQuery.resolve_node(self, node)
         if resolved.observation is not None:
             return resolved.observation
@@ -413,9 +418,7 @@ class Result(Generic[T]):
         if not include_empty and not show_ids:
             return self.report("observer")
         return render_observer_report(
-            self.access_observations().values(),
-            include_empty=include_empty,
-            show_ids=show_ids,
+            self.access_observations().values(), include_empty=include_empty, show_ids=show_ids
         )
 
     def iter_nodes(self) -> list[ResultNode]:
@@ -429,56 +432,67 @@ class Result(Generic[T]):
     def find(self, query: Any) -> list[ResultNode]:
         """Return nodes matching a calculator class, instance, signature, or predicate."""
         from .query import ResultQuery
+
         return ResultQuery.find(self, query)
 
     def parents_of(self, node: str | ResultNode) -> list[ResultNode]:
         """Return parent nodes for a node id, name, or node object."""
         from .query import ResultQuery
+
         return ResultQuery.parents_of(self, node)
 
     def parent_of(self, node: str | ResultNode) -> ResultNode | None:
         """Return the unique parent node, or ``None`` for the root."""
         from .query import ResultQuery
+
         return ResultQuery.parent_of(self, node)
 
     def children_of(self, node: str | ResultNode) -> list[ResultNode]:
         """Return child nodes for a node id, name, or node object."""
         from .query import ResultQuery
+
         return ResultQuery.children_of(self, node)
 
     def ancestors_of(self, node: str | ResultNode) -> list[ResultNode]:
         """Return ancestor nodes in nearest-first order."""
         from .query import ResultQuery
+
         return ResultQuery.ancestors_of(self, node)
 
     def descendants_of(self, node: str | ResultNode) -> list[ResultNode]:
         """Return descendant nodes in depth-first order."""
         from .query import ResultQuery
+
         return ResultQuery.descendants_of(self, node)
 
     def phases_of(self, node: str | ResultNode) -> list[PhaseRecord]:
         """Return phase records for a node id, name, or node object."""
         from .query import ResultQuery
+
         return ResultQuery.phases_of(self, node)
 
     def walk_depth_first(self) -> list[ResultNode]:
         """Return nodes in depth-first order starting at the root."""
         from .query import ResultQuery
+
         return ResultQuery.walk_depth_first(self)
 
     def find_by_kind(self, kind: str) -> list[ResultNode]:
         """Return nodes whose kind matches ``kind``."""
         from .query import ResultQuery
+
         return ResultQuery.find_by_kind(self, kind)
 
     def find_error_nodes(self) -> list[ResultNode]:
         """Return nodes that captured an exception."""
         from .query import ResultQuery
+
         return ResultQuery.find_error_nodes(self)
 
     def describe_node(self, node: str | ResultNode) -> str:
         """Return a detailed text description of one result node."""
         from .query import ResultQuery
+
         return ResultQuery.describe_node(self, node)
 
     def report_node_tree(
@@ -491,13 +505,8 @@ class Result(Generic[T]):
     ) -> str:
         """Return a tree view of evaluated nodes."""
         from .query import ResultQuery
-        return ResultQuery.node_tree(
-            self,
-            node=node,
-            show_ids=show_ids,
-            max_depth=max_depth,
-            max_children=max_children,
-        )
+
+        return ResultQuery.node_tree(self, node=node, show_ids=show_ids, max_depth=max_depth, max_children=max_children)
 
     def report_execution_tree(
         self,
@@ -513,6 +522,7 @@ class Result(Generic[T]):
     ) -> str:
         """Return a tree report annotated with runtime diagnostics."""
         from .query import ResultQuery
+
         return ResultQuery.execution_tree(
             self,
             node=node,
@@ -526,24 +536,17 @@ class Result(Generic[T]):
         )
 
     def report_perf(
-        self,
-        *,
-        show_ids: bool = False,
-        max_depth: int | None = None,
-        max_children: int | None = None,
+        self, *, show_ids: bool = False, max_depth: int | None = None, max_children: int | None = None
     ) -> str:
         """Return a formatted performance report."""
         from .repr import ResultRepr
-        return ResultRepr.perf_table(
-            self,
-            show_ids=show_ids,
-            max_depth=max_depth,
-            max_children=max_children,
-        )
+
+        return ResultRepr.perf_table(self, show_ids=show_ids, max_depth=max_depth, max_children=max_children)
 
     def report_summary(self) -> str:
         """Return a compact text summary of the run."""
         from .repr import ResultRepr
+
         return ResultRepr.summary(self)
 
     def report_pipeline(
@@ -560,6 +563,7 @@ class Result(Generic[T]):
     ) -> str:
         """Return a multi-section text report for the run."""
         from .repr import ResultRepr
+
         return ResultRepr.pipeline_report(
             self,
             include_perf=include_perf,

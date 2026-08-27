@@ -10,8 +10,8 @@ Storage pattern
 For persisting calculators alongside results, use the two-field pattern::
 
     sig = calculator_to_signature(calc)
-    key  = sig.pretty()       # human-readable, searchable
-    data = sig.to_json()      # full signature for reconstruction
+    key = sig.pretty()  # human-readable, searchable
+    data = sig.to_json()  # full signature for reconstruction
 
     # ... later ...
     calc = calculator_from_signature(data)
@@ -34,7 +34,7 @@ import hashlib
 import importlib
 import io
 import json
-from dataclasses import MISSING, Field, dataclass, fields as dataclass_fields, is_dataclass
+from dataclasses import MISSING, Field, dataclass, field, fields as dataclass_fields, is_dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -106,6 +106,10 @@ class CalculatorSignature:
     payload: dict[str, Any]
     constructible: bool = True
     non_constructible_paths: tuple[str, ...] = ()
+    #: Memoised immutable payload.  ``None`` means "not yet computed"; the frozen
+    #: payload is never ``None``.  Excluded from equality/hash so the memo does
+    #: not affect signature identity.
+    _frozen_cache: Any = field(default=None, init=False, repr=False, compare=False)
 
     @property
     def hash(self) -> str:
@@ -116,7 +120,17 @@ class CalculatorSignature:
         return self.hash[:length]
 
     def frozen_payload(self) -> Any:
-        return _freeze_signature_value(self.payload)
+        """Return the frozen (canonicalised) payload, computed at most once.
+
+        The payload is immutable, so the deep freeze that walks nested values
+        only needs to happen on the first request; subsequent ``cache_key()``
+        calls reuse the memoised result instead of re-walking the whole payload.
+        """
+        cached = self._frozen_cache
+        if cached is None:
+            cached = _freeze_signature_value(self.payload)
+            object.__setattr__(self, "_frozen_cache", cached)
+        return cached
 
     def cache_key(self) -> tuple[Any, ...]:
         return ("calculator_signature", self.frozen_payload())
@@ -134,15 +148,13 @@ class CalculatorSignature:
 
     def to_json(self, *, indent: int | None = None, full: bool = False) -> str:
         return json.dumps(
-            self.as_dict(full=full),
-            sort_keys=True,
-            separators=(",", ":") if indent is None else None,
-            indent=indent,
+            self.as_dict(full=full), sort_keys=True, separators=(",", ":") if indent is None else None, indent=indent
         )
 
     def pretty(self) -> str:
         """Return a compact canonical expression for this signature."""
         from .render import _pretty_calculator
+
         return _pretty_calculator(self.payload)
 
     @classmethod
@@ -210,12 +222,7 @@ def _merge_encoded(value: Any, children: list[_Encoded]) -> _Encoded:
 
 
 def _non_constructible(value: Any, path: str, reason: str, **metadata: Any) -> _Encoded:
-    payload = {
-        "type": "unsupported",
-        "class": _class_path(value),
-        "repr": repr(value),
-        "reason": reason,
-    }
+    payload = {"type": "unsupported", "class": _class_path(value), "repr": repr(value), "reason": reason}
     payload.update(metadata)
     return _Encoded(payload, constructible=False, paths=(path,))
 
@@ -231,7 +238,7 @@ def _short_class_name(path: str) -> str:
     return path.rsplit(".", 1)[-1]
 
 
-def _payload_sort_label(value: Any) -> str: # noqa: PLR0911
+def _payload_sort_label(value: Any) -> str:  # noqa: PLR0911
     if not isinstance(value, dict):
         return type(value).__name__
     node_type = value.get("node")
@@ -302,12 +309,11 @@ class _Encoder:
         return isinstance(value, TransformBase)
 
     @staticmethod
-    def transform_state(
-        calculator: Any, inline_bytes: int, path: str
-    ) -> tuple[dict[str, Any] | None, list[_Encoded]]:
+    def transform_state(calculator: Any, inline_bytes: int, path: str) -> tuple[dict[str, Any] | None, list[_Encoded]]:
         if not _Encoder.is_transform_base(calculator):
             return None, []
         from .enums import RevertPolicy
+
         state: dict[str, Any] = {}
         children: list[_Encoded] = []
         if calculator.revert_policy != RevertPolicy.ALWAYS:
@@ -325,6 +331,7 @@ class _Encoder:
     @staticmethod
     def encode_scope(scope: Any, path: str, inline_bytes: int) -> _Encoded:
         from .enums import RevertPolicy
+
         transforms = [
             _Encoder.encode_calculator_value(t, f"{path}.transforms[{idx}]", inline_bytes)
             for idx, t in enumerate(scope.transforms)
@@ -379,9 +386,10 @@ class _Encoder:
         return _Encoded(sig.payload, constructible=sig.constructible, paths=sig.non_constructible_paths)
 
     @staticmethod
-    def encode_value(value: Any, path: str, inline_bytes: int) -> _Encoded: # noqa: PLR0911
+    def encode_value(value: Any, path: str, inline_bytes: int) -> _Encoded:  # noqa: PLR0911
         """Encode an arbitrary Python value into a JSON-compatible payload."""
         from pynbodyext.core.calculate.nodes.base import CalculatorBase
+
         if isinstance(value, CalculatorBase):
             return _Encoder.encode_calculator_value(value, path, inline_bytes)
         if value is None or isinstance(value, (bool, int, float, str)):
@@ -446,7 +454,7 @@ class _Encoder:
     @staticmethod
     def encode_special(calculator: Any, path: str, inline_bytes: int) -> _Encoded | None:
         """Encode known special calculator types; returns None for unknown types."""
-        from pynbodyext.core.calculate.nodes.base import BoundCalculator, CombinedCalculator
+        from pynbodyext.core.calculate.nodes.base import CombinedCalculator
         from pynbodyext.core.calculate.nodes.expr import (
             CalculatorValueProperty,
             ConstantProperty,
@@ -459,14 +467,7 @@ class _Encoder:
         ts, ts_children = _Encoder.transform_state(calculator, inline_bytes, path)
         encoded: _Encoded | None = None
 
-        if isinstance(calculator, BoundCalculator):
-            base = _Encoder.encode_calculator_value(calculator.base, f"{path}.base", inline_bytes)
-            scope = _Encoder.encode_scope(calculator.scope, f"{path}.scope", inline_bytes)
-            encoded = _merge_encoded(
-                {"node": "bound", "base": base.value, "scope": scope.value}, [base, scope]
-            )
-
-        elif isinstance(calculator, CombinedCalculator):
+        if isinstance(calculator, CombinedCalculator):
             items = [
                 _Encoder.encode_calculator_value(item, f"{path}.items[{i}]", inline_bytes)
                 for i, item in enumerate(calculator.items)
@@ -521,11 +522,7 @@ class _Encoder:
             )
 
         elif isinstance(calculator, LambdaProperty):
-            payload = {
-                "node": "lambda_property",
-                "class": _class_path(calculator),
-                "func_repr": repr(calculator._func),
-            }
+            payload = {"node": "lambda_property", "class": _class_path(calculator), "func_repr": repr(calculator._func)}
             encoded = _Encoded(payload, constructible=False, paths=(f"{path}.func",))
 
         return encoded
@@ -637,9 +634,7 @@ class _Decoder:
 
     @staticmethod
     def unsupported(payload: dict[str, Any]) -> Any:
-        raise ValueError(
-            f"cannot reconstruct unsupported value at {payload.get('class')}: {payload.get('reason')}"
-        )
+        raise ValueError(f"cannot reconstruct unsupported value at {payload.get('class')}: {payload.get('reason')}")
 
     # ------------------------------------------------------------------
     # Value dispatch
@@ -669,29 +664,30 @@ class _Decoder:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def decode_bound(payload: dict[str, Any]) -> Any:
-        from pynbodyext.core.calculate.nodes.base import BoundCalculator
-        return BoundCalculator(
-            base=_Decoder.decode_value(payload["base"]),
-            scope=_Decoder.decode_scope(payload["scope"]),
-        )
+    @staticmethod
+    def decode_scoped(payload: dict[str, Any]) -> Any:
+        """Decode a plain calculator wrapped with a scope (see ``calculator_to_signature``)."""
+        base = _Decoder.decode_value(payload["base"])
+        base.scope = _Decoder.decode_scope(payload["scope"])
+        return base
 
     @staticmethod
     def decode_combined(payload: dict[str, Any]) -> Any:
         from pynbodyext.core.calculate.nodes.base import CombinedCalculator
+
         return CombinedCalculator(*(_Decoder.decode_value(item) for item in payload["items"]))
 
     @staticmethod
     def decode_transform_chain(payload: dict[str, Any]) -> Any:
         cls = _import_object(payload["class"])
         return _Decoder.apply_transform_state(
-            cls(*(_Decoder.decode_value(item) for item in payload["transforms"])),
-            payload.get("transform"),
+            cls(*(_Decoder.decode_value(item) for item in payload["transforms"])), payload.get("transform")
         )
 
     @staticmethod
     def decode_filter_op(payload: dict[str, Any]) -> Any:
         from pynbodyext.core.calculate.nodes.filters import AndFilter, NotFilter, OrFilter
+
         op = payload["op"]
         if op == "and":
             return AndFilter(_Decoder.decode_value(payload["left"]), _Decoder.decode_value(payload["right"]))
@@ -704,16 +700,19 @@ class _Decoder:
     @staticmethod
     def decode_constant_property(payload: dict[str, Any]) -> Any:
         from pynbodyext.core.calculate.nodes.expr import ConstantProperty
+
         return ConstantProperty(_Decoder.decode_value(payload["value"]))
 
     @staticmethod
     def decode_calculator_value_property(payload: dict[str, Any]) -> Any:
         from pynbodyext.core.calculate.nodes.expr import CalculatorValueProperty
+
         return CalculatorValueProperty(_Decoder.decode_value(payload["calculator"]))
 
     @staticmethod
     def decode_op_property(payload: dict[str, Any]) -> Any:
         from pynbodyext.core.calculate.nodes.expr import OpProperty
+
         return OpProperty(payload["op_name"], [_Decoder.decode_value(item) for item in payload["operands"]])
 
     # ------------------------------------------------------------------
@@ -747,6 +746,7 @@ class _Decoder:
         from pynbodyext.core.calculate.runtime.scopes import ScopeSpec
 
         from .enums import RevertPolicy
+
         transforms = tuple(_Decoder.decode_value(item) for item in payload.get("transforms", ()))
         filter_node = _Decoder.decode_value(payload["filter"]) if "filter" in payload else None
         revert_policy = RevertPolicy(payload.get("revert_policy", RevertPolicy.ALWAYS.value))
@@ -764,26 +764,26 @@ class _Decoder:
 
 # Populate handler dicts after class definition.
 _Decoder._VALUE_DECODERS = {
-    "scalar":      lambda p: p.get("value"),
+    "scalar": lambda p: p.get("value"),
     "numpy_scalar": _Decoder.numpy_scalar,
-    "enum":        _Decoder.enum_,
-    "family":      _Decoder.family,
-    "unit":        _Decoder.unit,
-    "array":       _Decoder.array,
-    "tuple":       _Decoder.tuple_,
-    "list":        _Decoder.list_,
-    "dict":        _Decoder.dict_,
-    "calculator":  lambda p: _Decoder.decode_calculator_value(p["value"]),
+    "enum": _Decoder.enum_,
+    "family": _Decoder.family,
+    "unit": _Decoder.unit,
+    "array": _Decoder.array,
+    "tuple": _Decoder.tuple_,
+    "list": _Decoder.list_,
+    "dict": _Decoder.dict_,
+    "calculator": lambda p: _Decoder.decode_calculator_value(p["value"]),
     "unsupported": _Decoder.unsupported,
 }
 _Decoder._SPECIAL_DECODERS = {
-    "bound":                     _Decoder.decode_bound,
-    "combined":                  _Decoder.decode_combined,
-    "transform_chain":           _Decoder.decode_transform_chain,
-    "filter_op":                 _Decoder.decode_filter_op,
-    "constant_property":         _Decoder.decode_constant_property,
+    "scoped": _Decoder.decode_scoped,
+    "combined": _Decoder.decode_combined,
+    "transform_chain": _Decoder.decode_transform_chain,
+    "filter_op": _Decoder.decode_filter_op,
+    "constant_property": _Decoder.decode_constant_property,
     "calculator_value_property": _Decoder.decode_calculator_value_property,
-    "op_property":               _Decoder.decode_op_property,
+    "op_property": _Decoder.decode_op_property,
 }
 
 
@@ -793,10 +793,7 @@ _Decoder._SPECIAL_DECODERS = {
 
 
 def calculator_to_signature(
-    calculator: Any,
-    *,
-    inline_array_bytes: int = DEFAULT_INLINE_ARRAY_BYTES,
-    _path: str = "calculator",
+    calculator: Any, *, inline_array_bytes: int = DEFAULT_INLINE_ARRAY_BYTES, _path: str = "calculator"
 ) -> CalculatorSignature:
     """Return a structured signature for a calculator graph."""
     from pynbodyext.core.calculate.nodes.base import CalculatorBase
@@ -807,14 +804,19 @@ def calculator_to_signature(
     encoded = _Encoder.encode_special(calculator, _path, inline_array_bytes)
     if encoded is None:
         if is_dataclass(calculator):
-            encoded = _Encoder.encode_dataclass(calculator, _path, inline_array_bytes) # type: ignore[unreachable]
+            encoded = _Encoder.encode_dataclass(calculator, _path, inline_array_bytes)  # type: ignore[unreachable]
         else:
             encoded = _Encoder.encode_generic(calculator, _path, inline_array_bytes)
 
+    # A non-empty scope on a calculator must be part of its identity so a scoped
+    # clone gets a different cache key than the unscoped one.
+    scope_spec = getattr(calculator, "scope", None)
+    if scope_spec is not None and not scope_spec.is_empty:
+        scope_e = _Encoder.encode_scope(scope_spec, f"{_path}.scope", inline_array_bytes)
+        encoded = _merge_encoded({"node": "scoped", "base": encoded.value, "scope": scope_e.value}, [encoded, scope_e])
+
     return CalculatorSignature(
-        payload=encoded.value,
-        constructible=encoded.constructible,
-        non_constructible_paths=encoded.paths,
+        payload=encoded.value, constructible=encoded.constructible, non_constructible_paths=encoded.paths
     )
 
 
@@ -837,11 +839,7 @@ def calculator_from_signature(signature: CalculatorSignature | dict[str, Any] | 
     return _Decoder.decode_special(payload)
 
 
-def calculator_pretty_init_args(
-    calculator: Any,
-    *,
-    inline_array_bytes: int = DEFAULT_INLINE_ARRAY_BYTES,
-) -> str:
+def calculator_pretty_init_args(calculator: Any, *, inline_array_bytes: int = DEFAULT_INLINE_ARRAY_BYTES) -> str:
     """Return a pretty-printed string of the calculator's init arguments."""
     if not is_dataclass(calculator):
         return ""
@@ -864,6 +862,7 @@ def calculator_pretty_init_args(
         return ""
 
     from .render import _tree_dataclass_args
+
     return _tree_dataclass_args({"class": _class_path(calculator), "init": init_payload})
 
 
@@ -872,11 +871,7 @@ def calculator_pretty_init_args(
 # ---------------------------------------------------------------------------
 
 
-def calculator_pack(
-    calculator: Any,
-    *,
-    inline_array_bytes: int = DEFAULT_INLINE_ARRAY_BYTES,
-) -> tuple[str, str]:
+def calculator_pack(calculator: Any, *, inline_array_bytes: int = DEFAULT_INLINE_ARRAY_BYTES) -> tuple[str, str]:
     """Pack a calculator into a ``(pretty_key, signature_json)`` pair for storage.
 
     This is the recommended persistence pattern:
@@ -903,11 +898,7 @@ def calculator_pack(
     return sig.pretty(), sig.to_json()
 
 
-def calculator_unpack(
-    signature_json: str,
-    *,
-    pretty_key: str | None = None,
-) -> Any:
+def calculator_unpack(signature_json: str, *, pretty_key: str | None = None) -> Any:
     """Reconstruct a calculator from its stored signature JSON.
 
     This is a thin wrapper around :func:`calculator_from_signature` that

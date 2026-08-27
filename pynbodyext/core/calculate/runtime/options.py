@@ -11,6 +11,7 @@ from pynbodyext.core.calculate.result.enums import ErrorPolicy, RecordPolicy, no
 if TYPE_CHECKING:
     from .progress import ProgressSink
 
+
 @dataclass(slots=True)
 class RunOptions:
     """Execution options for a calculator run.
@@ -54,7 +55,6 @@ class RunOptions:
     cache_small_value_bytes: int = 10_000_000
     auto_record_cached_values: bool = True
     auto_record_small_value_bytes: int | None = 1_000_000
-
 
     def __post_init__(self) -> None:
         self.errors = normalize_error_policy(self.errors)

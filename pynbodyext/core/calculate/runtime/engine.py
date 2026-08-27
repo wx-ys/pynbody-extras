@@ -40,12 +40,14 @@ embedding the execution model into a larger workflow::
 
     from pynbodyext.core.calculate import EvalEngine, PropertyBase
 
+
     class StellarMass(PropertyBase[float]):
         def instance_signature(self):
             return ("stellar_mass",)
 
         def calculate(self, sim):
             return float(sim["mass"].sum())
+
 
     engine = EvalEngine()
     result = engine.run(StellarMass(), sim)
@@ -101,15 +103,18 @@ from .context import ExecutionContext
 from .input import FilterResult, NodeInput
 from .options import RunOptions
 from .progress import NodeProgressEvent, RunProgressEvent
+from .sim_identity import SimIdentityProvider, id_based_sim_identity
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
     from pynbodyext.core.calculate.nodes.base import CalculatorBase
+    from pynbodyext.core.calculate.store.base import ResultStore
 
 T = TypeVar("T")
 TRaw = TypeVar("TRaw")
 TPublic = TypeVar("TPublic")
+
 
 @dataclass(slots=True)
 class _EvaluationPlan:
@@ -119,6 +124,11 @@ class _EvaluationPlan:
     observed_cache_prefix: tuple[Any, ...] | None
     cacheable: bool
     cache_policy: CachePolicy
+    #: Structured signature computed once for this node evaluation.  Shared with
+    #: :meth:`_create_node_result` (and the root provenance) so a node's signature
+    #: is serialized once per run instead of once per consumer.
+    structured_signature: Any | None = None
+
 
 @dataclass(slots=True)
 class _NodeExecutionState:
@@ -159,15 +169,7 @@ class _MinimalBatchContext:
     this class creates **zero** sub-objects beyond itself.
     """
 
-    __slots__ = (
-        "sim",
-        "sim_signature",
-        "options",
-        "engine",
-        "mutation_generation",
-        "_node_stack",
-        "_evaluation_stack",
-    )
+    __slots__ = ("sim", "sim_signature", "options", "engine", "mutation_generation", "_node_stack", "_evaluation_stack")
 
     def __init__(self, sim: Any, options: RunOptions, engine: EvalEngine) -> None:
         self.sim = sim
@@ -195,7 +197,18 @@ class _MinimalBatchContext:
 
 
 class EvalEngine:
-    """Evaluate calculator DAGs in a single run context."""
+    """Evaluate calculator DAGs in a single run context.
+
+    Parameters
+    ----------
+    sim_identity : SimIdentityProvider, optional
+        Callable mapping a simulation object to the identity tuple used in
+        provenance and in-run cache keys.  Defaults to :func:`id_based_sim_identity`,
+        which keys on object ``id``.
+    """
+
+    def __init__(self, *, sim_identity: SimIdentityProvider = id_based_sim_identity) -> None:
+        self._sim_identity = sim_identity
 
     def _class_path(self, value: Any) -> str:
         cls = value if isinstance(value, type) else type(value)
@@ -206,6 +219,8 @@ class EvalEngine:
         node: CalculatorBase[TRaw, TPublic],
         sim: Any,
         options: RunOptions | None = None,
+        *,
+        store: ResultStore | None = None,
     ) -> Result[TPublic]:
         """Run ``node`` on ``sim`` and return a :class:`Result`.
 
@@ -217,17 +232,26 @@ class EvalEngine:
             Simulation object passed to the root calculator.
         options : RunOptions, optional
             Execution options.
+        store : ResultStore, optional
+            When given, the assembled result is persisted on completion keyed by
+            ``(engine.make_sim_signature(sim), root CalculatorSignature)``.  The
+            store is only written to when the run completes cleanly (no errors),
+            so a failed run never silently persists a partial value.
+
+        Notes
+        -----
+        This is the hook that connects the result-store seam (see
+        :mod:`pynbodyext.core.calculate.store`) into the real execution path: the
+        simulation identity comes from the engine's pluggable ``sim_identity``
+        provider, and the calculator identity is the content-addressed root
+        signature.
         """
         opts = options or RunOptions()
         started = time.perf_counter()
         estimated_total_nodes = self._estimate_total_nodes(node)
 
         ctx = ExecutionContext(
-            sim=sim,
-            sim_signature=self.make_sim_signature(sim),
-            run_id=str(uuid.uuid4()),
-            options=opts,
-            engine=self,
+            sim=sim, sim_signature=self.make_sim_signature(sim), run_id=str(uuid.uuid4()), options=opts, engine=self
         )
 
         status = "ok"
@@ -236,10 +260,7 @@ class EvalEngine:
 
         ctx._progress_sink.on_run_start(
             RunProgressEvent(
-                run_id=ctx.run_id,
-                root_name=run_label,
-                started_at=started,
-                total_nodes=estimated_total_nodes,
+                run_id=ctx.run_id, root_name=run_label, started_at=started, total_nodes=estimated_total_nodes
             )
         )
         ctx.log("debug", f"run start: {run_label}")
@@ -269,13 +290,15 @@ class EvalEngine:
             )
             ctx.log("debug", f"run end: {run_label} status={status}")
 
-        return self._assemble_result(
-            node=node,
-            ctx=ctx,
-            root=root,
-            run_label=run_label,
-            started=started,
-        )
+        result = self._assemble_result(node=node, ctx=ctx, root=root, run_label=run_label, started=started)
+
+        if store is not None and not result.errors:
+            calculator_signature = getattr(ctx, "root_signature", None)
+            if calculator_signature is None:
+                calculator_signature = node.to_signature()
+            store.store(result, sim_signature=ctx.sim_signature, calculator_signature=calculator_signature)
+
+        return result
 
     # ------------------------------------------------------------------
     # Batch / light-weight execution path
@@ -315,14 +338,8 @@ class EvalEngine:
         if not node.dependencies():
             return self._run_minimal(node, sim, options)
 
-        # Full light path: BoundCalculator, nested-calculator Param deps, etc.
-        ctx = ExecutionContext(
-            sim=sim,
-            sim_signature=(),
-            run_id="",
-            options=options,
-            engine=self,
-        )
+        # Full light path: nested-calculator Param deps, etc.
+        ctx = ExecutionContext(sim=sim, sim_signature=(), run_id="", options=options, engine=self)
         work = NodeInput(sim_raw=sim, sim_current=sim)
         try:
             root = self._evaluate_light(
@@ -341,12 +358,7 @@ class EvalEngine:
             return None  # type: ignore[return-value]
         return store.public_value
 
-    def _run_minimal(
-        self,
-        node: CalculatorBase[TRaw, TPublic],
-        sim: Any,
-        options: RunOptions,
-    ) -> TPublic:
+    def _run_minimal(self, node: CalculatorBase[TRaw, TPublic], sim: Any, options: RunOptions) -> TPublic:
         """Absolute minimal execution path for nodes with no child CalculatorBase dependencies.
 
         Uses :class:`_MinimalBatchContext` instead of :class:`ExecutionContext` to avoid
@@ -384,7 +396,7 @@ class EvalEngine:
         :meth:`_execute_node_body_light` which bypasses ``node_scope``
         (skips per-node progress events and log-event appends).
 
-        Dependencies of *node* (e.g. child nodes for ``BoundCalculator``) are
+        Dependencies of *node* (e.g. scope filter/transform or child nodes) are
         still evaluated through the normal :meth:`evaluate` path so that
         filters and transforms work correctly.
         """
@@ -433,11 +445,7 @@ class EvalEngine:
         return node_result
 
     def _execute_node_body_light(
-        self,
-        node: CalculatorBase[T, Any],
-        ctx: ExecutionContext,
-        node_result: ResultNode,
-        work: NodeInput,
+        self, node: CalculatorBase[T, Any], ctx: ExecutionContext, node_result: ResultNode, work: NodeInput
     ) -> _NodeExecutionState:
         """Like :meth:`_execute_node_body` but without progress events or log entries.
 
@@ -450,6 +458,7 @@ class EvalEngine:
         state = _NodeExecutionState()
         ctx._node_stack.append(node_result)
         try:
+            work = self._apply_node_scope(node, ctx, work)
             state.raw_value = node.execute(ctx, work)
             state.raw_value = node.materialize(ctx, state.raw_value)
             state.public_value = node.public_value(state.raw_value)
@@ -460,13 +469,42 @@ class EvalEngine:
             ctx._node_stack.pop()
         return state
 
+    def _apply_node_scope(self, node: CalculatorBase[Any, Any], ctx: ExecutionContext, work: NodeInput) -> NodeInput:
+        """Apply ``node.scope`` (transforms then filter) to ``work`` before execution.
+
+        Scoped composition is expressed by cloning the concrete calculator with a
+        non-empty :class:`~.runtime.scopes.ScopeSpec`; the engine applies that scope
+        right before running ``node.execute`` so the same filtering/transform logic
+        works for every calculator type without a wrapper node.
+        """
+        scope = getattr(node, "scope", None)
+        if scope is None or scope.is_empty:
+            return work
+        transform = scope.as_transform()
+        if transform is not None:
+            from pynbodyext.core.calculate.runtime.input import TransformResult
+
+            with ctx.phase(node, "transform"):
+                transform_result = ctx.raw_value(transform, work)
+                if not isinstance(transform_result, TransformResult):
+                    raise TypeError("transform nodes must return TransformResult")
+                work = work.with_transform(transform_result)
+
+        if scope.filter is not None:
+            from pynbodyext.core.calculate.runtime.input import FilterResult
+
+            with ctx.phase(node, "filter"):
+                filter_result = ctx.raw_value(scope.filter, work)
+                if not isinstance(filter_result, FilterResult):
+                    raise TypeError("filter nodes must return FilterResult")
+                work = work.with_selection(filter_result)
+
+        return work
+
     # ------------------------------------------------------------------
 
     def evaluate(
-        self,
-        node: CalculatorBase[TRaw, TPublic],
-        ctx: ExecutionContext,
-        input: NodeInput | None = None
+        self, node: CalculatorBase[TRaw, TPublic], ctx: ExecutionContext, input: NodeInput | None = None
     ) -> ResultNode:
         """Evaluate one node within an existing :class:`ExecutionContext`."""
         plan = self._make_evaluation_plan(node, ctx, input)
@@ -477,9 +515,14 @@ class EvalEngine:
         if cached_node is not None:
             return cached_node
 
-        node_result = self._create_node_result(node, ctx)
+        structured_signature = (
+            plan.structured_signature if plan.structured_signature is not None else node.to_signature()
+        )
+        node_result = self._create_node_result(node, ctx, structured_signature)
         ctx.register_node(node_result)
         is_root = ctx.current_node is None
+        if is_root:
+            ctx.root_signature = structured_signature
 
         ctx._evaluation_stack.append(plan.stack_key)
         try:
@@ -499,26 +542,19 @@ class EvalEngine:
             ctx._evaluation_stack.pop()
 
         return self._finalize_successful_node(
-            node=node,
-            ctx=ctx,
-            node_result=node_result,
-            state=state,
-            plan=plan,
-            is_root=is_root,
+            node=node, ctx=ctx, node_result=node_result, state=state, plan=plan, is_root=is_root
         )
 
     def _make_evaluation_plan(
-        self,
-        node: CalculatorBase[Any, Any],
-        ctx: ExecutionContext,
-        input: NodeInput | None,
+        self, node: CalculatorBase[Any, Any], ctx: ExecutionContext, input: NodeInput | None
     ) -> _EvaluationPlan:
         work = input or NodeInput(sim_raw=ctx.sim, sim_current=ctx.sim)
         work = work.with_mutation_generation(ctx.mutation_generation)
 
         cache_policy = getattr(node, "cache_policy", CachePolicy.AUTO)
         cacheable = bool(getattr(node, "cacheable", True)) and cache_policy != CachePolicy.NONE
-        node_signature = node.signature()
+        compiled_signature = node.to_signature()
+        node_signature = compiled_signature.cache_key()
         observed_cache_prefix = None
         if ctx.options.observe:
             observed_scope = work.observed_scope_cache_token
@@ -527,8 +563,8 @@ class EvalEngine:
             cache_key = observed_cache_prefix
         else:
             cache_token = work.cache_token
-            stack_scope = cache_token   # type: ignore[assignment]
-            cache_key = (ctx.sim_signature, cache_token, node_signature) # type: ignore[assignment]
+            stack_scope = cache_token  # type: ignore[assignment]
+            cache_key = (ctx.sim_signature, cache_token, node_signature)  # type: ignore[assignment]
 
         return _EvaluationPlan(
             work=work,
@@ -537,6 +573,7 @@ class EvalEngine:
             observed_cache_prefix=observed_cache_prefix,
             cacheable=cacheable,
             cache_policy=cache_policy,
+            structured_signature=compiled_signature,
         )
 
     def _estimate_total_nodes(self, node: CalculatorBase[Any, Any]) -> int | None:
@@ -578,18 +615,14 @@ class EvalEngine:
         return None
 
     def _try_cache_hit(
-        self,
-        node: CalculatorBase[Any, Any],
-        ctx: ExecutionContext,
-        plan: _EvaluationPlan,
+        self, node: CalculatorBase[Any, Any], ctx: ExecutionContext, plan: _EvaluationPlan
     ) -> ResultNode | None:
         cached_runtime = None
         cache_key_for_trace = plan.cache_key
         if plan.cacheable:
             if plan.observed_cache_prefix is not None:
                 cached_runtime = ctx.cache.get_compatible(
-                    plan.observed_cache_prefix,
-                    ctx.observed_cache_token_is_current,
+                    plan.observed_cache_prefix, ctx.observed_cache_token_is_current
                 )
                 cache_key_for_trace = plan.observed_cache_prefix
             else:
@@ -612,12 +645,7 @@ class EvalEngine:
                 cached_node.parent_ids.append(parent.node_id)
 
         node_name = cached_node.label or node.log_label
-        ctx.trace.cache(
-            node_id=cached_node.node_id,
-            node_name=node_name,
-            event="hit",
-            key=repr(cache_key_for_trace),
-        )
+        ctx.trace.cache(node_id=cached_node.node_id, node_name=node_name, event="hit", key=repr(cache_key_for_trace))
         ctx.log("debug", f"cache hit: {node_name}", node_id=cached_node.node_id)
 
         now = time.perf_counter()
@@ -638,11 +666,8 @@ class EvalEngine:
         return cached_node
 
     def _create_node_result(
-        self,
-        node: CalculatorBase[Any, Any],
-        ctx: ExecutionContext,
+        self, node: CalculatorBase[Any, Any], ctx: ExecutionContext, structured_signature: Any
     ) -> ResultNode:
-        structured_signature = node.to_signature()
         return ResultNode(
             node_id=ctx.new_node_id(),
             kind=node.kind,
@@ -656,16 +681,13 @@ class EvalEngine:
         )
 
     def _execute_node_body(
-        self,
-        node: CalculatorBase[T, Any],
-        ctx: ExecutionContext,
-        node_result: ResultNode,
-        work: NodeInput,
+        self, node: CalculatorBase[T, Any], ctx: ExecutionContext, node_result: ResultNode, work: NodeInput
     ) -> _NodeExecutionState:
         state = _NodeExecutionState()
         with ctx.node_scope(node_result, node):
             with ctx.observe_node_access(node_result, node):
                 try:
+                    work = self._apply_node_scope(node, ctx, work)
                     state.raw_value = node.execute(ctx, work)
                     with observation_phase("materialize"):
                         state.raw_value = node.materialize(ctx, state.raw_value)
@@ -699,11 +721,7 @@ class EvalEngine:
             node_result.value_summary = self.summarize_value(summary_source)
 
         self._store_recorded_values(
-            node_result,
-            raw_value=raw_value,
-            public_value=public_value,
-            is_root=is_root,
-            had_error=True,
+            node_result, raw_value=raw_value, public_value=public_value, is_root=is_root, had_error=True
         )
 
     def _finalize_successful_node(
@@ -720,11 +738,7 @@ class EvalEngine:
 
         stored_in_runtime_cache = False
         if plan.cacheable and self._should_store_runtime_cache(
-            node,
-            state.raw_value,
-            state.public_value,
-            plan.cache_policy,
-            ctx.options,
+            node, state.raw_value, state.public_value, plan.cache_policy, ctx.options
         ):
             cache_key = plan.cache_key
             if plan.observed_cache_prefix is not None:
@@ -748,11 +762,10 @@ class EvalEngine:
             public_value=state.public_value,
             is_root=is_root,
             had_error=False,
-            auto_record_public_value=stored_in_runtime_cache and self._should_auto_record_public_value(
-                public_value=state.public_value,
-                record_policy=node_result.record_policy,
-                options=ctx.options,
-            )
+            auto_record_public_value=stored_in_runtime_cache
+            and self._should_auto_record_public_value(
+                public_value=state.public_value, record_policy=node_result.record_policy, options=ctx.options
+            ),
         )
         return node_result
 
@@ -765,13 +778,9 @@ class EvalEngine:
         raise RuntimeError("run failed before any result node was registered")
 
     def _build_provenance(
-        self,
-        node: CalculatorBase[Any, Any],
-        ctx: ExecutionContext,
-        started: float,
-        finished: float,
+        self, node: CalculatorBase[Any, Any], ctx: ExecutionContext, started: float, finished: float
     ) -> ProvenanceInfo:
-        root_signature = node.to_signature()
+        root_signature = getattr(ctx, "root_signature", None) or node.to_signature()
         return ProvenanceInfo(
             calculator_signature=root_signature.cache_key(),
             calculator_signature_text=root_signature.to_json(),
@@ -781,12 +790,7 @@ class EvalEngine:
             finished_at=finished,
         )
 
-    def _collect_reports(
-        self,
-        ctx: ExecutionContext,
-        root: ResultNode,
-        run_label: str,
-    ) -> dict[str, str]:
+    def _collect_reports(self, ctx: ExecutionContext, root: ResultNode, run_label: str) -> dict[str, str]:
         return {
             "perf": ctx.perf.report_text(ctx.node_registry, title=run_label),
             "cache": ctx.cache.report_text(),
@@ -795,11 +799,7 @@ class EvalEngine:
             "trace_tree": ctx.trace.render_tree(ctx.node_registry, root.node_id),
         }
 
-    def _collect_diagnostics(
-        self,
-        ctx: ExecutionContext,
-        named: dict[str, ResultNode],
-    ) -> dict[str, Any]:
+    def _collect_diagnostics(self, ctx: ExecutionContext, named: dict[str, ResultNode]) -> dict[str, Any]:
         named_values = {
             name: ctx.runtime_store[node_result.node_id].public_value
             for name, node_result in named.items()
@@ -809,13 +809,10 @@ class EvalEngine:
             "trace_events": list(ctx.trace.events),
             "cache_events": list(ctx.cache.events),
             "observations": {
-                node_id: observation.as_dict()
-                for node_id, observation in ctx.access_observations.items()
+                node_id: observation.as_dict() for node_id, observation in ctx.access_observations.items()
             },
             "observer_events": [
-                event.as_dict()
-                for observation in ctx.access_observations.values()
-                for event in observation.events
+                event.as_dict() for observation in ctx.access_observations.values() for event in observation.events
             ],
             "log_events": list(ctx.log_events),
             "named_values": named_values,
@@ -849,8 +846,7 @@ class EvalEngine:
         perf_summary.cache_store_count = int(cache_summary["stores"])
 
         root_value = cast(
-            "TPublic",
-            ctx.runtime_store[root.node_id].public_value if root.node_id in ctx.runtime_store else None,
+            "TPublic", ctx.runtime_store[root.node_id].public_value if root.node_id in ctx.runtime_store else None
         )
 
         result = Result(
@@ -858,6 +854,7 @@ class EvalEngine:
             root=root,
             nodes=dict(ctx.node_registry),
             named=named,
+            calculator=node,
             observations=dict(ctx.access_observations),
             provenance=provenance,
             perf_summary=perf_summary,
@@ -898,11 +895,7 @@ class EvalEngine:
         return size <= options.cache_small_value_bytes
 
     def _should_auto_record_public_value(
-        self,
-        *,
-        public_value: Any,
-        record_policy: RecordPolicy | None,
-        options: RunOptions,
+        self, *, public_value: Any, record_policy: RecordPolicy | None, options: RunOptions
     ) -> bool:
         if not options.auto_record_cached_values:
             return False
@@ -926,8 +919,7 @@ class EvalEngine:
             size = self._estimate_cache_bytes(value.mask)
         elif isinstance(value, dict):
             size = sum(
-                self._estimate_cache_bytes(key) + self._estimate_cache_bytes(item)
-                for key, item in value.items()
+                self._estimate_cache_bytes(key) + self._estimate_cache_bytes(item) for key, item in value.items()
             )
         elif isinstance(value, (tuple, list)):
             size = sum(self._estimate_cache_bytes(item) for item in value)
@@ -956,7 +948,8 @@ class EvalEngine:
                 node_result.value = public_value
                 node_result.stored_value = True
             if policy == RecordPolicy.FULL or (
-                had_error and policy == RecordPolicy.ERROR_ONLY and raw_value is not None):
+                had_error and policy == RecordPolicy.ERROR_ONLY and raw_value is not None
+            ):
                 node_result.raw_value = raw_value
                 node_result.stored_raw = True
             return
@@ -984,7 +977,6 @@ class EvalEngine:
         elif policy == RecordPolicy.NONE:
             node_result.raw_value = None
             node_result.value = None
-
 
     def summarize_value(self, value: Any) -> ValueSummary | None:
         """Create a compact summary used in reports and result nodes."""
@@ -1022,13 +1014,9 @@ class EvalEngine:
             preview = value.__class__.__name__
 
         return ValueSummary(
-            python_type=value.__class__.__name__,
-            shape=shape,
-            dtype=dtype,
-            units=units,
-            preview=preview,
+            python_type=value.__class__.__name__, shape=shape, dtype=dtype, units=units, preview=preview
         )
 
     def make_sim_signature(self, sim: Any) -> tuple[Any, ...]:
-        """Return the simulation identity fragment used in cache keys."""
-        return ("sim", id(sim))
+        """Return the simulation identity fragment used in cache keys and provenance."""
+        return self._sim_identity(sim)

@@ -1,5 +1,3 @@
-
-
 import warnings
 from typing import Any, Literal
 
@@ -14,6 +12,7 @@ from pynbodyext.log import logger
 
 __all__ = ["WrapBox"]
 
+
 class WrapTransformation(transformation.Transformation):
     """A pynbody Transformation to wrap particle positions into a periodic box.
 
@@ -22,12 +21,14 @@ class WrapTransformation(transformation.Transformation):
       offsets `k` such that: wrapped_pos = original_pos - k * L. Typically, using
       int16 reduces memory dramatically vs. a float64 copy of pos.
     """
+
     def __init__(
         self,
         f: SimSnap | transformation.Transformation,
-        boxsize: float | units.UnitBase | None=None,
+        boxsize: float | units.UnitBase | None = None,
         convention: Literal["center", "upper", "minirange"] = "minirange",
-        k_dtype: DTypeLike = np.int8):
+        k_dtype: DTypeLike = np.int8,
+    ):
         """
         Parameters
         ----------
@@ -48,14 +49,12 @@ class WrapTransformation(transformation.Transformation):
         """
         convention_l = convention.lower()
         if convention_l not in ("center", "upper", "minirange"):
-            raise ValueError(
-                "Unknown wrapping convention, must be 'center', 'upper' or 'minirange'"
-            )
+            raise ValueError("Unknown wrapping convention, must be 'center', 'upper' or 'minirange'")
         self.boxsize = boxsize
         self.convention = convention_l
         self._k_dtype = k_dtype
         self._k_offsets: np.ndarray | None = None  # shape (N, 3), ints
-        description = "Wrap"+convention_l.capitalize()
+        description = f"Wrap{convention_l.capitalize()}"
         super().__init__(f, description=description)
 
     def _resolve_boxsize_float(self, f: SimSnap | None) -> float | None:
@@ -78,6 +77,7 @@ class WrapTransformation(transformation.Transformation):
         if max_abs <= np.iinfo(np.int32).max:
             return np.dtype(np.int32)
         return np.dtype(np.int64)
+
     def _compute_k_and_wrapped(self, v: np.ndarray, L: float, lower: float) -> tuple[np.ndarray, np.ndarray]:
         """Given positions v, box size L and lower bound, return (k, wrapped_v)."""
         k_f = np.floor((v - lower) / L)
@@ -85,9 +85,7 @@ class WrapTransformation(transformation.Transformation):
         wrapped = v - k * L
         return k, wrapped
 
-    def _promote_and_cast_k(
-        self, *k_f_list: np.ndarray
-    ) -> list[np.ndarray]:
+    def _promote_and_cast_k(self, *k_f_list: np.ndarray) -> list[np.ndarray]:
         max_abs = 0.0
         for k_f in k_f_list:
             if k_f.size:
@@ -97,8 +95,7 @@ class WrapTransformation(transformation.Transformation):
         new_k_dtype = self._select_k_dtype(max_abs)
         if new_k_dtype != self._k_dtype:
             warnings.warn(
-                f"wrap: auto-promote k dtype from {self._k_dtype} to {new_k_dtype} "
-                f"(max |k| = {max_abs:.0f})",
+                f"wrap: auto-promote k dtype from {self._k_dtype} to {new_k_dtype} (max |k| = {max_abs:.0f})",
                 stacklevel=2,
             )
             self._k_dtype = new_k_dtype
@@ -123,26 +120,16 @@ class WrapTransformation(transformation.Transformation):
         L = self._resolve_boxsize_float(f)
         logger.debug("wrap: resolved boxsize L=%s", L)
 
-
         if L is None:
             warnings.warn(
-                "wrap: no boxsize specified and snapshot has no 'boxsize' property; skipping wrap",
-                stacklevel=2,
+                "wrap: no boxsize specified and snapshot has no 'boxsize' property; skipping wrap", stacklevel=2
             )
-            logger.warning(
-                "wrap: no boxsize specified and snapshot has no 'boxsize' property; skipping wrap"
-            )
+            logger.warning("wrap: no boxsize specified and snapshot has no 'boxsize' property; skipping wrap")
             return
 
         if L <= 0:
-            warnings.warn(
-                f"wrap: boxsize must be positive, got {L}; skipping wrap",
-                stacklevel=2,
-            )
-            logger.warning(
-                "wrap: boxsize must be positive, got %s; skipping wrap",
-                L,
-            )
+            warnings.warn(f"wrap: boxsize must be positive, got {L}; skipping wrap", stacklevel=2)
+            logger.warning("wrap: boxsize must be positive, got %s; skipping wrap", L)
             return
 
         if self.convention in ("center", "upper"):
@@ -158,32 +145,24 @@ class WrapTransformation(transformation.Transformation):
             y -= ky * L
             z -= kz * L
         elif self.convention == "minirange":
-
             lower_center = -0.5 * L
             lower_upper = 0.0
 
-             # compute candidate k_f for both center & upper so dtype promotion can consider all axes
+            # compute candidate k_f for both center & upper so dtype promotion can consider all axes
             kx_c_f, ky_c_f, kz_c_f = self._compute_kf_for_axes(x, y, z, L, lower_center)
             kx_u_f, ky_u_f, kz_u_f = self._compute_kf_for_axes(x, y, z, L, lower_upper)
 
-            ( kx_c, ky_c, kz_c, kx_u, ky_u, kz_u,
-            ) = self._promote_and_cast_k(
-                kx_c_f, ky_c_f, kz_c_f,
-                kx_u_f, ky_u_f, kz_u_f,
+            (kx_c, ky_c, kz_c, kx_u, ky_u, kz_u) = self._promote_and_cast_k(
+                kx_c_f, ky_c_f, kz_c_f, kx_u_f, ky_u_f, kz_u_f
             )
 
-            axes_v   = (x,    y,    z)
+            axes_v = (x, y, z)
             axes_k_c = (kx_c, ky_c, kz_c)
             axes_k_u = (kx_u, ky_u, kz_u)
             chosen_k = []
 
             for i, (v, kc, ku, _lower_c, _lower_u) in enumerate(
-                zip(
-                axes_v,
-                axes_k_c,
-                axes_k_u,
-                (lower_center,)*3,
-                (lower_upper,)*3, strict=False,)
+                zip(axes_v, axes_k_c, axes_k_u, (lower_center,) * 3, (lower_upper,) * 3, strict=False)
             ):
                 if v.size == 0:
                     chosen_k.append(np.zeros_like(v, dtype=self._k_dtype))
@@ -195,10 +174,7 @@ class WrapTransformation(transformation.Transformation):
                 range_c = float(wrapped_c.max() - wrapped_c.min()) if wrapped_c.size else 0.0
                 range_u = float(wrapped_u.max() - wrapped_u.min()) if wrapped_u.size else 0.0
 
-                logger.debug(
-                    "wrap[minirange]: axis %d range center=%.6g upper=%.6g",
-                    i, range_c, range_u,
-                )
+                logger.debug("wrap[minirange]: axis %d range center=%.6g upper=%.6g", i, range_c, range_u)
 
                 if range_c <= range_u:
                     v[:] = wrapped_c
@@ -248,8 +224,7 @@ class WrapTransformation(transformation.Transformation):
         L = self._resolve_boxsize_float(f)
         if L is None:
             warnings.warn(
-                "wrap: no boxsize specified and snapshot has no 'boxsize' property; skipping wrap",
-                stacklevel=2,
+                "wrap: no boxsize specified and snapshot has no 'boxsize' property; skipping wrap", stacklevel=2
             )
             return
 
@@ -278,12 +253,10 @@ class WrapTransformation(transformation.Transformation):
                 range_c = float(wrapped_c.max() - wrapped_c.min()) if wrapped_c.size else 0.0
                 range_u = float(wrapped_u.max() - wrapped_u.min()) if wrapped_u.size else 0.0
 
-                if range_c <= range_u:
-                    v[:] = wrapped_c
-                else:
-                    v[:] = wrapped_u
+                v[:] = wrapped_c if range_c <= range_u else wrapped_u
         else:
             raise ValueError("Unknown wrapping convention")
+
 
 @TransformBase.dataclass
 class WrapBox(TransformBase[WrapTransformation]):
@@ -304,11 +277,11 @@ class WrapBox(TransformBase[WrapTransformation]):
     move_all: bool, default True
         Whether to perform the wrapping on ancestors (all particles).
     """
+
     boxsize: Param[float | units.UnitBase | None] = Param(default=None, field_name="pos")
     convention: Literal["center", "upper", "minirange"] = "minirange"
     move_all: bool = True
 
-    def build_handle(self, sim, target, params = None):
+    def build_handle(self, sim, target, params=None):
         boxsize = params.boxsize
         return WrapTransformation(target, boxsize=boxsize, convention=self.convention)
-

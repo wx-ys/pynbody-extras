@@ -1,5 +1,3 @@
-
-
 from typing import Any, Literal
 
 import numpy as np
@@ -12,8 +10,7 @@ from .base import Gravity, KernelKind
 
 
 def _coerce_softening(
-    sim: SimSnap,
-    softening: NDArray[np.float64] | SimArray | float | None,
+    sim: SimSnap, softening: NDArray[np.float64] | SimArray | float | None
 ) -> NDArray[np.float64] | float | None:
     if softening is None:
         return None
@@ -27,6 +24,7 @@ def _coerce_softening(
     if isinstance(softening, (float, int)):
         return float(softening)
     return np.asarray(softening, dtype=np.float64)
+
 
 def calculate_potential(
     sim: SimSnap,
@@ -85,8 +83,7 @@ def calculate_potential(
 
     Potentials at custom target points (in the same units as sim["pos"]):
 
-    >>> targets = np.array([[0.0, 0.0, 0.0],
-    ...                     [10.0, 0.0, 0.0]], dtype=np.float64)
+    >>> targets = np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]], dtype=np.float64)
     >>> pot_t = calculate_potential(sim, positions=targets, method="tree", theta=0.6)
 
     With softening + kernel:
@@ -114,13 +111,14 @@ def calculate_potential(
         pot = grav_helper.direct_potentials(positions, threads)
     elif method == "tree":
         theta = kwargs.get("theta", 0.7)
-        pot = grav_helper.tree_potentials(positions,theta, threads)
+        pot = grav_helper.tree_potentials(positions, theta, threads)
     else:
         raise ValueError(f"Unknown method: {method}")
 
     res = SimArray(pot, units.G * sim["mass"].units / sim["pos"].units)
     res.sim = sim
     return res.in_units("km**2 s**-2")
+
 
 def calculate_acceleration(
     sim: SimSnap,
@@ -211,9 +209,6 @@ def calculate_acceleration(
     else:
         raise ValueError(f"Unknown method: {method}")
 
-    res = SimArray(acc, units.G * sim["mass"].units / sim["pos"].units**2)
+    res = SimArray(acc, units.G * sim["mass"].units / sim["pos"].units ** 2)
     res.sim = sim
     return res.in_units("km s**-2")
-
-
-

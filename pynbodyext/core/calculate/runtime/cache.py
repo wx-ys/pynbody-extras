@@ -172,14 +172,7 @@ class RuntimeCache:
             self.compatible_index.setdefault(key[:-1], []).append(key)
         self.store[key] = value
         self.store_count += 1
-        self.events.append(
-            CacheEvent(
-                timestamp=time.perf_counter(),
-                event="store",
-                key=key,
-                node_id=value.node_id,
-            )
-        )
+        self.events.append(CacheEvent(timestamp=time.perf_counter(), event="store", key=key, node_id=value.node_id))
 
     def clear(self) -> None:
         """Remove all cached values and diagnostics."""

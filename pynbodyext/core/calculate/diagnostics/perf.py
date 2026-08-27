@@ -82,6 +82,7 @@ from typing import TYPE_CHECKING
 
 try:
     import psutil
+
     _HAS_PSUTIL = True
 except Exception:
     psutil = None
@@ -143,11 +144,7 @@ class PerfCollector:
 
     @contextmanager
     def phase(
-        self,
-        phase_name: str,
-        *,
-        measure_time: bool = True,
-        measure_memory: bool = False,
+        self, phase_name: str, *, measure_time: bool = True, measure_memory: bool = False
     ) -> Iterator[PhaseRecord]:
         """Context manager that records one phase.
 
@@ -207,11 +204,7 @@ class PerfCollector:
         if started and finished:
             total_time = max(finished) - min(started)
 
-        return PerfSummary(
-            total_time_s=total_time,
-            node_count=len(nodes),
-            cache_hit_count=cache_hit_count,
-        )
+        return PerfSummary(total_time_s=total_time, node_count=len(nodes), cache_hit_count=cache_hit_count)
 
     def report_text(self, nodes: dict[str, ResultNode], title: str = "") -> str:
         """Render a text performance table."""

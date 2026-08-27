@@ -6,6 +6,7 @@ logger = logging.getLogger("pynext")
 # Expose names for import *
 __all__ = ["logger", "setlevel", "set_color", "set_format"]
 
+
 class DuplicateFilter(logging.Filter):
     """A filter that removes duplicated successive log entries."""
 
@@ -18,12 +19,13 @@ class DuplicateFilter(logging.Filter):
             return True
         return False
 
-class BlankLineFormatter(logging.Formatter):
 
+class BlankLineFormatter(logging.Formatter):
     def format(self, record):
-        if record.msg == "" and not record.args: # blank line
+        if record.msg == "" and not record.args:  # blank line
             return ""
         return super().format(record)
+
 
 class _Ansi:
     RESET = "\033[0m"
@@ -34,6 +36,7 @@ class _Ansi:
     MAGENTA = "\033[35m"
     BLUE = "\033[34m"
 
+
 class Fore:
     RED = _Ansi.RED
     YELLOW = _Ansi.YELLOW
@@ -42,8 +45,10 @@ class Fore:
     MAGENTA = _Ansi.MAGENTA
     BLUE = _Ansi.BLUE
 
+
 class Style:
     RESET_ALL = _Ansi.RESET
+
 
 # default format strings
 ufstring = "%(name)s: %(message)s"
@@ -56,7 +61,7 @@ _formats = {
 
 # config holder to avoid rebinding module-level names (avoids `global` usage)
 _config = {
-    "colors_enabled": True,  # None -> auto (detect TTY), True/False -> explicit
+    "colors_enabled": True  # None -> auto (detect TTY), True/False -> explicit
 }
 
 # color palette (mutable dict — we will mutate in-place to avoid `global`)
@@ -68,8 +73,10 @@ _color_palette = {
     logging.CRITICAL: Fore.MAGENTA,
 }
 
+
 class ColoredFormatter(BlankLineFormatter):
     """Formatter that injects color codes into the formatted message based on level."""
+
     def __init__(self, fmt=None, use_colors=None):
         super().__init__(fmt)
         self._use_colors = use_colors
@@ -96,6 +103,7 @@ class ColoredFormatter(BlankLineFormatter):
         # we color the whole formatted line for more visible effect
         return f"{color}{base}{reset}"
 
+
 # configure logger defaults (safe to call multiple times)
 def _ensure_handler():
     # avoid adding duplicate stream handlers if module reloaded
@@ -107,11 +115,13 @@ def _ensure_handler():
     logger.addHandler(handler)
     return handler
 
+
 logger.setLevel(logging.INFO)
 logger.addFilter(DuplicateFilter())
 _ensure_handler()
 
 # Public API functions
+
 
 def setlevel(level: int | str = logging.INFO) -> None:
     """
@@ -136,6 +146,7 @@ def setlevel(level: int | str = logging.INFO) -> None:
             raise ValueError(f"Unknown logging level: {level}")
     logger.setLevel(level)
 
+
 def set_color(enabled: bool = True, palette: dict | None = None) -> None:
     """
     Enable or disable colored output and optionally set a custom palette.
@@ -155,13 +166,15 @@ def set_color(enabled: bool = True, palette: dict | None = None) -> None:
     if palette:
         # update palette in-place (avoids rebinding the module name)
         _color_palette.clear()
-        _color_palette.update({
-            logging.DEBUG: Fore.CYAN,
-            logging.INFO: Fore.GREEN,
-            logging.WARNING: Fore.YELLOW,
-            logging.ERROR: Fore.RED,
-            logging.CRITICAL: Fore.MAGENTA,
-        })
+        _color_palette.update(
+            {
+                logging.DEBUG: Fore.CYAN,
+                logging.INFO: Fore.GREEN,
+                logging.WARNING: Fore.YELLOW,
+                logging.ERROR: Fore.RED,
+                logging.CRITICAL: Fore.MAGENTA,
+            }
+        )
         # then overlay provided palette entries
         _color_palette.update(palette)
 

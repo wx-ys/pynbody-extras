@@ -1,6 +1,3 @@
-
-
-
 import numpy as np
 from pynbody.analysis.angmom import calc_faceon_matrix
 from pynbody.transformation import Rotation
@@ -8,6 +5,7 @@ from pynbody.transformation import Rotation
 from pynbodyext.calculate import Param, TransformBase
 
 __all__ = ["AlignVec"]
+
 
 @TransformBase.dataclass
 class AlignVec(TransformBase[Rotation]):
@@ -24,23 +22,18 @@ class AlignVec(TransformBase[Rotation]):
         Whether to move all particles or only a subset.
 
     """
+
     vector: Param[np.ndarray]
     up: np.ndarray | None = None
     move_all: bool = True
 
-    def build_handle(
-        self,
-        sim,
-        target,
-        params = None,
-    ):
+    def build_handle(self, sim, target, params=None):
         """Apply the transform and return a handle."""
         vec = params.vector
         safe_up = params.up if params.up is not None else self._safe_up(vec)
 
         trans = calc_faceon_matrix(vec, up=safe_up)
-        rota = target.rotate(trans, description=self.__class__.__name__)
-        return rota
+        return target.rotate(trans, description=self.__class__.__name__)
 
     @staticmethod
     def _safe_up(ang: np.ndarray, up: np.ndarray | None = None, parallel_tol: float = 1e-6) -> np.ndarray:

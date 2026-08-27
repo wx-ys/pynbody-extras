@@ -55,6 +55,7 @@ implements :meth:`compute`::
         def public_value(self, value):
             return value["ratio"]
 
+
     result = Ratio(ParamSum("mass"), ParamContain()).run(sim)
     print(result.value)
 
@@ -89,7 +90,7 @@ layer, not the default first choice.
 from __future__ import annotations
 
 from abc import ABC
-from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from pynbodyext.core.calculate.params.fields import ParamView
 from pynbodyext.core.calculate.runtime import CalcRuntime, bind_runtime
@@ -100,9 +101,6 @@ if TYPE_CHECKING:
     from pynbodyext.core.calculate.runtime.context import ExecutionContext
     from pynbodyext.core.calculate.runtime.input import NodeInput
 
-    from .base import BoundCalculator
-    from .filters import FilterBase
-    from .transforms import TransformBase
 
 TRaw = TypeVar("TRaw")
 TPublic = TypeVar("TPublic")
@@ -116,35 +114,6 @@ class RuntimeCalculatorBase(CalculatorBase[TRaw, TPublic], Generic[TRaw, TPublic
 
     ``make_runtime -> resolve_params -> prepare_params -> compute -> wrap_raw``.
     """
-
-    def with_filter(self: TRuntime, filt: FilterBase) -> BoundCalculator[TRuntime, TRaw, TPublic]:
-        """Return a scoped calculator while preserving the concrete base type."""
-        return cast("BoundCalculator[TRuntime, TRaw, TPublic]", super().with_filter(filt))
-
-    def filter(self: TRuntime, filt: FilterBase) -> BoundCalculator[TRuntime, TRaw, TPublic]:
-        """Alias for :meth:`with_filter`."""
-        return self.with_filter(filt)
-
-    def with_transformation(
-        self: TRuntime,
-        transform: TransformBase[Any],
-        *,
-        revert: bool = True,
-    ) -> BoundCalculator[TRuntime, TRaw, TPublic]:
-        """Return a transformed calculator while preserving the concrete base type."""
-        return cast(
-            "BoundCalculator[TRuntime, TRaw, TPublic]",
-            super().with_transformation(transform, revert=revert),
-        )
-
-    def transform(
-        self: TRuntime,
-        transform: TransformBase[Any],
-        *,
-        revert: bool = True,
-    ) -> BoundCalculator[TRuntime, TRaw, TPublic]:
-        """Alias for :meth:`with_transformation`."""
-        return self.with_transformation(transform, revert=revert)
 
     def make_runtime(self, ctx: ExecutionContext, input: NodeInput) -> CalcRuntime:
         """Create the runtime facade passed to advanced hooks."""
@@ -162,7 +131,7 @@ class RuntimeCalculatorBase(CalculatorBase[TRaw, TPublic], Generic[TRaw, TPublic
         :meth:`prepare_resolved_params` when they need the full runtime facade.
         """
         params = ParamView.from_calculator(self, values)
-        return params if params else None
+        return params or None
 
     def prepare_resolved_params(self, runtime: CalcRuntime, values: dict[str, Any]) -> Any:
         """Prepare resolved parameters using the runtime facade."""

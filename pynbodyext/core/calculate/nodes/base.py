@@ -44,10 +44,7 @@ A direct subclass usually implements :meth:`signature_payload`,
             self.total_mass = total_mass
 
         def signature_payload(self):
-            return {
-                "hot_mass": self.hot_mass,
-                "total_mass": self.total_mass,
-            }
+            return {"hot_mass": self.hot_mass, "total_mass": self.total_mass}
 
         def declared_dependencies(self):
             return [self.hot_mass, self.total_mass]
@@ -57,19 +54,13 @@ A direct subclass usually implements :meth:`signature_payload`,
             total = ctx.public_value(self.total_mass, input)
             if total == 0:
                 raise ValueError("total mass is zero")
-            return {
-                "hot_mass": float(hot),
-                "total_mass": float(total),
-                "fraction": float(hot / total),
-            }
+            return {"hot_mass": float(hot), "total_mass": float(total), "fraction": float(hot / total)}
 
         def public_value(self, value):
             return value["fraction"]
 
-    result = HotMassFraction(
-        ParamSum("mass").filter(TemperatureAbove(1.0e5)),
-        ParamSum("mass"),
-    ).run(sim)
+
+    result = HotMassFraction(ParamSum("mass").filter(TemperatureAbove(1.0e5)), ParamSum("mass")).run(sim)
 
     print(result.value)
 
@@ -100,13 +91,14 @@ Most subclasses should not override :meth:`run` or :meth:`__call__`.
 from __future__ import annotations
 
 import copy
-from abc import ABC, abstractmethod
+from abc import ABC
 from contextlib import contextmanager
 from typing import (
     TYPE_CHECKING,
     Any,
     ClassVar,
     Generic,
+    Self,
     TypeVar,
     TypeVarTuple,
     Unpack,
@@ -148,7 +140,6 @@ from pynbodyext.core.calculate.result.enums import (
     RecordPolicy,
     normalize_kind,
 )
-from pynbodyext.core.calculate.runtime.input import FilterResult, NodeInput, TransformResult
 from pynbodyext.core.calculate.runtime.options import RunOptions
 from pynbodyext.core.calculate.runtime.scopes import ScopeSpec
 
@@ -159,7 +150,10 @@ if TYPE_CHECKING:
     from pynbodyext.core.calculate.result.signature import CalculatorSignature
     from pynbodyext.core.calculate.runtime.context import ExecutionContext
     from pynbodyext.core.calculate.runtime.engine import EvalEngine
+    from pynbodyext.core.calculate.runtime.input import NodeInput
     from pynbodyext.core.calculate.runtime.progress import ProgressSink, ProgressVerbosity
+    from pynbodyext.core.calculate.runtime.sim_identity import SimIdentityProvider
+    from pynbodyext.core.calculate.store.base import ResultStore
     from pynbodyext.util._type import SingleElementArray, UnitLike
 
     from .filters import FilterBase
@@ -169,14 +163,15 @@ T = TypeVar("T")
 U = TypeVar("U")
 Ts = TypeVarTuple("Ts")
 Us = TypeVarTuple("Us")
-TBase = TypeVar("TBase", bound="CalculatorBase[Any, Any]")
 TCalc = TypeVar("TCalc", bound="CalculatorBase[Any, Any]")
 
 TRaw = TypeVar("TRaw")
 TPublic = TypeVar("TPublic")
 
+
 def _coerce_unit(value: UnitLike) -> units.UnitBase:
     return units.Unit(value)
+
 
 def _merge_dependencies(*groups: list[CalculatorBase[Any, Any]]) -> list[CalculatorBase[Any, Any]]:
     merged: list[CalculatorBase[Any, Any]] = []
@@ -189,30 +184,21 @@ def _merge_dependencies(*groups: list[CalculatorBase[Any, Any]]) -> list[Calcula
             seen.add(key)
             merged.append(dep)
     return merged
+
+
 def _tree_kind_label(kind: str, *, compact: bool) -> str:
     if not compact:
         return kind
-    return {
-        "property": "prop",
-        "filter": "filt",
-        "transform": "trans",
-        "calculator": "calc",
-        "combined": "comb",
-    }.get(kind, kind)
+    return {"property": "prop", "filter": "filt", "transform": "trans", "calculator": "calc", "combined": "comb"}.get(
+        kind, kind
+    )
 
 
 def _tree_input_node(node: CalculatorBase[Any, Any]) -> CalculatorBase[Any, Any]:
-    if isinstance(node, BoundCalculator):
-        return node.base
     return node
 
 
-def _tree_label_for(
-    node: CalculatorBase[Any, Any],
-    *,
-    show_inputs: bool,
-    compact_kinds: bool,
-) -> str:
+def _tree_label_for(node: CalculatorBase[Any, Any], *, show_inputs: bool, compact_kinds: bool) -> str:
     from pynbodyext.core.calculate.result.signature import calculator_pretty_init_args
 
     label = node.tree_label
@@ -291,91 +277,238 @@ def _tree_render_children(
         lines.append(f"{prefix}└─ {_tree_hidden_label(hidden_children)}")
 
     return lines
-@dataclass_transform(field_specifiers=(Param,))
-class CalculatorBase(Generic[TRaw, TPublic], ABC):
-    """Abstract base class for executable calculator nodes.
 
-    Parameters
-    ----------
-    name : str, optional
-        Human-readable node name.  Named nodes are registered in
-        :attr:`Result.named` and can be retrieved with :meth:`Result.get` when
-        their value is available.
-    record_policy : RecordPolicy, optional
-        Controls whether raw and public values are retained in the returned
-        :class:`Result`.
-    default_options : RunOptions, optional
-        Default execution options used by :meth:`run`, :meth:`__call__`, and
-        :meth:`value`.
 
-    Notes
-    -----
-    Subclasses should make :meth:`signature_payload` stable for calculators
-    that should share cache entries across equivalent instances.
+# ---------------------------------------------------------------------------
+# Focused mixins
+#
+# ``CalculatorBase`` grew to span several unrelated concerns.  These mixins
+# group its methods by concern without changing behaviour: every method below is
+# relocated verbatim from ``CalculatorBase``, and no mixin defines ``__init__``
+# or ``__slots__`` (so the dataclass-style subclass machinery and the existing
+# ``__dict__``/slot layout are untouched).  The code left in ``CalculatorBase``
+# is the contract: class-kind metadata, ``__init__``/``_init_dataclass_base``,
+# the ``dataclass`` classmethod, the ``kind`` property, the abstract
+# ``execute``, and the shared unit-conversion helper.
+# ---------------------------------------------------------------------------
+
+
+class _CalculatorSignatureMixin:
+    """Identity, hashing, and reconstruction of a calculator.
+
+    Kept separate so the save/load system can depend on the structured-signature
+    path without touching the rest of the calculator surface.
     """
 
-    node_kind: NodeKind = BuiltinKinds.CALCULATOR
-    effect: EffectPolicy = EffectPolicy.CONTEXTUAL
-    cacheable: bool = True
-    parallel_safe: bool = True
-    cache_policy: CachePolicy = CachePolicy.AUTO
+    def signature_payload(self) -> Mapping[str, Any] | None:
+        """Return calculator state used by CalculatorSignature generic fallback.
 
-    # Mapping of dynamic parameter names to unit metadata used for runtime resolution.
-    # See :meth:`resolve_dynamic_param` and :mod:`.params` for details.
+        Dataclass calculators and special calculator nodes do not need this.
+        Non-dataclass custom calculators should override it when their behavior
+        depends on constructor state beyond declared dependencies.
+
+        Returns
+        -------
+        Mapping[str, Any] | None
+            A JSON-encodable-or-encodable-by-signature mapping describing this
+            calculator's identity state, or None to fall back to opaque identity.
+        """
+        return None
+
+    def signature(self) -> tuple[Any, ...]:
+        """Return the canonical cache key for this calculator."""
+        return self.to_signature().cache_key()
+
+    def signature_text(self) -> str:
+        """Return the canonical JSON representation of this calculator."""
+        return self.to_signature().to_json()
+
+    def signature_hash(self, *, length: int = 12) -> str:
+        """Return a short hash of the canonical calculator signature."""
+        return self.to_signature().short_hash(length=length)
+
+    def to_signature(self, *, inline_array_bytes: int = 128) -> CalculatorSignature:
+        """Return a structured signature that can reconstruct this calculator when possible."""
+        from pynbodyext.core.calculate.result.signature import calculator_to_signature
+
+        return calculator_to_signature(self, inline_array_bytes=inline_array_bytes)
+
+    @classmethod
+    def from_signature(cls, signature: Any) -> CalculatorBase[Any, Any]:
+        """Reconstruct a calculator from a structured signature."""
+        from pynbodyext.core.calculate.result.signature import calculator_from_signature
+
+        calculator = calculator_from_signature(signature)
+        if not isinstance(calculator, CalculatorBase):
+            raise TypeError(f"signature did not reconstruct a CalculatorBase: {type(calculator)!r}")
+        return calculator
+
+
+class _CalculatorGraphMixin:
+    """Parameter declaration and dependency-traversal for a calculator node."""
+
+    scope: ScopeSpec
+
+    # Declared here (not only on ``CalculatorBase``) so this mixin is
+    # self-contained for static analysis.  ``CalculatorBase`` provides the
+    # concrete value.
     dynamic_param_specs: ClassVar[Mapping[str, DynamicParamSpec | str | None]] = {}
 
-    @overload
-    @classmethod
-    def dataclass(cls, target: type[TCalc], **dataclass_kwargs: Any) -> type[TCalc]: ...
+    def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:
+        """Return explicitly declared calculator dependencies for this node."""
+        return []
 
-    @overload
-    @classmethod
-    def dataclass(cls, target: None = None, **dataclass_kwargs: Any) -> Callable[[type[TCalc]], type[TCalc]]: ...
+    def dynamic_param_names(self) -> tuple[str, ...]:
+        """Return declared dynamic parameter names."""
+        return tuple(type(self).dynamic_param_specs)
 
-    @classmethod
-    @dataclass_transform(field_specifiers=(Param,))
-    def dataclass(
-        cls,
-        target: type[TCalc] | None = None,
-        **dataclass_kwargs: Any,
-    ) -> type[TCalc] | Callable[[type[TCalc]], type[TCalc]]:
-        """Decorate an explicit subclass with dataclass-style calculator fields."""
-        from pynbodyext.core.calculate.params.declarative import dataclass_calc
+    def dynamic_param_spec(self, name: str) -> DynamicParamSpec:
+        """Return normalized metadata for one dynamic parameter."""
+        spec = type(self).dynamic_param_specs.get(name)
+        if isinstance(spec, DynamicParamSpec):
+            return spec
+        if isinstance(spec, str):
+            return DynamicParamSpec(field_name=spec)
+        return DynamicParamSpec()
 
-        def wrap(raw_cls: type[TCalc]) -> type[TCalc]:
-            if not issubclass(raw_cls, cls):
-                raise TypeError(f"{cls.__name__}.dataclass can only decorate {cls.__name__} subclasses.")
-            decorator: Any = dataclass_calc
-            return decorator(raw_cls, **dataclass_kwargs)
+    def dynamic_param_dependencies(self) -> list[CalculatorBase[Any, Any]]:
+        """Return calculator dependencies nested inside dynamic parameters."""
+        deps: list[CalculatorBase[Any, Any]] = []
+        for name in self.dynamic_param_names():
+            deps.extend(dynamic_value_dependencies(getattr(self, name)))
+        return deps
 
-        if target is None:
-            return wrap
-        return wrap(target)
-
-    def _init_dataclass_base(self) -> None:
-        CalculatorBase.__init__(
-            self,
-            name=getattr(self, "name", None),
-            record_policy=getattr(self, "record_policy", None),
-            default_options=getattr(self, "default_options", None),
+    def resolve_param_with(
+        self,
+        resolver: ValueResolver,
+        name: str,
+        *,
+        field_name: str | None = None,
+        target_units: Any | None = None,
+        optional_units: bool | None = None,
+        allow_calculator: bool = True,
+        allow_callable: bool = True,
+        coerce_unit_string: bool = False,
+    ) -> Any:
+        """Resolve one named dynamic parameter using a resolver strategy."""
+        spec = self.dynamic_param_spec(name)
+        return resolve_value_for(
+            resolver,
+            getattr(self, name),
+            field_name=spec.field_name if field_name is None else field_name,
+            target_units=spec.target_units if target_units is None else target_units,
+            optional_units=spec.optional_units if optional_units is None else optional_units,
+            allow_calculator=allow_calculator,
+            allow_callable=allow_callable,
+            coerce_unit_string=coerce_unit_string,
         )
 
-    def __init__(
-        self,
-        *,
-        name: str | None = None,
-        record_policy: RecordPolicy | None = None,
-        default_options: RunOptions | None = None,
-    ) -> None:
-        self.name = name
-        self.record_policy = record_policy
-        self.default_options = default_options or RunOptions()
-        self.scope = ScopeSpec()
+    def resolve_dynamic_param(self, ctx: ExecutionContext, input: NodeInput, name: str, **kwargs: Any) -> Any:
+        """Resolve one named dynamic parameter inside an active run."""
+        return self.resolve_param_with(RuntimeValueResolver(ctx, input), name, **kwargs)
 
+    def resolve_dynamic_params(self, ctx: ExecutionContext, input: NodeInput) -> dict[str, Any]:
+        """Resolve all declared dynamic parameters inside an active run."""
+        resolver = RuntimeValueResolver(ctx, input)
+        return {name: self.resolve_param_with(resolver, name) for name in self.dynamic_param_names()}
+
+    def resolve_param_for_sim(
+        self, sim: Any | None, name: str, *, options: RunOptions | None = None, **kwargs: Any
+    ) -> Any:
+        """Resolve one named dynamic parameter outside an active run."""
+        return self.resolve_param_with(StandaloneValueResolver(sim, options=options), name, **kwargs)
+
+    def resolve_params_for_sim(self, sim: Any | None, *, options: RunOptions | None = None) -> dict[str, Any]:
+        """Resolve all declared dynamic parameters outside an active run."""
+        resolver = StandaloneValueResolver(sim, options=options)
+        return {name: self.resolve_param_with(resolver, name) for name in self.dynamic_param_names()}
+
+    @classmethod
+    def is_dynamic_value(cls, value: Any) -> bool:
+        """Whether a constructor value should be resolved at run time."""
+        return bool(dynamic_value_dependencies(value)) or callable(value)
+
+    def has_dynamic_param(self, name: str) -> bool:
+        """Whether one declared dynamic parameter needs runtime resolution."""
+        return self.is_dynamic_value(getattr(self, name))
+
+    def dependencies(self) -> list[CalculatorBase[Any, Any]]:
+        """Return all calculator dependencies, including dynamic parameters."""
+        return _merge_dependencies(
+            self.declared_dependencies(), self.dynamic_param_dependencies(), self.scope.dependencies()
+        )
+
+    def children(self) -> list[CalculatorBase[Any, Any]]:
+        """Return child nodes shown in graph displays."""
+        return self.dependencies()
+
+
+class _CalculatorLoggingMixin:
+    """Runtime-aware logging helpers for calculator hooks."""
+
+    def current_runtime(self) -> Any | None:
+        """Return the active runtime when this node is inside a run."""
+        from pynbodyext.core.calculate.runtime import current_runtime
+
+        return current_runtime()
+
+    def log(self, level: str, message: str, *, phase: str | None = None) -> None:
+        """Record a runtime log event from simple subclass hooks.
+
+        This is primarily for ``calculate(self, sim, params=None)`` and
+        ``build_handle(...)`` hooks that do not accept ``ctx`` directly. When
+        called outside a calculator run, it falls back to the package logger.
+        """
+        runtime = self.current_runtime()
+        if runtime is not None:
+            runtime.log(level, message, phase=phase)
+            return
+
+        from pynbodyext.log import logger
+
+        log_fn = getattr(logger, level, logger.debug)
+        log_fn(message)
+
+    def debug(self, message: str, *, phase: str | None = None) -> None:
+        self.log("debug", message, phase=phase)
+
+    def info(self, message: str, *, phase: str | None = None) -> None:
+        self.log("info", message, phase=phase)
+
+    def warning(self, message: str, *, phase: str | None = None) -> None:
+        self.log("warning", message, phase=phase)
+
+    def error(self, message: str, *, phase: str | None = None) -> None:
+        self.log("error", message, phase=phase)
+
+
+class _CalculatorDisplayMixin:
+    """Human-readable and notebook-friendly representation of a calculator."""
+
+    name: str | None
+    record_policy: RecordPolicy | None
+    scope: ScopeSpec
+    cache_policy: CachePolicy
+
+    # Method stubs (overridden by the earlier ``_CalculatorSignatureMixin`` /
+    # ``_CalculatorGraphMixin`` bases of ``CalculatorBase``) so this mixin is
+    # self-contained for static analysis without changing runtime MRO.
     @property
     def kind(self) -> NodeKind:
-        """Normalized node kind used for display and signatures."""
-        return normalize_kind(getattr(self, "node_kind", BuiltinKinds.CALCULATOR))
+        """Placeholder overridden by ``CalculatorBase.kind``."""
+        raise NotImplementedError
+
+    def signature_payload(self) -> Mapping[str, Any] | None:
+        raise NotImplementedError
+
+    def signature_hash(self, *, length: int = 12) -> str:
+        raise NotImplementedError
+
+    def dependencies(self) -> list[CalculatorBase[Any, Any]]:
+        raise NotImplementedError
+
+    def children(self) -> list[CalculatorBase[Any, Any]]:
+        raise NotImplementedError
 
     @property
     def log_label(self) -> str:
@@ -458,7 +591,7 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         positional_index = 0
         for key, value in self._repr_fields():  # type: ignore
             if key is None:
-                positional_index += 1   # type: ignore
+                positional_index += 1  # type: ignore
                 label = f"arg{positional_index}"
             else:
                 label = key
@@ -479,235 +612,61 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
                 )
             )
 
-        body_parts.append(
-            html_details(
-                "Dependency tree",
-                html_pre(self.format_tree()),
-                open=False,
-            )
-        )
+        body_parts.append(html_details("Dependency tree", html_pre(self.format_tree()), open=False))
 
-        return html_card(
-            self.__class__.__name__,
-            rows,
-            body="".join(body_parts),
-            escape_values=False,
-        )
+        return html_card(self.__class__.__name__, rows, body="".join(body_parts), escape_values=False)
 
     def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, str]:
         return mimebundle(repr(self), self._repr_html_())
 
-    def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:
-        """Return explicitly declared calculator dependencies for this node."""
-        return []
-
-    def dynamic_param_names(self) -> tuple[str, ...]:
-        """Return declared dynamic parameter names."""
-        return tuple(type(self).dynamic_param_specs)
-
-    def dynamic_param_spec(self, name: str) -> DynamicParamSpec:
-        """Return normalized metadata for one dynamic parameter."""
-        spec = type(self).dynamic_param_specs.get(name)
-        if isinstance(spec, DynamicParamSpec):
-            return spec
-        if isinstance(spec, str):
-            return DynamicParamSpec(field_name=spec)
-        return DynamicParamSpec()
-
-    def signature_payload(self) -> Mapping[str, Any] | None:
-        """Return calculator state used by CalculatorSignature generic fallback.
-
-        Dataclass calculators and special calculator nodes do not need this.
-        Non-dataclass custom calculators should override it when their behavior
-        depends on constructor state beyond declared dependencies.
-
-        Returns
-        -------
-        Mapping[str, Any] | None
-            A JSON-encodable-or-encodable-by-signature mapping describing this
-            calculator's identity state, or None to fall back to opaque identity.
-        """
-        return None
-
-    def dynamic_param_dependencies(self) -> list[CalculatorBase[Any, Any]]:
-        """Return calculator dependencies nested inside dynamic parameters."""
-        deps: list[CalculatorBase[Any, Any]] = []
-        for name in self.dynamic_param_names():
-            deps.extend(dynamic_value_dependencies(getattr(self, name)))
-        return deps
-
-    def resolve_param_with(
+    def format_tree(
         self,
-        resolver: ValueResolver,
-        name: str,
+        max_depth: int | None = None,
+        show_inputs: bool = True,
         *,
-        field_name: str | None = None,
-        target_units: Any | None = None,
-        optional_units: bool | None = None,
-        allow_calculator: bool = True,
-        allow_callable: bool = True,
-        coerce_unit_string: bool = False,
-    ) -> Any:
-        """Resolve one named dynamic parameter using a resolver strategy."""
-        spec = self.dynamic_param_spec(name)
-        return resolve_value_for(
-            resolver,
-            getattr(self, name),
-            field_name=spec.field_name if field_name is None else field_name,
-            target_units=spec.target_units if target_units is None else target_units,
-            optional_units=spec.optional_units if optional_units is None else optional_units,
-            allow_calculator=allow_calculator,
-            allow_callable=allow_callable,
-            coerce_unit_string=coerce_unit_string,
-        )
+        max_children: int | None = None,
+        compact_kinds: bool = True,
+    ) -> str:
+        """Return a text tree of this calculator and its dependencies."""
+        if max_depth is not None and max_depth < 0:
+            raise ValueError("max_depth must be non-negative or None")
+        if max_children is not None and max_children < 0:
+            raise ValueError("max_children must be non-negative or None")
 
-    def resolve_dynamic_param(
-        self,
-        ctx: ExecutionContext,
-        input: NodeInput,
-        name: str,
-        **kwargs: Any,
-    ) -> Any:
-        """Resolve one named dynamic parameter inside an active run."""
-        return self.resolve_param_with(RuntimeValueResolver(ctx, input), name, **kwargs)
+        calculator = cast("CalculatorBase[Any, Any]", self)
+        lines = [_tree_label_for(calculator, show_inputs=show_inputs, compact_kinds=compact_kinds)]
 
-    def resolve_dynamic_params(self, ctx: ExecutionContext, input: NodeInput) -> dict[str, Any]:
-        """Resolve all declared dynamic parameters inside an active run."""
-        resolver = RuntimeValueResolver(ctx, input)
-        return {name: self.resolve_param_with(resolver, name) for name in self.dynamic_param_names()}
+        if max_depth == 0 and calculator.children():
+            lines.append(f"└─ {_tree_hidden_label(calculator.children())}")
+        else:
+            lines.extend(
+                _tree_render_children(
+                    calculator,
+                    prefix="",
+                    depth=1,
+                    max_depth=max_depth,
+                    max_children=max_children,
+                    show_inputs=show_inputs,
+                    compact_kinds=compact_kinds,
+                )
+            )
 
-    def resolve_param_for_sim(
-        self,
-        sim: Any | None,
-        name: str,
-        *,
-        options: RunOptions | None = None,
-        **kwargs: Any,
-    ) -> Any:
-        """Resolve one named dynamic parameter outside an active run."""
-        return self.resolve_param_with(StandaloneValueResolver(sim, options=options), name, **kwargs)
+        return "\n" + "\n".join(lines)
 
-    def resolve_params_for_sim(
-        self,
-        sim: Any | None,
-        *,
-        options: RunOptions | None = None,
-    ) -> dict[str, Any]:
-        """Resolve all declared dynamic parameters outside an active run."""
-        resolver = StandaloneValueResolver(sim, options=options)
-        return {name: self.resolve_param_with(resolver, name) for name in self.dynamic_param_names()}
 
-    @classmethod
-    def is_dynamic_value(cls, value: Any) -> bool:
-        """Whether a constructor value should be resolved at run time."""
-        return bool(dynamic_value_dependencies(value)) or callable(value)
+class _CalculatorRunMixin(Generic[TRaw, TPublic]):
+    """Public execution entry points and run-option resolution."""
 
-    def has_dynamic_param(self, name: str) -> bool:
-        """Whether one declared dynamic parameter needs runtime resolution."""
-        return self.is_dynamic_value(getattr(self, name))
+    default_options: RunOptions
 
-    def dependencies(self) -> list[CalculatorBase[Any, Any]]:
-        """Return all calculator dependencies, including dynamic parameters."""
-        return _merge_dependencies(
-            self.declared_dependencies(),
-            self.dynamic_param_dependencies(),
-        )
-
-    def current_runtime(self) -> Any | None:
-        """Return the active runtime when this node is inside a run."""
-        from pynbodyext.core.calculate.runtime import current_runtime
-
-        return current_runtime()
-
-    def log(self, level: str, message: str, *, phase: str | None = None) -> None:
-        """Record a runtime log event from simple subclass hooks.
-
-        This is primarily for ``calculate(self, sim, params=None)`` and
-        ``build_handle(...)`` hooks that do not accept ``ctx`` directly. When
-        called outside a calculator run, it falls back to the package logger.
-        """
-        runtime = self.current_runtime()
-        if runtime is not None:
-            runtime.log(level, message, phase=phase)
-            return
-
-        from pynbodyext.log import logger
-
-        log_fn = getattr(logger, level, logger.debug)
-        log_fn(message)
-
-    def debug(self, message: str, *, phase: str | None = None) -> None:
-        self.log("debug", message, phase=phase)
-
-    def info(self, message: str, *, phase: str | None = None) -> None:
-        self.log("info", message, phase=phase)
-
-    def warning(self, message: str, *, phase: str | None = None) -> None:
-        self.log("warning", message, phase=phase)
-
-    def error(self, message: str, *, phase: str | None = None) -> None:
-        self.log("error", message, phase=phase)
-
-    def children(self) -> list[CalculatorBase[Any, Any]]:
-        """Return child nodes shown in graph displays."""
-        return self.dependencies()
-
+    # Method stubs (overridden by the earlier ``_CalculatorSignatureMixin``
+    # base of ``CalculatorBase``) so this mixin is self-contained for static
+    # analysis without changing runtime MRO.
     def signature(self) -> tuple[Any, ...]:
-        """Return the canonical cache key for this calculator."""
-        return self.to_signature().cache_key()
-
-
-    def signature_text(self) -> str:
-        """Return the canonical JSON representation of this calculator."""
-        return self.to_signature().to_json()
-
-    def signature_hash(self, *, length: int = 12) -> str:
-        """Return a short hash of the canonical calculator signature."""
-        return self.to_signature().short_hash(length=length)
-
-    def to_signature(self, *, inline_array_bytes: int = 128) -> CalculatorSignature:
-        """Return a structured signature that can reconstruct this calculator when possible."""
-        from pynbodyext.core.calculate.result.signature import calculator_to_signature
-
-        return calculator_to_signature(self, inline_array_bytes=inline_array_bytes)
-
-    @classmethod
-    def from_signature(cls, signature: Any) -> CalculatorBase[Any, Any]:
-        """Reconstruct a calculator from a structured signature."""
-        from pynbodyext.core.calculate.result.signature import calculator_from_signature
-
-        calculator = calculator_from_signature(signature)
-        if not isinstance(calculator, CalculatorBase):
-            raise TypeError(f"signature did not reconstruct a CalculatorBase: {type(calculator)!r}")
-        return calculator
-
-    @abstractmethod
-    def execute(self, ctx: ExecutionContext, input: NodeInput) -> TRaw:
-        """Execute the calculator against an active :class:`NodeInput`.
-
-        Parameters
-        ----------
-        ctx : ExecutionContext
-            Runtime context that owns cache, trace, perf, and dependency
-            evaluation state.
-        input : NodeInput
-            Snapshot view and active scope for this evaluation.
-
-        Returns
-        -------
-        TRaw
-            Raw calculator value before public-value conversion.
-        """
         raise NotImplementedError
 
-    def materialize(self, ctx: ExecutionContext, value: TRaw) -> TRaw:
-        return value
-
-    def public_value(self, value: TRaw) -> TPublic:
-        return cast("TPublic", value)
-
-    def materialize_public(self, ctx: ExecutionContext, value: TPublic) -> TPublic:
-        return value
+    def to_signature(self, *, inline_array_bytes: int = 128) -> CalculatorSignature:
+        raise NotImplementedError
 
     def __call__(
         self,
@@ -725,6 +684,8 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         cache_small_value_bytes: int | None = None,
         auto_record_cached_values: bool | None = None,
         auto_record_small_value_bytes: int | None = None,
+        sim_identity: SimIdentityProvider | None = None,
+        store: ResultStore | None = None,
     ) -> TPublic:
         """Evaluate the calculator and return a public value.
 
@@ -761,6 +722,11 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
             Whether cached SUMMARY nodes may retain their public value.
         auto_record_small_value_bytes: int, optional
             Maximum public-value size eligible for automatic SUMMARY recording.
+        sim_identity : SimIdentityProvider, optional
+            Identity provider for a restart-stable simulation address (see
+            :meth:`run`).
+        store : ResultStore, optional
+            Persistence hook (see :meth:`run`).
 
         Returns
         -------
@@ -781,8 +747,9 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
             cache_small_value_bytes=cache_small_value_bytes,
             auto_record_cached_values=auto_record_cached_values,
             auto_record_small_value_bytes=auto_record_small_value_bytes,
+            sim_identity=sim_identity,
+            store=store,
         ).value
-
 
     def _resolve_run_options(
         self,
@@ -844,6 +811,8 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         cache_small_value_bytes: int | None = None,
         auto_record_cached_values: bool | None = None,
         auto_record_small_value_bytes: int | None = None,
+        sim_identity: SimIdentityProvider | None = None,
+        store: ResultStore | None = None,
     ) -> Result[TPublic]:
         """Run the calculator and return a Result.
 
@@ -877,6 +846,15 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
             Whether cached SUMMARY nodes may retain their public value.
         auto_record_small_value_bytes: int, optional
             Maximum public-value size eligible for automatic SUMMARY recording.
+        sim_identity : SimIdentityProvider, optional
+            Identity provider mapping the simulation object to a stable address
+            tuple (``("sim", "snapshot_103", "halo_0")``).  When given, the engine
+            keys provenance and the store on this identity instead of the default
+            id-based one, so a stored result survives restarts.
+        store : ResultStore, optional
+            When given, the assembled result is persisted on completion keyed by
+            ``(sim_identity(sim), root CalculatorSignature)``.  Only written on a
+            clean run (see :meth:`EvalEngine.run`).
 
         Returns
         -------
@@ -885,7 +863,7 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
         """
         from pynbodyext.core.calculate.runtime.engine import EvalEngine
 
-        engine = EvalEngine()
+        engine = EvalEngine(sim_identity=sim_identity) if sim_identity is not None else EvalEngine()
         merged = self._resolve_run_options(
             options=options,
             cache=cache,
@@ -900,90 +878,149 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
             auto_record_cached_values=auto_record_cached_values,
             auto_record_small_value_bytes=auto_record_small_value_bytes,
         )
-        return engine.run(self, sim, merged)
+        return engine.run(cast("CalculatorBase[Any, TPublic]", self), sim, merged, store=store)
 
-    def value(
-        self,
-        sim: Any,
-        options: RunOptions | None = None,
-        **overrides: Any,
-    ) -> TPublic:
+    def value(self, sim: Any, options: RunOptions | None = None, **overrides: Any) -> TPublic:
         """Evaluate the calculator and return only the public value."""
         return self.run(sim, options=options, **overrides).value
 
-    def named(self, name: str) -> CalculatorBase[TRaw, TPublic]:
+    @contextmanager
+    def batch(self, options: RunOptions | None = None, **overrides: Any) -> Any:  # yields _BatchCaller[TPublic]
+        """Context manager for efficient repeated execution on many sims.
+
+        Pre-computes the node signature once and creates a single
+        :class:`~pynbodyext.core.calculate.runtime.engine.EvalEngine`, then
+        yields a callable ``run_one(sim) -> TPublic`` that uses the lightweight
+        :meth:`~pynbodyext.core.calculate.runtime.engine.EvalEngine.run_light`
+        path for each invocation.
+
+        This avoids the per-call overhead of ``uuid.uuid4()``,
+        ``_estimate_total_nodes``, ``_assemble_result``, and duplicate
+        ``to_signature()`` calls, giving a **~4–10×** speedup over calling
+        ``__call__`` or ``run()`` in a tight loop.
+
+        Example::
+
+            with calc.batch(cache=False, progress=False) as run_one:
+                for sub_sim in bin_subs:
+                    value = run_one(sub_sim)
+
+        Parameters
+        ----------
+        options:
+            Base :class:`~pynbodyext.core.calculate.runtime.options.RunOptions`
+            to use for all iterations.  Keyword *overrides* are merged on top.
+        **overrides:
+            Keyword overrides forwarded to :meth:`_resolve_run_options` (e.g.
+            ``cache=False``, ``progress=False``).
+        """
+        from pynbodyext.core.calculate.runtime.engine import EvalEngine
+
+        opts = self._resolve_run_options(options, **overrides)
+        engine = EvalEngine()
+        node_sig = self.signature()
+        structured_sig = self.to_signature()
+        yield _BatchCaller(cast("CalculatorBase[Any, TPublic]", self), engine, opts, node_sig, structured_sig)
+
+    def _in_sim_units(
+        self,
+        value: UnitLike | float | int | SingleElementArray,
+        sim_parameter: str,
+        sim: Any,
+        target_units: UnitLike | None = None,
+    ) -> float:
+        target_unit = _coerce_unit(target_units) if target_units is not None else sim[sim_parameter].units
+
+        if isinstance(value, str):
+            value = _coerce_unit(value)
+
+        if isinstance(value, units.UnitBase):
+            value = float(value.in_units(target_unit, **sim.conversion_context()))
+
+        if isinstance(value, np.ndarray):
+            if value.ndim == 0 or value.size == 1:
+                if isinstance(value, SimArray):
+                    value = value.in_units(target_unit, **sim.conversion_context()).item()
+                else:
+                    value = value.item()
+            else:
+                raise TypeError(f"value must be scalar-like, got shape {value.shape}")
+
+        if isinstance(value, (int, float)):
+            return float(value)
+
+        raise TypeError(f"unsupported value type: {type(value)!r}")
+
+
+class _CalculatorComposeMixin(Generic[TRaw, TPublic]):
+    """Scoped composition, cloning, and arithmetic operators for a calculator."""
+
+    default_options: RunOptions
+    scope: ScopeSpec
+
+    @property
+    def kind(self) -> NodeKind:
+        """Placeholder overridden by ``CalculatorBase.kind``."""
+        raise NotImplementedError
+
+    def named(self: Self, name: str) -> Self:
         """Return a copy that records this node under ``name``."""
         return self._clone(name=name)
 
-    def record(self, policy: RecordPolicy) -> CalculatorBase[TRaw, TPublic]:
+    def record(self: Self, policy: RecordPolicy) -> Self:
         """Return a copy with a different result recording policy."""
         return self._clone(record_policy=policy)
 
-    def with_filter(self, filt: FilterBase) -> BoundCalculator[Any, TRaw, TPublic]:
+    def with_filter(self: Self, filt: FilterBase) -> Self:
         """Return a calculator evaluated on the subset selected by ``filt``."""
-        return BoundCalculator(base=self, scope=self.scope.with_filter(filt))
+        return self._clone(scope=self.scope.with_filter(filt))
 
-    def filter(self, filt: FilterBase) -> BoundCalculator[Any, TRaw, TPublic]:
+    def filter(self: Self, filt: FilterBase) -> Self:
         """Alias for :meth:`with_filter`."""
         return self.with_filter(filt)
 
-    def with_transformation(
-        self,
-        transform: TransformBase[Any],
-        *,
-        revert: bool = True,
-    ) -> BoundCalculator[Any, TRaw, TPublic]:
+    def with_transformation(self: Self, transform: TransformBase[Any], *, revert: bool = True) -> Self:
         """Return a calculator evaluated after a pre-transform."""
-        return BoundCalculator(base=self, scope=self.scope.with_transform(transform, revert=revert))
+        return self._clone(scope=self.scope.with_transform(transform, revert=revert))
 
-    def transform(
-        self,
-        transform: TransformBase[Any],
-        *,
-        revert: bool = True,
-    ) -> BoundCalculator[Any, TRaw, TPublic]:
+    def transform(self: Self, transform: TransformBase[Any], *, revert: bool = True) -> Self:
         """Return a calculator evaluated after applying ``transform``."""
         return self.with_transformation(transform, revert=revert)
 
-    def keep(self, name: str, policy: RecordPolicy = RecordPolicy.FULL) -> CalculatorBase[TRaw, TPublic]:
+    def keep(self: Self, name: str, policy: RecordPolicy = RecordPolicy.FULL) -> Self:
         """Name the node and retain its value in the returned result."""
         return self._clone(name=name, record_policy=policy)
 
-    def _with_options(self, **changes: Any) -> CalculatorBase[TRaw, TPublic]:
+    def _with_options(self: Self, **changes: Any) -> Self:
         opts = copy.copy(self.default_options)
         for key, value in changes.items():
             setattr(opts, key, value)
         return self._clone(default_options=opts)
 
-    def with_cache(self, enabled: bool = True) -> CalculatorBase[TRaw, TPublic]:
+    def with_cache(self: Self, enabled: bool = True) -> Self:
         """Return a copy with a default cache override."""
         return self._with_options(cache=enabled)
 
-    def with_perf(
-        self,
-        *,
-        time: bool = True,
-        memory: bool = False,
-    ) -> CalculatorBase[TRaw, TPublic]:
+    def with_perf(self: Self, *, time: bool = True, memory: bool = False) -> Self:
         """Return a copy with performance collection defaults."""
         return self._with_options(perf_time=time, perf_memory=memory)
 
     def with_progress(
-        self,
+        self: Self,
         progress: bool | ProgressVerbosity | ProgressSink | list[ProgressSink] | tuple[ProgressSink, ...] = True,
-    ) -> CalculatorBase[TRaw, TPublic]:
+    ) -> Self:
         """Return a copy with a default progress reporting option."""
         return self._with_options(progress=progress)
 
-    def with_observer(self, enabled: bool = True) -> CalculatorBase[TRaw, TPublic]:
+    def with_observer(self: Self, enabled: bool = True) -> Self:
         """Return a copy with diagnostic field-access observation enabled or disabled."""
         return self._with_options(observe=enabled)
 
-    def with_backend(self, name: str) -> CalculatorBase[TRaw, TPublic]:
+    def with_backend(self: Self, name: str) -> Self:
         """Return a copy with a default backend label."""
         return self._with_options(backend=name)
 
-    def with_record_policy(self, policy: RecordPolicy) -> CalculatorBase[TRaw, TPublic]:
+    def with_record_policy(self: Self, policy: RecordPolicy) -> Self:
         """Alias for :meth:`record`."""
         return self.record(policy)
 
@@ -1026,135 +1063,17 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
     def __rpow__(self, other: object) -> CalculatorBase[Any, Any]:
         return self._as_value_property().__rpow__(other)
 
-
-
-    def format_tree(
-        self,
-        max_depth: int | None = None,
-        show_inputs: bool = True,
-        *,
-        max_children: int | None = None,
-        compact_kinds: bool = True,
-    ) -> str:
-        """Return a text tree of this calculator and its dependencies."""
-        if max_depth is not None and max_depth < 0:
-            raise ValueError("max_depth must be non-negative or None")
-        if max_children is not None and max_children < 0:
-            raise ValueError("max_children must be non-negative or None")
-
-        lines = [
-            _tree_label_for(
-                self,
-                show_inputs=show_inputs,
-                compact_kinds=compact_kinds,
-            )
-        ]
-
-        if max_depth == 0 and self.children():
-            lines.append(f"└─ {_tree_hidden_label(self.children())}")
-        else:
-            lines.extend(
-                _tree_render_children(
-                    self,
-                    prefix="",
-                    depth=1,
-                    max_depth=max_depth,
-                    max_children=max_children,
-                    show_inputs=show_inputs,
-                    compact_kinds=compact_kinds,
-                )
-            )
-
-        return "\n" + "\n".join(lines)
-
-    def _clone(self, **changes: Any) -> CalculatorBase[TRaw, TPublic]:
+    def _clone(self: Self, **changes: Any) -> Self:
         clone = copy.copy(self)
         for key, value in changes.items():
             setattr(clone, key, value)
         return clone
 
-    @contextmanager
-    def batch(
-        self,
-        options: RunOptions | None = None,
-        **overrides: Any,
-    ) -> Any:  # yields _BatchCaller[TPublic]
-        """Context manager for efficient repeated execution on many sims.
-
-        Pre-computes the node signature once and creates a single
-        :class:`~pynbodyext.core.calculate.runtime.engine.EvalEngine`, then
-        yields a callable ``run_one(sim) -> TPublic`` that uses the lightweight
-        :meth:`~pynbodyext.core.calculate.runtime.engine.EvalEngine.run_light`
-        path for each invocation.
-
-        This avoids the per-call overhead of ``uuid.uuid4()``,
-        ``_estimate_total_nodes``, ``_assemble_result``, and duplicate
-        ``to_signature()`` calls, giving a **~4–10×** speedup over calling
-        ``__call__`` or ``run()`` in a tight loop.
-
-        Example::
-
-            with calc.batch(cache=False, progress=False) as run_one:
-                for sub_sim in bin_subs:
-                    value = run_one(sub_sim)
-
-        Parameters
-        ----------
-        options:
-            Base :class:`~pynbodyext.core.calculate.runtime.options.RunOptions`
-            to use for all iterations.  Keyword *overrides* are merged on top.
-        **overrides:
-            Keyword overrides forwarded to :meth:`_resolve_run_options` (e.g.
-            ``cache=False``, ``progress=False``).
-        """
-        from pynbodyext.core.calculate.runtime.engine import EvalEngine
-
-        opts = self._resolve_run_options(options, **overrides)
-        engine = EvalEngine()
-        node_sig = self.signature()
-        structured_sig = self.to_signature()
-        yield _BatchCaller(self, engine, opts, node_sig, structured_sig)  # pyright: ignore[reportUndefinedVariable]
-
-    def _in_sim_units(
-        self,
-        value: UnitLike | float | int | SingleElementArray,
-        sim_parameter: str,
-        sim: Any,
-        target_units: UnitLike | None = None,
-    ) -> float:
-        target_unit = _coerce_unit(target_units) if target_units is not None else sim[sim_parameter].units
-
-        if isinstance(value, str):
-            value = _coerce_unit(value)
-
-        if isinstance(value, units.UnitBase):
-            value = float(value.in_units(target_unit, **sim.conversion_context()))
-
-        if isinstance(value, np.ndarray):
-            if value.ndim == 0 or value.size == 1:
-                if isinstance(value, SimArray):
-                    value = value.in_units(target_unit, **sim.conversion_context()).item()
-                else:
-                    value = value.item()
-            else:
-                raise TypeError(f"value must be scalar-like, got shape {value.shape}")
-
-        if isinstance(value, (int, float)):
-            return float(value)
-
-        raise TypeError(f"unsupported value type: {type(value)!r}")
+    @overload
+    def __and__(self, other: CombinedCalculator[Unpack[Us]]) -> CombinedCalculator[TPublic, Unpack[Us]]: ...
 
     @overload
-    def __and__(
-        self,
-        other: CombinedCalculator[Unpack[Us]],
-    ) -> CombinedCalculator[TPublic, Unpack[Us]]: ...
-
-    @overload
-    def __and__(
-        self,
-        other: CalculatorBase[Any, U],
-    ) -> CombinedCalculator[TPublic, U]: ...
+    def __and__(self, other: CalculatorBase[Any, U]) -> CombinedCalculator[TPublic, U]: ...
 
     def __and__(self, other: object) -> CombinedCalculator[Any, Any]:
         if not isinstance(other, CalculatorBase):
@@ -1162,10 +1081,132 @@ class CalculatorBase(Generic[TRaw, TPublic], ABC):
 
         if self.kind == BuiltinKinds.FILTER and other.kind == BuiltinKinds.FILTER:
             from .filters import AndFilter
+
             and_filter = cast("Any", AndFilter)
             return and_filter(self, other)
 
-        return CombinedCalculator(self, other)
+        return CombinedCalculator(cast("CalculatorBase[Any, Any]", self), other)
+
+
+@dataclass_transform(field_specifiers=(Param, Param.static))
+class CalculatorBase(
+    _CalculatorSignatureMixin,
+    _CalculatorGraphMixin,
+    _CalculatorLoggingMixin,
+    _CalculatorDisplayMixin,
+    _CalculatorRunMixin[TRaw, TPublic],
+    _CalculatorComposeMixin[TRaw, TPublic],
+    Generic[TRaw, TPublic],
+    ABC,
+):
+    """Abstract base class for executable calculator nodes.
+
+    Parameters
+    ----------
+    name : str, optional
+        Human-readable node name.  Named nodes are registered in
+        :attr:`Result.named` and can be retrieved with :meth:`Result.get` when
+        their value is available.
+    record_policy : RecordPolicy, optional
+        Controls whether raw and public values are retained in the returned
+        :class:`Result`.
+    default_options : RunOptions, optional
+        Default execution options used by :meth:`run`, :meth:`__call__`, and
+        :meth:`value`.
+
+    Notes
+    -----
+    Subclasses should make :meth:`signature_payload` stable for calculators
+    that should share cache entries across equivalent instances.
+    """
+
+    node_kind: NodeKind = BuiltinKinds.CALCULATOR
+    effect: EffectPolicy = EffectPolicy.CONTEXTUAL
+    cacheable: bool = True
+    parallel_safe: bool = True
+    cache_policy: CachePolicy = CachePolicy.AUTO
+
+    # Mapping of dynamic parameter names to unit metadata used for runtime resolution.
+    # See :meth:`resolve_dynamic_param` and :mod:`.params` for details.
+    dynamic_param_specs: ClassVar[Mapping[str, DynamicParamSpec | str | None]] = {}
+
+    @overload
+    @classmethod
+    def dataclass(cls, target: type[TCalc], **dataclass_kwargs: Any) -> type[TCalc]: ...
+
+    @overload
+    @classmethod
+    def dataclass(cls, target: None = None, **dataclass_kwargs: Any) -> Callable[[type[TCalc]], type[TCalc]]: ...
+
+    @classmethod
+    @dataclass_transform(field_specifiers=(Param, Param.static))
+    def dataclass(
+        cls, target: type[TCalc] | None = None, **dataclass_kwargs: Any
+    ) -> type[TCalc] | Callable[[type[TCalc]], type[TCalc]]:
+        """Decorate an explicit subclass with dataclass-style calculator fields."""
+        from pynbodyext.core.calculate.params.declarative import dataclass_calc
+
+        def wrap(raw_cls: type[TCalc]) -> type[TCalc]:
+            if not issubclass(raw_cls, cls):
+                raise TypeError(f"{cls.__name__}.dataclass can only decorate {cls.__name__} subclasses.")
+            decorator: Any = dataclass_calc
+            return decorator(raw_cls, **dataclass_kwargs)
+
+        if target is None:
+            return wrap
+        return wrap(target)
+
+    def _init_dataclass_base(self) -> None:
+        CalculatorBase.__init__(
+            self,
+            name=getattr(self, "name", None),
+            record_policy=getattr(self, "record_policy", None),
+            default_options=getattr(self, "default_options", None),
+        )
+
+    def __init__(
+        self,
+        *,
+        name: str | None = None,
+        record_policy: RecordPolicy | None = None,
+        default_options: RunOptions | None = None,
+    ) -> None:
+        self.name = name
+        self.record_policy = record_policy
+        self.default_options = default_options or RunOptions()
+        self.scope = ScopeSpec()
+
+    @property
+    def kind(self) -> NodeKind:
+        """Normalized node kind used for display and signatures."""
+        return normalize_kind(getattr(self, "node_kind", BuiltinKinds.CALCULATOR))
+
+    def execute(self, ctx: ExecutionContext, input: NodeInput) -> TRaw:
+        """Execute the calculator against an active :class:`NodeInput`.
+
+        Parameters
+        ----------
+        ctx : ExecutionContext
+            Runtime context that owns cache, trace, perf, and dependency
+            evaluation state.
+        input : NodeInput
+            Snapshot view and active scope for this evaluation.
+
+        Returns
+        -------
+        TRaw
+            Raw calculator value before public-value conversion.
+        """
+        raise NotImplementedError
+
+    def materialize(self, ctx: ExecutionContext, value: TRaw) -> TRaw:
+        return value
+
+    def public_value(self, value: TRaw) -> TPublic:
+        return cast("TPublic", value)
+
+    def materialize_public(self, ctx: ExecutionContext, value: TPublic) -> TPublic:
+        return value
 
 
 class _BatchCaller(Generic[TPublic]):
@@ -1204,189 +1245,7 @@ class _BatchCaller(Generic[TPublic]):
         )
 
 
-class BoundCalculator(CalculatorBase[TRaw, TPublic], Generic[TBase, TRaw, TPublic]):
-    """Calculator wrapper that applies a scope before running a base node.
-
-    ``BoundCalculator`` is created by methods such as
-    :meth:`CalculatorBase.filter`, :meth:`CalculatorBase.transform`, and
-    :meth:`Scope.apply`.  The concrete wrapped calculator type is preserved on
-    :attr:`base`, so scoped calculators can still expose original dataclass
-    fields through ``scoped.base`` in static analysis.
-    """
-
-    node_kind = BuiltinKinds.CALCULATOR
-
-    def __init__(
-        self,
-        *,
-        base: TBase,
-        pre_filter: FilterBase | None = None,
-        pre_transform: TransformBase[Any] | None = None,
-        revert_transform: bool = True,
-        scope: ScopeSpec | None = None,
-        name: str | None = None,
-        record_policy: RecordPolicy | None = None,
-        default_options: RunOptions | None = None,
-    ) -> None:
-        super().__init__(
-            name=name or base.name,
-            record_policy=record_policy or base.record_policy,
-            default_options=default_options or base.default_options,
-        )
-        self.base = base
-        if scope is None:
-            scope = ScopeSpec(filter=pre_filter)
-            if pre_transform is not None:
-                scope = scope.with_transform(pre_transform, revert=revert_transform)
-        self.scope = scope
-        self.pre_filter = scope.filter
-        self.pre_transform = scope.as_transform()
-        self.revert_transform = scope.should_revert
-        if self.pre_transform is not None:
-            self.cacheable = False
-
-    @property
-    def kind(self) -> NodeKind:
-        """Kind inherited from the wrapped base calculator."""
-        return self.base.kind
-
-    @property
-    def log_label(self) -> str:
-        """Use the wrapped calculator label instead of the wrapper class name."""
-        return self.name or self.base.log_label
-
-    @property
-    def tree_label(self) -> str:
-        return self.log_label
-
-    def children(self) -> list[CalculatorBase[Any, Any]]:
-        """Display children for graph views.
-
-        The wrapper node already represents ``base`` itself, so tree displays
-        should expand the base children directly instead of showing an extra
-        nested copy of the base node.
-        """
-        children = list(self.base.children())
-        if self.pre_filter is not None:
-            children.append(self.pre_filter)
-        if self.pre_transform is not None:
-            children.append(self.pre_transform)
-        return children
-
-    def declared_dependencies(self) -> list[CalculatorBase[Any, Any]]:
-        deps: list[CalculatorBase[Any, Any]] = [self.base]
-        if self.pre_filter is not None:
-            deps.append(self.pre_filter)
-        if self.pre_transform is not None:
-            deps.append(self.pre_transform)
-        return deps
-
-    def _repr_fields(self) -> list[tuple[str | None, Any]]:
-        fields: list[tuple[str | None, Any]] = [("base", self.base)]
-        if self.pre_filter is not None:
-            fields.append(("filter", self.pre_filter))
-        if self.pre_transform is not None:
-            fields.append(("transform", self.pre_transform))
-            fields.append(("revert", self.revert_transform))
-        if self.name is not None and self.name != self.base.name:
-            fields.append(("name", self.name))
-        if self.record_policy is not None and self.record_policy != self.base.record_policy:
-            fields.append(("record", display_value(self.record_policy)))
-        return fields
-
-    def materialize(self, ctx: ExecutionContext, value: TRaw) -> TRaw:
-        return self.base.materialize(ctx, value)
-
-    def public_value(self, value: TRaw) -> TPublic:
-        return self.base.public_value(value)
-
-    def materialize_public(self, ctx: ExecutionContext, value: TPublic) -> TPublic:
-        return self.base.materialize_public(ctx, value)
-
-    def execute(self, ctx: ExecutionContext, input: NodeInput) -> TRaw:
-        work = input
-        transform_result: TransformResult[Any] | None = None
-
-        if self.pre_transform is not None:
-            with ctx.phase(self, "transform"):
-                transform_result = ctx.raw_value(self.pre_transform, work)
-                if not isinstance(transform_result, TransformResult):
-                    raise TypeError("transform nodes must return TransformResult")
-                work = work.with_transform(transform_result)
-
-        if self.pre_filter is not None:
-            with ctx.phase(self, "filter"):
-                filter_result = ctx.raw_value(self.pre_filter, work)
-                if not isinstance(filter_result, FilterResult):
-                    raise TypeError("filter nodes must return FilterResult")
-                work = work.with_selection(filter_result)
-
-        try:
-            with ctx.phase(self, "calculate"):
-                return ctx.raw_value(self.base, work)
-        finally:
-            if transform_result is not None and self.revert_transform and transform_result.revertible:
-                with ctx.phase(self, "revert"):
-                    assert self.pre_transform is not None
-                    cleanup = getattr(self.pre_transform, "cleanup", None)
-                    if cleanup is None:
-                        raise TypeError("transform nodes must provide cleanup()")
-                    cleanup(ctx, transform_result.handle)
-
-    def filter(self, filt: FilterBase) -> BoundCalculator[TBase, TRaw, TPublic]:
-        return self.with_filter(filt)
-
-    def transform(
-        self,
-        transform: TransformBase[Any],
-        *,
-        revert: bool = True,
-    ) -> BoundCalculator[TBase, TRaw, TPublic]:
-        return self.with_transformation(transform, revert=revert)
-
-    def with_filter(self, filt: FilterBase) -> BoundCalculator[TBase, TRaw, TPublic]:
-        """Compose another filter into this bound calculator."""
-        return BoundCalculator(
-            base=self.base,
-            scope=self.scope.with_filter(filt),
-            name=self.name,
-            record_policy=self.record_policy,
-            default_options=self.default_options,
-        )
-
-    def with_transformation(
-        self,
-        transform: TransformBase[Any],
-        *,
-        revert: bool = True,
-    ) -> BoundCalculator[TBase, TRaw, TPublic]:
-        """Compose another transform into this bound calculator."""
-        return BoundCalculator(
-            base=self.base,
-            scope=self.scope.with_transform(transform, revert=revert),
-            name=self.name,
-            record_policy=self.record_policy,
-            default_options=self.default_options,
-        )
-
-    def cleanup(self, ctx: ExecutionContext, handle: Any) -> None:
-        """Delegate transform cleanup to the wrapped base calculator when available."""
-        cleanup = getattr(self.base, "cleanup", None)
-        if cleanup is not None:
-            cleanup(ctx, handle)
-
-    def is_revertible(self, handle: Any) -> bool:
-        """Delegate transform revertibility checks to the wrapped base calculator."""
-        is_revertible = getattr(self.base, "is_revertible", None)
-        if is_revertible is not None:
-            return bool(is_revertible(handle))
-        return hasattr(handle, "revert")
-
-
-class CombinedCalculator(
-    CalculatorBase[tuple[Unpack[Ts]], tuple[Unpack[Ts]]],
-    Generic[Unpack[Ts]],
-):
+class CombinedCalculator(CalculatorBase[tuple[Unpack[Ts]], tuple[Unpack[Ts]]], Generic[Unpack[Ts]]):
     """Calculator that evaluates several calculators and returns a tuple.
 
     Examples
@@ -1411,7 +1270,7 @@ class CombinedCalculator(
         self.items = tuple(flat)
 
     @overload  # type: ignore[override]
-    def __and__(self, other: CalculatorBase[Any,U]) -> CombinedCalculator[Unpack[Ts], U]: ...
+    def __and__(self, other: CalculatorBase[Any, U]) -> CombinedCalculator[Unpack[Ts], U]: ...
 
     @overload
     def __and__(self, other: CombinedCalculator[Any]) -> CombinedCalculator[Any]: ...
@@ -1433,4 +1292,3 @@ class CombinedCalculator(
     def execute(self, ctx: ExecutionContext, input: NodeInput) -> tuple[Unpack[Ts]]:
         with ctx.phase(self, "calculate"):
             return tuple(ctx.public_value(item, input) for item in self.items)
-

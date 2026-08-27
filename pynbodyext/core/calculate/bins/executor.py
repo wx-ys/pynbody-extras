@@ -1,3 +1,5 @@
+"""Execution of :class:`BinND` into a binned result."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -6,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from .axis_materializer import AxisMaterializer
+from .model import BinResultModel
 from .result import BinNDResult, SubBinNDResult
 
 if TYPE_CHECKING:
@@ -30,7 +33,6 @@ class BinParticleAssignment:
     valid_mask: np.ndarray
 
 
-
 class BinExecutor:
     def __init__(self, calculator: BinND) -> None:
         self._calculator = calculator
@@ -40,11 +42,7 @@ class BinExecutor:
         sim = input.active_sim
         materialized = self.resolve_axes(sim, ctx=ctx, input=input)
         result = self.build_result(
-            sim,
-            materialized.axes,
-            materialized.values,
-            source_sim=input.sim_raw,
-            scope_signature=input.cache_token,
+            sim, materialized.axes, materialized.values, source_sim=input.sim_raw, scope_signature=input.cache_token
         )
         for key in self._calculator.active:
             if isinstance(key, str):
@@ -56,11 +54,7 @@ class BinExecutor:
         return result
 
     def resolve_axes(
-        self,
-        sim: Any,
-        *,
-        ctx: ExecutionContext | None = None,
-        input: NodeInput | None = None,
+        self, sim: Any, *, ctx: ExecutionContext | None = None, input: NodeInput | None = None
     ) -> MaterializedBinAxes:
         materialized_axes: list[BinAxis] = []
         values: list[Any] = []
@@ -74,10 +68,7 @@ class BinExecutor:
             materialized_axes.append(axis)
             values.append(axis_values)
 
-        return MaterializedBinAxes(
-            axes=tuple(materialized_axes),
-            values=tuple(values),
-        )
+        return MaterializedBinAxes(axes=tuple(materialized_axes), values=tuple(values))
 
     def build_result(
         self,
@@ -90,8 +81,7 @@ class BinExecutor:
         parent: BinNDResult | None = None,
     ) -> BinNDResult:
         assignment = self.assign_particles(axes, values, len(sim))
-        cls = BinNDResult if parent is None else SubBinNDResult
-        return cls(
+        model = BinResultModel(
             sim=sim,
             source_sim=sim if source_sim is None else source_sim,
             axes=axes,
@@ -101,13 +91,15 @@ class BinExecutor:
             valid_mask=assignment.valid_mask,
             calculator=self._calculator,
             scope_signature=scope_signature,
-            parent=parent,
+            parent=parent._model if parent is not None else None,
+            owner=None,
         )
+        cls = BinNDResult if parent is None else SubBinNDResult
+        return cls(model=model)
 
     def spawn_result(self, parent: BinNDResult, subset: Any) -> SubBinNDResult:
         values = tuple(
-            self._axis_materializer._resolve_source(spec, subset).values
-            for spec in self._calculator.axes_specs
+            self._axis_materializer._resolve_source(spec, subset).values for spec in self._calculator.axes_specs
         )
         result = self.build_result(
             subset,
@@ -122,10 +114,7 @@ class BinExecutor:
         return result
 
     def assign_particles(
-        self,
-        axes: tuple[BinAxis, ...],
-        values: tuple[Any, ...],
-        n_particles: int,
+        self, axes: tuple[BinAxis, ...], values: tuple[Any, ...], n_particles: int
     ) -> BinParticleAssignment:
         """Return BinParticleAssignment(bin_data, bin_indptr, particle_bin, valid_mask) in CSR format.
 
@@ -165,8 +154,5 @@ class BinExecutor:
         bin_indptr = np.concatenate(([0], np.cumsum(counts)))
 
         return BinParticleAssignment(
-            bin_data=bin_data,
-            bin_indptr=bin_indptr,
-            particle_bin=particle_bin,
-            valid_mask=valid_mask,
+            bin_data=bin_data, bin_indptr=bin_indptr, particle_bin=particle_bin, valid_mask=valid_mask
         )

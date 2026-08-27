@@ -28,10 +28,10 @@ users may pass a string instead of a function. This keeps user code concise:
 
 >>> bins = BinsSet(bins_by="r", bins_area="annulus", bins_type="lin", nbins=20)
 >>> bins(sim)  # materialize
->>> bins.rbins        # centers
->>> bins.bin_edges    # edges
->>> bins.npart_bins   # counts per bin
->>> bins.binsize      # area per bin
+>>> bins.rbins  # centers
+>>> bins.bin_edges  # edges
+>>> bins.npart_bins  # counts per bin
+>>> bins.binsize  # area per bin
 
 Error handling
 --------------
@@ -123,6 +123,7 @@ class BinsSet:
     binsize : :data:`~pynbodyext.profiles.bins.SimNpArray` or None
         Area or volume per bin (depends on ``bins_area`` implementation).
     """
+
     _bins_by_registry: dict[str, BinByFunc] = {}
     _bins_area_registry: dict[str, BinsAreaFunc] = {}
     _bins_algorithm_registry: dict[str, BinsAlgorithmFunc] = {}
@@ -133,10 +134,10 @@ class BinsSet:
         bins_area: RegistBinAreaString | BinsAreaFunc,
         bins_type: RegistBinAlgorithmString | BinsAlgorithmFunc,
         nbins: int | SimNpArray,
-        bin_min:float | None = None,
-        bin_max:float | None = None,
+        bin_min: float | None = None,
+        bin_max: float | None = None,
         **kwargs: Any,
-        ) -> None:
+    ) -> None:
         self._bins_by = bins_by
         self._bins_area = bins_area
         self._bins_type = bins_type
@@ -158,18 +159,22 @@ class BinsSet:
     def bins_by(self) -> RegistBinByString | BinByFunc:
         """The source specification for the data being binned."""
         return self._bins_by
+
     @property
     def bins_area(self) -> RegistBinAreaString | BinsAreaFunc:
         """The specification for the area/volume calculation method."""
         return self._bins_area
+
     @property
     def bins_type(self) -> RegistBinAlgorithmString | BinsAlgorithmFunc:
         """The specification for the edge-building algorithm."""
         return self._bins_type
+
     @property
     def bin_min(self) -> float | None:
         """The minimum domain value for edge construction (if using an algorithm)."""
         return self._bin_min
+
     @property
     def bin_max(self) -> float | None:
         """The maximum domain value for edge construction (if using an algorithm)."""
@@ -184,13 +189,15 @@ class BinsSet:
         bool
             ``True`` if bin edges and derived attributes are defined, ``False`` otherwise.
         """
-        return (self.bin_edges is not None
-                and self.rbins is not None
-                and self.dr is not None
-                and self.x is not None
-                and self.binind is not None
-                and self.npart_bins is not None
-                and self.binsize is not None)
+        return (
+            self.bin_edges is not None
+            and self.rbins is not None
+            and self.dr is not None
+            and self.x is not None
+            and self.binind is not None
+            and self.npart_bins is not None
+            and self.binsize is not None
+        )
 
     def _resolve_x(self, sim: SimSnap) -> SimNpArray:
         """
@@ -282,7 +289,7 @@ class BinsSet:
         """
         # If nbins is an array, interpret as explicit edges
         if not isinstance(self._nbins, (int, np.integer)):
-            arr = np.asarray(self._nbins)                   # type: ignore[unreachable]
+            arr = np.asarray(self._nbins)  # type: ignore[unreachable]
             if arr.ndim != 1 or arr.shape[0] < 2:
                 raise ValueError("Explicit bin_edges must be a 1D array of length >= 2")
             return self._coerce_edges_units(arr, x)
@@ -323,7 +330,9 @@ class BinsSet:
         elif isinstance(self._bins_area, str):
             return self._bins_area_registry[self._bins_area](self, bin_edges)
         else:
-            raise ValueError(f"Invalid bins_area: {self._bins_area}, required callable or registry keys: {list(self._bins_area_registry)}")
+            raise ValueError(
+                f"Invalid bins_area: {self._bins_area}, required callable or registry keys: {list(self._bins_area_registry)}"
+            )
 
     @staticmethod
     def _calc_binmid(bin_edges: SimNpArray) -> SimNpArray:
@@ -341,7 +350,6 @@ class BinsSet:
             Midpoints (length ``nbins``).
         """
         return 0.5 * (bin_edges[:-1] + bin_edges[1:])
-
 
     def _assign_particles(self, x: SimNpArray, bin_edges: SimNpArray) -> tuple[list[np.ndarray], np.ndarray]:
         """
@@ -390,7 +398,7 @@ class BinsSet:
         order = np.argsort(bin_id, kind="stable")
         idx_sorted = idx[order]
         starts = np.concatenate(([0], np.cumsum(counts)))
-        binind = [idx_sorted[starts[i]:starts[i+1]] for i in range(nbins)]
+        binind = [idx_sorted[starts[i] : starts[i + 1]] for i in range(nbins)]
 
         return binind, counts
 
@@ -450,12 +458,11 @@ class BinsSet:
             target.bin_edges = np.asarray([0.0, 1.0])
 
         target.rbins = target._calc_binmid(target.bin_edges)
-        target.dr = np.gradient(target.rbins)   # approx. half-widths
+        target.dr = np.gradient(target.rbins)  # approx. half-widths
         target.binind, target.npart_bins = target._assign_particles(target.x, target.bin_edges)
         target.binsize = target._calc_area_or_volume(target.bin_edges)
 
         return target
-
 
     def spawn_with_same_edges(self, sim: SimSnap) -> "BinsSet":
         """
@@ -463,16 +470,18 @@ class BinsSet:
         the already-computed edges/centers/widths, and recomputing bin assignments.
         """
         if not self.is_defined():
-            raise ValueError("Cannot spawn with same edges: parent BinsSet is not materialized. "
-                             "Call the instance with a simulation first.")
+            raise ValueError(
+                "Cannot spawn with same edges: parent BinsSet is not materialized. "
+                "Call the instance with a simulation first."
+            )
         child = BinsSet(
             bins_by=self._bins_by,
             bins_area=self._bins_area,
             bins_type=self._bins_type,
-            nbins=cast("SimNpArray", self.bin_edges),   # explicit edges
+            nbins=cast("SimNpArray", self.bin_edges),  # explicit edges
             bin_min=self._bin_min,
             bin_max=self._bin_max,
-            **self._kwargs
+            **self._kwargs,
         )
         child.x = child._resolve_x(sim)
         child.bin_edges = cast("SimNpArray", self.bin_edges)
@@ -495,11 +504,11 @@ class BinsSet:
         nb = self._nbins
         if isinstance(nb, (int, np.integer)):
             return int(nb)
-        if isinstance(nb, (np.ndarray, SimArray)):      # type: ignore[unreachable]
+        if isinstance(nb, (np.ndarray, SimArray)):  # type: ignore[unreachable]
             return len(nb) - 1
         raise TypeError(f"Invalid _nbins type: {type(nb)}")
 
-    def __repr__(self)->str:
+    def __repr__(self) -> str:
         if self.is_defined():
             x_len = len(self.x) if self.x is not None else "None"
             return (
@@ -515,30 +524,19 @@ class BinsSet:
                 f"bin_min={self._bin_min}, bin_max={self._bin_max})"
             )
 
-
     # ------------------- registry helpers ---------------------------------#
 
     @classmethod
     @overload
-    def bins_by_register(
-        cls,
-        fn: BinByFunc,
-        name: str | None = None,
-    ) -> BinByFunc: ...
+    def bins_by_register(cls, fn: BinByFunc, name: str | None = None) -> BinByFunc: ...
     @classmethod
     @overload
-    def bins_by_register(
-        cls,
-        fn: None = None,
-        name: str | None = None,
-    ) -> Callable[[BinByFunc], BinByFunc]: ...
+    def bins_by_register(cls, fn: None = None, name: str | None = None) -> Callable[[BinByFunc], BinByFunc]: ...
 
     @classmethod
     def bins_by_register(
-        cls,
-        fn: BinByFunc | None = None,
-        name: str | None = None
-        ) -> BinByFunc | Callable[[BinByFunc], BinByFunc]:
+        cls, fn: BinByFunc | None = None, name: str | None = None
+    ) -> BinByFunc | Callable[[BinByFunc], BinByFunc]:
         """
         Register a function that extracts a 1D array from a simulation.
 
@@ -569,35 +567,25 @@ class BinsSet:
         ValueError
             If a duplicate key is registered (not enforced here but could be added).
         """
+
         def decorator(func: BinByFunc) -> BinByFunc:
             cls._bins_by_registry[name or func.__name__] = func
             return func
+
         if fn is None:
             return decorator
         return decorator(fn)
 
-
-
     @classmethod
     @overload
-    def bins_area_register(
-        cls,
-        fn: BinsAreaFunc,
-        name: str | None = None,
-    ) -> BinsAreaFunc: ...
+    def bins_area_register(cls, fn: BinsAreaFunc, name: str | None = None) -> BinsAreaFunc: ...
     @classmethod
     @overload
-    def bins_area_register(
-        cls,
-        fn: None = None,
-        name: str | None = None,
-    ) -> Callable[[BinsAreaFunc], BinsAreaFunc]: ...
+    def bins_area_register(cls, fn: None = None, name: str | None = None) -> Callable[[BinsAreaFunc], BinsAreaFunc]: ...
 
     @classmethod
     def bins_area_register(
-        cls,
-        fn: BinsAreaFunc | None = None,
-        name: str | None = None
+        cls, fn: BinsAreaFunc | None = None, name: str | None = None
     ) -> BinsAreaFunc | Callable[[BinsAreaFunc], BinsAreaFunc]:
         """
         Register an area/volume calculator.
@@ -621,36 +609,29 @@ class BinsSet:
         --------
         >>> @BinsSet.bins_area_register
         ... def shell_volume(self, edges):
-        ...     return 4/3 * np.pi * (edges[1:]**3 - edges[:-1]**3)
+        ...     return 4 / 3 * np.pi * (edges[1:] ** 3 - edges[:-1] ** 3)
         """
+
         def decorator(func: BinsAreaFunc) -> BinsAreaFunc:
             cls._bins_area_registry[name or func.__name__] = func
             return func
+
         if fn is None:
             return decorator
         return decorator(fn)
 
-
+    @classmethod
+    @overload
+    def bins_algorithm_register(cls, fn: BinsAlgorithmFunc, name: str | None = None) -> BinsAlgorithmFunc: ...
     @classmethod
     @overload
     def bins_algorithm_register(
-        cls,
-        fn: BinsAlgorithmFunc,
-        name: str | None = None,
-    ) -> BinsAlgorithmFunc: ...
-    @classmethod
-    @overload
-    def bins_algorithm_register(
-        cls,
-        fn: None = None,
-        name: str | None = None,
+        cls, fn: None = None, name: str | None = None
     ) -> Callable[[BinsAlgorithmFunc], BinsAlgorithmFunc]: ...
 
     @classmethod
     def bins_algorithm_register(
-        cls,
-        fn: BinsAlgorithmFunc | None = None,
-        name: str | None = None
+        cls, fn: BinsAlgorithmFunc | None = None, name: str | None = None
     ) -> BinsAlgorithmFunc | Callable[[BinsAlgorithmFunc], BinsAlgorithmFunc]:
         """
         Register a bin edges construction algorithm.
@@ -675,11 +656,13 @@ class BinsSet:
         ... def sqrt_edges(self, x):
         ...     nbins = int(self._nbins)
         ...     xmin, xmax = np.min(x), np.max(x)
-        ...     return np.sqrt(np.linspace(xmin**2, xmax**2, nbins+1))
+        ...     return np.sqrt(np.linspace(xmin**2, xmax**2, nbins + 1))
         """
+
         def decorator(func: BinsAlgorithmFunc) -> BinsAlgorithmFunc:
             cls._bins_algorithm_registry[name or func.__name__] = func
             return func
+
         if fn is None:
             return decorator
         return decorator(fn)
@@ -687,9 +670,7 @@ class BinsSet:
 
 # ------------------- bins algorithms --------------------------------------#
 @BinsSet.bins_algorithm_register(name="lin")
-def linear_bins_algorithm(
-    self: "BinsSet", x: SimNpArray
-    ) -> SimNpArray:
+def linear_bins_algorithm(self: "BinsSet", x: SimNpArray) -> SimNpArray:
     """
     Build linearly spaced bin edges over the domain.
 
@@ -701,10 +682,9 @@ def linear_bins_algorithm(
     xmax = np.max(x) if self._bin_max is None else self._bin_max
     return np.linspace(xmin, xmax, nbins + 1)
 
+
 @BinsSet.bins_algorithm_register(name="log")
-def logarithmic_bins_algorithm(
-    self: "BinsSet", x: SimNpArray
-    ) -> SimNpArray:
+def logarithmic_bins_algorithm(self: "BinsSet", x: SimNpArray) -> SimNpArray:
     """
     Build logarithmically spaced bin edges over the positive domain.
 
@@ -717,10 +697,9 @@ def logarithmic_bins_algorithm(
         raise ValueError("Logarithmic bins require xmin to be non-negative")
     return np.logspace(np.log10(xmin), np.log10(xmax), nbins + 1)
 
+
 @BinsSet.bins_algorithm_register(name="equaln")
-def equal_number_bins_algorithm(
-    self: "BinsSet", x: SimNpArray
-    ) -> SimNpArray:
+def equal_number_bins_algorithm(self: "BinsSet", x: SimNpArray) -> SimNpArray:
     """
     Build edges so that each bin contains approximately the same number of particles.
 
@@ -745,39 +724,36 @@ def equal_number_bins_algorithm(
     edges.append(sorted_x[-1])
     return np.array(edges)
 
+
 # ------------------- bins area/volume calculators -------------------------#
 
+
 @BinsSet.bins_area_register(name="length")
-def length_area(
-    self: "BinsSet", bin_edges: SimNpArray
-    ) -> SimNpArray:
+def length_area(self: "BinsSet", bin_edges: SimNpArray) -> SimNpArray:
     """
     Length of 1D bins: ``r_{i+1} - r_i`` for each bin.
     """
     return bin_edges[1:] - bin_edges[:-1]
 
+
 @BinsSet.bins_area_register(name="annulus")
-def annulus_area(
-    self: "BinsSet", bin_edges: SimNpArray
-    ) -> SimNpArray:
+def annulus_area(self: "BinsSet", bin_edges: SimNpArray) -> SimNpArray:
     """
     Area of 2D circular annuli: ``pi * (r_{i+1}^2 - r_i^2)`` for each bin.
     """
-    return np.pi * (bin_edges[1:]**2 - bin_edges[:-1]**2)
+    return np.pi * (bin_edges[1:] ** 2 - bin_edges[:-1] ** 2)
+
 
 @BinsSet.bins_area_register(name="spherical_shell")
-def spherical_shell_area(
-    self: "BinsSet", bin_edges: SimNpArray
-    ) -> SimNpArray:
+def spherical_shell_area(self: "BinsSet", bin_edges: SimNpArray) -> SimNpArray:
     """
     Volume of 3D spherical shells: ``4/3 * pi * (r_{i+1}^3 - r_i^3)`` for each bin.
     """
-    return 4/3 * np.pi * (bin_edges[1:]**3 - bin_edges[:-1]**3)
+    return 4 / 3 * np.pi * (bin_edges[1:] ** 3 - bin_edges[:-1] ** 3)
+
 
 @BinsSet.bins_area_register(name="cylindrical_shell")
-def cylindrical_shell_area(
-    self: "BinsSet", bin_edges: SimNpArray
-    ) -> SimNpArray:
+def cylindrical_shell_area(self: "BinsSet", bin_edges: SimNpArray) -> SimNpArray:
     """
     Lateral surface area or volume proxy for cylindrical shells.
 
@@ -786,5 +762,4 @@ def cylindrical_shell_area(
     z = self._kwargs.get("z", None)
     if z is None:
         raise ValueError("Parameter 'z' must be provided for cylindrical_shell area calculation")
-    return np.pi * (bin_edges[1:]**2 - bin_edges[:-1]**2)*z
-
+    return np.pi * (bin_edges[1:] ** 2 - bin_edges[:-1] ** 2) * z
