@@ -483,3 +483,32 @@ def _axis_center(axis: BinAxis) -> Any:
 @BinAxis.register_property("width")
 def _axis_width(axis: BinAxis) -> Any:
     return axis.max - axis.min
+
+
+class BinMeasureResolver:
+    """Per-instance axis-measure overrides resolved against the global measure registries.
+
+    The resolvers checks the per-instance override (keyed by ``axis.alias``,
+    value is a measure-type name from :data:`_AXIS_MEASURE_TYPE_REGISTRY`) first,
+    then falls back to the global :attr:`BinAxis.measure` property.
+    """
+
+    def __init__(self) -> None:
+        self._overrides: dict[str, str] = {}
+
+    def resolve(self, axis: BinAxis) -> np.ndarray:
+        type_name = self._overrides.get(axis.alias)
+        if type_name is not None:
+            func = _AXIS_MEASURE_TYPE_REGISTRY.get(type_name)
+            if func is not None:
+                return func(axis)
+        return axis.measure
+
+    def set(self, alias: str, type_name: str | None) -> None:
+        if type_name is None:
+            self._overrides.pop(alias, None)
+        else:
+            self._overrides[alias] = type_name
+
+    def get(self, alias: str) -> str | None:
+        return self._overrides.get(alias)
