@@ -25,6 +25,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from .axes import BinDerivedSpec
+    from .model import BinResultModel
+    from .result import BinNDResult
 
 
 # Minimal RunOptions for per-bin apply loops: no cache, no progress, no perf,
@@ -106,7 +108,9 @@ def _cache_key_for_stat(field: str, transforms: tuple[str, ...], stat_key: str, 
     return PipelineStatKey(field, transforms, stat_key, weight_token)
 
 
-def _wrap(owner: Any, values: Any, *, name: str, field: str | None = None, mode: str | None = None) -> BinsArray:
+def _wrap(
+    owner: BinNDResult, values: Any, *, name: str, field: str | None = None, mode: str | None = None
+) -> BinsArray:
     return BinsArray(owner, values, name=name, field=field, mode=mode)
 
 
@@ -130,7 +134,7 @@ def callable_cache_token(query: Any) -> Any:
 class StatPipeline:
     """Compute a per-bin statistic (vectorised fast path, then per-bin fallback)."""
 
-    def __init__(self, model: Any, owner: Any, cache: QueryCache) -> None:
+    def __init__(self, model: BinResultModel, owner: BinNDResult, cache: QueryCache) -> None:
         self._model = model
         self._owner = owner
         self._cache = cache
@@ -155,6 +159,10 @@ class StatPipeline:
             return cached
 
         values = model.sim[field]
+        assert model.valid_mask is not None
+        assert model.particle_bin is not None
+        assert model.bin_indptr is not None
+        assert model.bin_data is not None
         weights = None
         if isinstance(weight, str):
             weights = model.sim[weight]
@@ -204,7 +212,7 @@ class DensityResolver:
 
     _SUFFIX = ".density"
 
-    def __init__(self, owner: Any, cache: QueryCache, resolve_query: Callable[[str], BinsArray]) -> None:
+    def __init__(self, owner: BinNDResult, cache: QueryCache, resolve_query: Callable[[str], BinsArray]) -> None:
         self._owner = owner
         self._cache = cache
         self._resolve_query = resolve_query
@@ -255,7 +263,7 @@ class DensityResolver:
 class ApplyComposer:
     """Evaluate a query (callable or calculator) per bin into a :class:`BinsArray`."""
 
-    def __init__(self, model: Any, owner: Any, cache: QueryCache, diagnostics: Any) -> None:
+    def __init__(self, model: BinResultModel, owner: BinNDResult, cache: QueryCache, diagnostics: Any) -> None:
         self._model = model
         self._owner = owner
         self._cache = cache
@@ -276,6 +284,7 @@ class ApplyComposer:
             return cached
 
         if vectorized:
+            assert model.particle_bin is not None
             if isinstance(query, CalculatorBase):
                 raise TypeError("vectorized=True requires a plain callable, not a CalculatorBase.")
             raw = query(model.sim, model.particle_bin)  # type: ignore[call-arg]
@@ -293,6 +302,8 @@ class ApplyComposer:
 
     def _value_nonvectorized(self, query: Callable[[Any], Any] | CalculatorBase[Any, Any]) -> np.ndarray:
         model = self._model
+        assert model.bin_indptr is not None
+        assert model.bin_data is not None
         outputs: list[np.ndarray | None] = [None] * model.nbins
         sample_shape: tuple[int, ...] | None = None
         if isinstance(query, CalculatorBase):
@@ -333,7 +344,7 @@ class ApplyComposer:
 class BinQueryService:
     """Orchestrates query resolution over a model, using the owner for extensions."""
 
-    def __init__(self, model: Any, owner: Any, diagnostics: Any, *, extensions: Any = None) -> None:
+    def __init__(self, model: BinResultModel, owner: BinNDResult, diagnostics: Any, *, extensions: Any = None) -> None:
         self._model = model
         self._owner = owner
         self._diagnostics = diagnostics
