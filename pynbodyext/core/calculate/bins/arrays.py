@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from pynbody.array import SimArray
+
+if TYPE_CHECKING:
+    from .result import BinNDResult
 
 
 class BinsArray(SimArray):
@@ -18,7 +21,7 @@ class BinsArray(SimArray):
 
     __slots__ = ["_bins", "_name", "_field", "_mode", "_shape_bins", "_axis_aliases", "_provenance"]
 
-    _bins: Any
+    _bins: Any  # set by __new__; kept Any for numpy __array_finalize__ quirks
     _name: str | None
     _field: str | None
     _mode: str | None
@@ -28,7 +31,7 @@ class BinsArray(SimArray):
 
     def __new__(
         cls,
-        bins: Any,
+        bins: BinNDResult,
         values: Any,
         *,
         name: str | None = None,
@@ -76,7 +79,7 @@ class BinsArray(SimArray):
         self._provenance = getattr(obj, "_provenance", {})
 
     @property
-    def bins(self) -> Any:
+    def bins(self) -> BinNDResult:
         return self._bins
 
     @property

@@ -7,17 +7,20 @@ This isolates geometry logic so it can be unit-tested independently.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .axes import BinMeasureResolver, axis_matches
+from .axes import BinAxis, BinMeasureResolver, axis_matches
+
+if TYPE_CHECKING:
+    from .model import BinResultModel
 
 
 class BinGeometry:
     """Per-bin geometry (centers, widths, measure) and axis lookup."""
 
-    def __init__(self, provider: Any, measure_resolver: BinMeasureResolver) -> None:
+    def __init__(self, provider: BinResultModel, measure_resolver: BinMeasureResolver) -> None:
         self._provider = provider
         self._measure = measure_resolver
         self._multi_index: np.ndarray | None = None
@@ -27,31 +30,31 @@ class BinGeometry:
             raise AttributeError(f"{name} is ambiguous for ND bins; use bins.axis[alias].{name}.")
 
     @property
-    def centers(self) -> Any:
+    def centers(self) -> np.ndarray:
         self._require_1d("centers")
         return self._provider.axes[0].centers
 
     @property
-    def mins(self) -> Any:
+    def mins(self) -> np.ndarray:
         self._require_1d("mins")
         return self._provider.axes[0].mins
 
     @property
-    def maxs(self) -> Any:
+    def maxs(self) -> np.ndarray:
         self._require_1d("maxs")
         return self._provider.axes[0].maxs
 
     @property
-    def widths(self) -> Any:
+    def widths(self) -> np.ndarray:
         self._require_1d("widths")
         return self._provider.axes[0].widths
 
     @property
-    def edges(self) -> Any:
+    def edges(self) -> np.ndarray:
         self._require_1d("edges")
         return self._provider.axes[0].edges
 
-    def axis_measure(self, axis: Any) -> np.ndarray:
+    def axis_measure(self, axis: BinAxis) -> np.ndarray:
         return self._measure.resolve(axis)
 
     @property
@@ -73,7 +76,7 @@ class BinGeometry:
             )
         return self._multi_index
 
-    def find_axis(self, aliases: set[str]) -> Any:
+    def find_axis(self, aliases: set[str]) -> BinAxis:
         for axis in self._provider.axes:
             if axis_matches(axis, aliases):
                 return axis

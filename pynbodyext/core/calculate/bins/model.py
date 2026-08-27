@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 if TYPE_CHECKING:
-    from .axes import BinAxis
+    from .arrays import BinsArray
+    from .axes import BinAxis, BinAxisAccessor
 
 
 class BinResultModel:
@@ -86,63 +87,63 @@ class BinResultModel:
             raise RuntimeError("BinResultModel is not bound to a BinNDResult.")
         return self._owner
 
-    def __getitem__(self, key: Any) -> Any:
+    def __getitem__(self, key: Any) -> BinsArray | BinResultModel:
         result = self._require_owner()[key]
         sub = getattr(result, "_model", None)
         return sub if sub is not None else result
 
     @property
-    def axis(self) -> Any:
+    def axis(self) -> BinAxisAccessor:
         return self._require_owner().axis
 
     @property
-    def centers(self) -> Any:
+    def centers(self) -> np.ndarray:
         return self._require_owner().centers
 
     @property
-    def mins(self) -> Any:
+    def mins(self) -> np.ndarray:
         return self._require_owner().mins
 
     @property
-    def maxs(self) -> Any:
+    def maxs(self) -> np.ndarray:
         return self._require_owner().maxs
 
     @property
-    def widths(self) -> Any:
+    def widths(self) -> np.ndarray:
         return self._require_owner().widths
 
     @property
-    def edges(self) -> Any:
+    def edges(self) -> np.ndarray:
         return self._require_owner().edges
 
-    def find_axis(self, aliases: set[str]) -> Any:
+    def find_axis(self, aliases: set[str]) -> BinAxis:
         return self._require_owner().find_axis(aliases)
 
     def multi_index_array(self) -> np.ndarray:
         return self._require_owner().multi_index_array()
 
-    def _resolve_axis_measure(self, axis: Any) -> np.ndarray:
+    def _resolve_axis_measure(self, axis: BinAxis) -> np.ndarray:
         return self._require_owner()._resolve_axis_measure(axis)
 
     def families(self) -> Any:
         return self._require_owner().families()
 
     @property
-    def gas(self) -> Any:
+    def gas(self) -> BinResultModel:
         return self._require_owner().gas._model
 
     @property
-    def dm(self) -> Any:
+    def dm(self) -> BinResultModel:
         return self._require_owner().dm._model
 
     @property
-    def star(self) -> Any:
+    def star(self) -> BinResultModel:
         return self._require_owner().star._model
 
     @property
-    def g(self) -> Any:
+    def g(self) -> BinResultModel:
         return self._require_owner().g._model
 
     @property
-    def s(self) -> Any:
+    def s(self) -> BinResultModel:
         return self._require_owner().s._model

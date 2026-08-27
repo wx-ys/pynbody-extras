@@ -201,8 +201,8 @@ def has_axes(*groups: set[str]) -> BinDerivedCondition:
 class BinAxis:
     alias: str
     prop: Any
-    mins: Any
-    maxs: Any
+    mins: np.ndarray
+    maxs: np.ndarray
     include_rightmost: bool = True
     units: Any | None = None
 
@@ -282,11 +282,11 @@ class BinAxis:
         return int(len(self.mins))
 
     @property
-    def centers(self) -> Any:
+    def centers(self) -> np.ndarray:
         return 0.5 * (self.mins + self.maxs)
 
     @property
-    def widths(self) -> Any:
+    def widths(self) -> np.ndarray:
         return self.maxs - self.mins
 
     @property
@@ -294,7 +294,7 @@ class BinAxis:
         return bool(self.nbins == 1 or np.all(self.maxs[:-1] == self.mins[1:]))
 
     @property
-    def edges(self) -> Any:
+    def edges(self) -> np.ndarray:
         if self.is_continuous:
             return np.concatenate((self.mins[:1], self.maxs))
         return np.column_stack((np.asarray(self.mins), np.asarray(self.maxs)))

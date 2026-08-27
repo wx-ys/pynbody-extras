@@ -255,23 +255,23 @@ class BinNDResult(BinPlotMixin):
         return self._subresults.total_cached_arr()
 
     @property
-    def edges(self) -> Any:
+    def edges(self) -> np.ndarray:
         return self._geometry.edges
 
     @property
-    def mins(self) -> Any:
+    def mins(self) -> np.ndarray:
         return self._geometry.mins
 
     @property
-    def maxs(self) -> Any:
+    def maxs(self) -> np.ndarray:
         return self._geometry.maxs
 
     @property
-    def centers(self) -> Any:
+    def centers(self) -> np.ndarray:
         return self._geometry.centers
 
     @property
-    def widths(self) -> Any:
+    def widths(self) -> np.ndarray:
         return self._geometry.widths
 
     def _require_1d(self, name: str) -> None:
@@ -388,7 +388,7 @@ class BinNDResult(BinPlotMixin):
     def multi_index_array(self) -> np.ndarray:
         return self._geometry.multi_index_array()
 
-    def find_axis(self, aliases: set[str]) -> Any:
+    def find_axis(self, aliases: set[str]) -> BinAxis:
         return self._geometry.find_axis(aliases)
 
     def _stat_pipeline(
