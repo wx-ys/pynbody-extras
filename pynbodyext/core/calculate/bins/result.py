@@ -10,10 +10,12 @@ from pynbodyext.core.calculate.nodes.base import CalculatorBase
 from pynbodyext.core.calculate.nodes.filters import FilterBase
 
 from .accessors import BinParticlesAccessor
-from .axes import BinAxisAccessor, BinDerivedCondition, BinDerivedFunc, axis_matches
+from .axes import BinAxisAccessor, BinDerivedCondition, BinDerivedFunc, BinMeasureResolver, axis_matches
 from .extensions import BIN_RESULT_EXTENSIONS, BinExtensionRegistry
+from .geometry import BinGeometry
+from .model import BinResultModel
 from .plot import BinPlotMixin
-from .query_engine import BinQueryEngine
+from .query import BinQueryService
 from .selectors import is_int_sequence
 from .statistics import BinNDStatAccessor
 from .subresults import BinSubresultStore
@@ -69,6 +71,11 @@ class _CSRBinsView:
 class BinNDResult(BinPlotMixin):
     _SHARED_SCOPES: ClassVar[set[str]] = {"axis", "geometry"}
     _extensions: ClassVar[BinExtensionRegistry] = BIN_RESULT_EXTENSIONS
+    _model: BinResultModel
+    _query_engine: BinQueryService
+    _geometry: BinGeometry
+    _measure_resolver: BinMeasureResolver
+    _subresults: BinSubresultStore
 
     def __init__(
         self,
@@ -96,18 +103,24 @@ class BinNDResult(BinPlotMixin):
         self._calculator = calculator
         self._scope_signature = scope_signature
         self._parent = parent
-
-        self._multi_index_cache: np.ndarray | None = None
-
-        # Per-instance axis measure overrides.  Keys are axis aliases; values
-        # are measure type *names* (str) that resolve through the global
-        # _AXIS_MEASURE_TYPE_REGISTRY.  When set, these take precedence over
-        # the global _AXIS_MEASURE_REGISTRY for this instance.
-        self._axis_measure_overrides: dict[str, str] = {}
+        self._model = BinResultModel(
+            sim=sim,
+            source_sim=source_sim,
+            axes=axes,
+            bin_data=bin_data,
+            bin_indptr=bin_indptr,
+            particle_bin=particle_bin,
+            valid_mask=valid_mask,
+            calculator=calculator,
+            scope_signature=scope_signature,
+            parent=parent._model if parent is not None else None,
+        )
 
         self._diagnostics = BinsResultEngine()
-        self._query_engine = BinQueryEngine(self, self._diagnostics)
+        self._query_engine = BinQueryService(self, self._diagnostics)
         self._subresults = BinSubresultStore(self)
+        self._measure_resolver = BinMeasureResolver()
+        self._geometry = BinGeometry(self, self._measure_resolver)
 
         # Subscribe to global measure-type redefinitions (e.g.
         # BinAxis.register_measure_type(..., overwrite=True)) so that
@@ -185,19 +198,10 @@ class BinNDResult(BinPlotMixin):
     def _resolve_axis_measure(self, axis: BinAxis) -> np.ndarray:
         """Return the effective per-bin measure for *axis*.
 
-        Checks this instance's local ``_axis_measure_overrides`` first
-        (keyed by ``axis.alias``; values are type names resolved via the
-        global ``_AXIS_MEASURE_TYPE_REGISTRY``), then falls back to the
-        global :attr:`BinAxis.measure` property.
+        Delegates to :attr:`_measure_resolver`, which checks per-instance
+        overrides first, then the global :attr:`BinAxis.measure` property.
         """
-        type_name = self._axis_measure_overrides.get(axis.alias)
-        if type_name is not None:
-            from .axes import _AXIS_MEASURE_TYPE_REGISTRY as _types
-
-            func = _types.get(type_name)
-            if func is not None:
-                return func(axis)
-        return axis.measure
+        return self._geometry.axis_measure(axis)
 
     @property
     def bin_indices(self) -> _CSRBinsView:
@@ -223,32 +227,26 @@ class BinNDResult(BinPlotMixin):
 
     @property
     def edges(self) -> Any:
-        self._require_1d("edges")
-        return self._axes[0].edges
+        return self._geometry.edges
 
     @property
     def mins(self) -> Any:
-        self._require_1d("mins")
-        return self._axes[0].mins
+        return self._geometry.mins
 
     @property
     def maxs(self) -> Any:
-        self._require_1d("maxs")
-        return self._axes[0].maxs
+        return self._geometry.maxs
 
     @property
     def centers(self) -> Any:
-        self._require_1d("centers")
-        return self._axes[0].centers
+        return self._geometry.centers
 
     @property
     def widths(self) -> Any:
-        self._require_1d("widths")
-        return self._axes[0].widths
+        return self._geometry.widths
 
     def _require_1d(self, name: str) -> None:
-        if self.ndim != 1:
-            raise AttributeError(f"{name} is ambiguous for ND bins; use bins.axis[alias].{name}.")
+        self._geometry._require_1d(name)
 
     def families(self) -> Any:
         return self.sim.families()
@@ -354,17 +352,10 @@ class BinNDResult(BinPlotMixin):
         return self._query_engine.resolve(key)
 
     def multi_index_array(self) -> np.ndarray:
-        if self._multi_index_cache is None:
-            self._multi_index_cache = np.column_stack(
-                np.unravel_index(np.arange(self.nbins), self.shape_bins, order="C")
-            )
-        return self._multi_index_cache
+        return self._geometry.multi_index_array()
 
     def find_axis(self, aliases: set[str]) -> Any:
-        for axis in self._axes:
-            if axis_matches(axis, aliases):
-                return axis
-        raise KeyError(f"No axis matching {sorted(aliases)!r}.")
+        return self._geometry.find_axis(aliases)
 
     def _stat_pipeline(
         self,
@@ -464,16 +455,16 @@ class BinNDResult(BinPlotMixin):
         from .axes import _AXIS_MEASURE_TYPE_REGISTRY as _types
 
         if type_name is None:
-            if alias not in self._axis_measure_overrides:
+            if self._measure_resolver.get(alias) is None:
                 return
-            del self._axis_measure_overrides[alias]
+            self._measure_resolver.set(alias, None)
         else:
             if type_name not in _types:
                 raise KeyError(f"Unknown measure type {type_name!r}. Known types: {sorted(_types)}.")
-            old_type = self._axis_measure_overrides.get(alias)
+            old_type = self._measure_resolver.get(alias)
             if old_type == type_name:
                 return  # no change — nothing to do
-            self._axis_measure_overrides[alias] = type_name
+            self._measure_resolver.set(alias, type_name)
 
         # Invalidate measure-dependent cache entries on this instance + subresults
         n, names = self._query_engine.invalidate_measure_dependent_cache()
