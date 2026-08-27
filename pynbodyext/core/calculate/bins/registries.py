@@ -73,6 +73,18 @@ class BinsRegistry:
     def __init__(self) -> None:
         self.derived = DerivedRegistry()
 
+    @property
+    def stat(self) -> Any:
+        from .statistics import STAT_REGISTRY
+
+        return STAT_REGISTRY
+
+    @property
+    def pipeline(self) -> Any:
+        from .statistics import PIPELINE_PARSER
+
+        return PIPELINE_PARSER
+
     def register_derived(
         self,
         fn: Callable[[Any], Any] | str | None = None,

@@ -72,7 +72,7 @@ class BinNDResult(BinPlotMixin):
     _SHARED_SCOPES: ClassVar[set[str]] = {"axis", "geometry"}
     _extensions: ClassVar[BinExtensionRegistry] = BIN_RESULT_EXTENSIONS
     _model: BinResultModel
-    _query_engine: BinQueryService
+    _query_service: BinQueryService
     _geometry: BinGeometry
     _measure_resolver: BinMeasureResolver
     _subresults: BinSubresultStore
@@ -117,7 +117,7 @@ class BinNDResult(BinPlotMixin):
         )
 
         self._diagnostics = BinsResultEngine()
-        self._query_engine = BinQueryService(self, self._diagnostics)
+        self._query_service = BinQueryService(self, self._diagnostics)
         self._subresults = BinSubresultStore(self)
         self._measure_resolver = BinMeasureResolver()
         self._geometry = BinGeometry(self, self._measure_resolver)
@@ -136,6 +136,11 @@ class BinNDResult(BinPlotMixin):
     @property
     def is_root(self) -> bool:
         return self._parent is None
+
+    @property
+    def model(self) -> BinResultModel:
+        """The underlying :class:`BinResultModel` data container for this result."""
+        return self._model
 
     @property
     def parent(self) -> BinNDResult | None:
@@ -215,7 +220,7 @@ class BinNDResult(BinPlotMixin):
 
     @property
     def num_cached_arr(self) -> int:
-        return self._query_engine.num_cached_arr
+        return self._query_service.num_cached_arr
 
     @property
     def nsubs(self) -> int:
@@ -270,10 +275,10 @@ class BinNDResult(BinPlotMixin):
         return BinNDStatAccessor(self)
 
     def keys(self) -> list[str]:
-        return self._query_engine.keys()
+        return self._query_service.keys()
 
     def property_keys(self) -> list[str]:
-        return self._query_engine.property_keys()
+        return self._query_service.property_keys()
 
     def all_keys(self) -> list[str]:
         return self.keys()
@@ -349,7 +354,7 @@ class BinNDResult(BinPlotMixin):
         return self.get_subresult(sub, _cache_key=("family", family.name))
 
     def _resolve_query(self, key: str) -> BinsArray:
-        return self._query_engine.resolve(key)
+        return self._query_service.resolve(key)
 
     def multi_index_array(self) -> np.ndarray:
         return self._geometry.multi_index_array()
@@ -366,7 +371,7 @@ class BinNDResult(BinPlotMixin):
         weight: str | Callable[[Any], Any] | Any | None = None,
         query_key: str | None = None,
     ) -> BinsArray:
-        return self._query_engine.stat_pipeline(field, transforms, terminal_stat, weight=weight, query_key=query_key)
+        return self._query_service.stat_pipeline(field, transforms, terminal_stat, weight=weight, query_key=query_key)
 
     def stat_explicit(
         self,
@@ -384,7 +389,7 @@ class BinNDResult(BinPlotMixin):
             bins.stat_explicit("vz", "mean", transforms=["abs"])
             bins.stat_explicit("mass", "mean", weight="mass")
         """
-        return self._query_engine.stat_explicit(field, statistic, weight=weight, transforms=transforms)
+        return self._query_service.stat_explicit(field, statistic, weight=weight, transforms=transforms)
 
     def apply(
         self,
@@ -414,16 +419,16 @@ class BinNDResult(BinPlotMixin):
 
             Signature: ``query(sim, particle_bin) -> np.ndarray``
         """
-        return self._query_engine.apply(query, name=name, empty=empty, vectorized=vectorized)
+        return self._query_service.apply(query, name=name, empty=empty, vectorized=vectorized)
 
     def _callable_cache_token(self, query: Any) -> Any:
-        return self._query_engine.callable_cache_token(query)
+        return self._query_service.callable_cache_token(query)
 
     def cache_report(self) -> dict[str, Any]:
-        return self._query_engine.cache_report()
+        return self._query_service.cache_report()
 
     def query_report(self) -> list[dict[str, Any]]:
-        return self._query_engine.query_report()
+        return self._query_service.query_report()
 
     # ------------------------------------------------------------------
     # Axis measure type configuration
@@ -467,9 +472,9 @@ class BinNDResult(BinPlotMixin):
             self._measure_resolver.set(alias, type_name)
 
         # Invalidate measure-dependent cache entries on this instance + subresults
-        n, names = self._query_engine.invalidate_measure_dependent_cache()
+        n, names = self._query_service.invalidate_measure_dependent_cache()
         for sub in self._subresults.values():
-            sn, snames = sub._query_engine.invalidate_measure_dependent_cache()
+            sn, snames = sub._query_service.invalidate_measure_dependent_cache()
             n += sn
             names.extend(snames)
 
@@ -488,9 +493,9 @@ class BinNDResult(BinPlotMixin):
         Invalidates measure-dependent cache entries on this instance and all
         subresults.  Returns ``(count, cleared_names)``.
         """
-        n, names = self._query_engine.invalidate_measure_dependent_cache()
+        n, names = self._query_service.invalidate_measure_dependent_cache()
         for sub in self._subresults.values():
-            sn, snames = sub._query_engine.invalidate_measure_dependent_cache()
+            sn, snames = sub._query_service.invalidate_measure_dependent_cache()
             n += sn
             names.extend(snames)
         return n, names
