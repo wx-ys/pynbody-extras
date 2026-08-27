@@ -28,7 +28,7 @@ def dataclass_calc(cls: type[TCalc], **dataclass_kwargs: Any) -> type[TCalc]: ..
 def dataclass_calc(cls: None = None, **dataclass_kwargs: Any) -> Callable[[type[TCalc]], type[TCalc]]: ...
 
 
-@dataclass_transform(field_specifiers=(Param,))
+@dataclass_transform(field_specifiers=(Param, Param.static))
 def dataclass_calc(
     cls: type[TCalc] | None = None, **dataclass_kwargs: Any
 ) -> type[TCalc] | Callable[[type[TCalc]], type[TCalc]]:
