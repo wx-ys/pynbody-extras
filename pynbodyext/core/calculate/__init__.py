@@ -191,6 +191,7 @@ from .bins import (
 from .diagnostics.observer import AccessEvent, AccessObservation
 from .diagnostics.perf import PerfCollector
 from .diagnostics.trace import TraceCollector, TraceEvent
+from .display import get_repr_style, reset_repr_style, set_repr_style
 from .nodes.base import CalculatorBase, CombinedCalculator
 from .nodes.expr import ConstantProperty, LambdaProperty, OpProperty
 from .nodes.filters import AndFilter, FilterBase, NotFilter, OrFilter
@@ -228,6 +229,9 @@ from .runtime.scopes import Scope, ScopeSpec, TransformScope
 
 __all__ = [
     "CalculatorBase",
+    "get_repr_style",
+    "set_repr_style",
+    "reset_repr_style",
     "Bin1D",
     "BinND",
     "BinAxis",

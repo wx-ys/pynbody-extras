@@ -347,6 +347,46 @@ HTML_STYLE = """
 </style>
 """
 
+REPR_STYLES: tuple[str, ...] = ("rich", "github", "plain")
+_REPR_STYLE: dict[str, str] = {"style": "rich"}
+
+
+def get_repr_style() -> str:
+    """Return the current display style (``"rich"``, ``"github"``, or ``"plain"``)."""
+    return _REPR_STYLE["style"]
+
+
+def set_repr_style(style: str) -> None:
+    """Set the global display style used by ``_repr_mimebundle_`` / ``_repr_html_``.
+
+    Parameters
+    ----------
+    style : {"rich", "github", "plain"}
+        - ``"rich"`` (default): full HTML for Jupyter/VSCode (cards, collapsible
+          details, badges, metric grids, embedded CSS).
+        - ``"github"``: GitHub-sanitizer-safe HTML (``table``/``pre``/``code``/
+          ``strong``/``p``), no ``<style>``/``<details>``/grid divs, so notebooks
+          render cleanly on GitHub.
+        - ``"plain"``: plain-text only (the HTML mime type is omitted).
+
+    Examples
+    --------
+    >>> set_repr_style("github")
+    >>> set_repr_style("rich")
+    """
+    if style not in REPR_STYLES:
+        raise ValueError(f"unknown repr style {style!r}; expected one of {REPR_STYLES}")
+    _REPR_STYLE["style"] = style
+
+
+def reset_repr_style() -> None:
+    """Reset the display style back to the default ``"rich"``."""
+    _REPR_STYLE["style"] = "rich"
+
+
+def _style() -> str:
+    return _REPR_STYLE["style"]
+
 
 def compact_repr(value: Any, *, max_length: int = 80) -> str:
     """Return a compact single-line string representation of a value, truncating if necessary."""
@@ -377,6 +417,8 @@ def _html_value(value: Any, *, escape_values: bool) -> str:
 def html_badge(text: Any, tone: str = "neutral") -> str:
     """Return a small badge pill."""
     safe_tone = tone if tone in {"neutral", "info", "ok", "warn", "error"} else "neutral"
+    if _style() != "rich":
+        return f"<code>{html_escape(text)}</code>"
     return f"<span class='pynbodyext-calc-badge pynbodyext-calc-badge-{safe_tone}'>{html_escape(text)}</span>"
 
 
@@ -384,6 +426,13 @@ def html_table(
     rows: list[tuple[str, Any]], *, escape_values: bool = True, class_name: str = "pynbodyext-calc-table"
 ) -> str:
     """Return a two-column div grid for the given rows."""
+    if _style() != "rich":
+        body = "".join(
+            f"<tr><th>{html_escape(key)}</th><td>{_html_value(value, escape_values=escape_values)}</td></tr>"
+            for key, value in rows
+        )
+        return f"<table class='{class_name}'><tbody>{body}</tbody></table>"
+
     body = "".join(
         "<div class='pynbodyext-calc-kv-row'>"
         f"<div class='pynbodyext-calc-kv-key'>{html_escape(key)}</div>"
@@ -402,6 +451,14 @@ def html_data_table(
     class_name: str = "pynbodyext-calc-data-table",
 ) -> str:
     """Return a multi-column div grid."""
+    if _style() != "rich":
+        head = "".join(f"<th>{html_escape(header)}</th>" for header in headers)
+        body = "".join(
+            "<tr>" + "".join(f"<td>{_html_value(value, escape_values=escape_values)}</td>" for value in row) + "</tr>"
+            for row in rows
+        )
+        return f"<table class='{class_name}'><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+
     if headers:
         column_template = " ".join("max-content" for _ in headers)
     else:
@@ -429,6 +486,9 @@ def html_data_table(
 
 def html_scroll_x(body: str, *, min_width: str | None = None) -> str:
     """Return a horizontal scroll container."""
+    if _style() != "rich":
+        return body
+
     inner_style = ""
     if min_width is not None:
         inner_style = f" style='min-width:{html_escape(min_width)};'"
@@ -442,6 +502,13 @@ def html_scroll_x(body: str, *, min_width: str | None = None) -> str:
 
 def html_metric_grid(metrics: list[tuple[str, Any]], *, escape_values: bool = True) -> str:
     """Return a compact responsive metric grid."""
+    if _style() != "rich":
+        rows = "".join(
+            f"<tr><th>{html_escape(label)}</th><td>{_html_value(value, escape_values=escape_values)}</td></tr>"
+            for label, value in metrics
+        )
+        return f"<table class='pynbodyext-calc-metric-grid'><tbody>{rows}</tbody></table>"
+
     body = "".join(
         "<div class='pynbodyext-calc-metric'>"
         f"<div class='pynbodyext-calc-metric-label'>{html_escape(label)}</div>"
@@ -454,6 +521,13 @@ def html_metric_grid(metrics: list[tuple[str, Any]], *, escape_values: bool = Tr
 
 def html_metric_strip(metrics: list[tuple[str, Any]], *, escape_values: bool = True) -> str:
     """Return a single-row metric strip intended for horizontal scrolling."""
+    if _style() != "rich":
+        rows = "".join(
+            f"<tr><th>{html_escape(label)}</th><td>{_html_value(value, escape_values=escape_values)}</td></tr>"
+            for label, value in metrics
+        )
+        return f"<table class='pynbodyext-calc-metric-strip'><tbody>{rows}</tbody></table>"
+
     body = "".join(
         "<div class='pynbodyext-calc-metric'>"
         f"<div class='pynbodyext-calc-metric-label'>{html_escape(label)}</div>"
@@ -466,6 +540,9 @@ def html_metric_strip(metrics: list[tuple[str, Any]], *, escape_values: bool = T
 
 def html_section(title: str, body: str) -> str:
     """Return a titled content section."""
+    if _style() != "rich":
+        return f"<h5>{html_escape(title)}</h5>{body}"
+
     return (
         "<div class='pynbodyext-calc-section'>"
         f"<div class='pynbodyext-calc-section-title'>{html_escape(title)}</div>"
@@ -476,6 +553,9 @@ def html_section(title: str, body: str) -> str:
 
 def html_details(summary: str, body: str, *, open: bool = False) -> str:
     """Return a collapsible section."""
+    if _style() != "rich":
+        return f"<p><strong>{html_escape(summary)}</strong></p>{body}"
+
     open_attr = " open" if open else ""
     return (
         f"<details class='pynbodyext-calc-details'{open_attr}><summary>{html_escape(summary)}</summary>{body}</details>"
@@ -484,6 +564,9 @@ def html_details(summary: str, body: str, *, open: bool = False) -> str:
 
 def html_pre(text: str) -> str:
     """Return an HTML <pre> block with the given text."""
+    if _style() != "rich":
+        return f"<pre>{html_escape(text)}</pre>"
+
     return f"<pre class='pynbodyext-calc-pre'>{html_escape(text)}</pre>"
 
 
@@ -491,6 +574,9 @@ def html_card(
     title: str, rows: list[tuple[str, Any]], *, body: str = "", html_style: str = HTML_STYLE, escape_values: bool = True
 ) -> str:
     """Return an HTML card with a title, table of rows, and optional body."""
+    if _style() != "rich":
+        return f"<p><strong>{html_escape(title)}</strong></p>{html_table(rows, escape_values=escape_values)}{body}"
+
     return (
         f"{html_style}"
         "<div class='pynbodyext-calc-card'>"
@@ -503,6 +589,8 @@ def html_card(
 
 def mimebundle(text: str, html: str) -> dict[str, str]:
     """Return a MIME bundle with plain text and HTML representations."""
+    if _style() == "plain":
+        return {"text/plain": text}
     return {"text/plain": text, "text/html": html}
 
 
@@ -535,6 +623,10 @@ def format_mem(value: int | None) -> str:
 
 __all__ = [
     "HTML_STYLE",
+    "REPR_STYLES",
+    "get_repr_style",
+    "set_repr_style",
+    "reset_repr_style",
     "compact_repr",
     "display_value",
     "html_escape",
