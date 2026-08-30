@@ -414,6 +414,21 @@ def _html_value(value: Any, *, escape_values: bool) -> str:
     return html_escape(value) if escape_values else str(value)
 
 
+def _github_value(value: Any, *, escape_values: bool) -> str:
+    """Render a table cell value for the GitHub-safe style.
+
+    Short scalar/token values are wrapped in ``<code>`` (monospace) so they read
+    cleanly on GitHub; longer text is left plain; pre-rendered HTML (``escape_values
+    = False``) is inserted unchanged.
+    """
+    if not escape_values:
+        return str(value)
+    text = str(value)
+    if len(text) <= 40 and isinstance(value, (str, int, float, bool)):
+        return f"<code>{html_escape(text)}</code>"
+    return html_escape(text)
+
+
 def html_badge(text: Any, tone: str = "neutral") -> str:
     """Return a small badge pill."""
     safe_tone = tone if tone in {"neutral", "info", "ok", "warn", "error"} else "neutral"
@@ -428,7 +443,7 @@ def html_table(
     """Return a two-column div grid for the given rows."""
     if _style() != "rich":
         body = "".join(
-            f"<tr><th>{html_escape(key)}</th><td>{_html_value(value, escape_values=escape_values)}</td></tr>"
+            f"<tr><th>{html_escape(key)}</th><td>{_github_value(value, escape_values=escape_values)}</td></tr>"
             for key, value in rows
         )
         return f"<table class='{class_name}'><tbody>{body}</tbody></table>"
@@ -454,7 +469,7 @@ def html_data_table(
     if _style() != "rich":
         head = "".join(f"<th>{html_escape(header)}</th>" for header in headers)
         body = "".join(
-            "<tr>" + "".join(f"<td>{_html_value(value, escape_values=escape_values)}</td>" for value in row) + "</tr>"
+            "<tr>" + "".join(f"<td>{_github_value(value, escape_values=escape_values)}</td>" for value in row) + "</tr>"
             for row in rows
         )
         return f"<table class='{class_name}'><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
@@ -503,11 +518,15 @@ def html_scroll_x(body: str, *, min_width: str | None = None) -> str:
 def html_metric_grid(metrics: list[tuple[str, Any]], *, escape_values: bool = True) -> str:
     """Return a compact responsive metric grid."""
     if _style() != "rich":
-        rows = "".join(
-            f"<tr><th>{html_escape(label)}</th><td>{_html_value(value, escape_values=escape_values)}</td></tr>"
+        body = "".join(
+            f"<tr><td>{html_escape(label)}</td><td>{_github_value(value, escape_values=escape_values)}</td></tr>"
             for label, value in metrics
         )
-        return f"<table class='pynbodyext-calc-metric-grid'><tbody>{rows}</tbody></table>"
+        return (
+            "<table class='pynbodyext-calc-metric-grid'>"
+            "<thead><tr><th>Metric</th><th>Value</th></tr></thead>"
+            f"<tbody>{body}</tbody></table>"
+        )
 
     body = "".join(
         "<div class='pynbodyext-calc-metric'>"
@@ -522,11 +541,15 @@ def html_metric_grid(metrics: list[tuple[str, Any]], *, escape_values: bool = Tr
 def html_metric_strip(metrics: list[tuple[str, Any]], *, escape_values: bool = True) -> str:
     """Return a single-row metric strip intended for horizontal scrolling."""
     if _style() != "rich":
-        rows = "".join(
-            f"<tr><th>{html_escape(label)}</th><td>{_html_value(value, escape_values=escape_values)}</td></tr>"
+        body = "".join(
+            f"<tr><td>{html_escape(label)}</td><td>{_github_value(value, escape_values=escape_values)}</td></tr>"
             for label, value in metrics
         )
-        return f"<table class='pynbodyext-calc-metric-strip'><tbody>{rows}</tbody></table>"
+        return (
+            "<table class='pynbodyext-calc-metric-strip'>"
+            "<thead><tr><th>Metric</th><th>Value</th></tr></thead>"
+            f"<tbody>{body}</tbody></table>"
+        )
 
     body = "".join(
         "<div class='pynbodyext-calc-metric'>"
@@ -554,7 +577,7 @@ def html_section(title: str, body: str) -> str:
 def html_details(summary: str, body: str, *, open: bool = False) -> str:
     """Return a collapsible section."""
     if _style() != "rich":
-        return f"<p><strong>{html_escape(summary)}</strong></p>{body}"
+        return f"<h5>{html_escape(summary)}</h5>{body}"
 
     open_attr = " open" if open else ""
     return (
@@ -575,7 +598,7 @@ def html_card(
 ) -> str:
     """Return an HTML card with a title, table of rows, and optional body."""
     if _style() != "rich":
-        return f"<p><strong>{html_escape(title)}</strong></p>{html_table(rows, escape_values=escape_values)}{body}"
+        return f"<h4>{html_escape(title)}</h4>{html_table(rows, escape_values=escape_values)}{body}"
 
     return (
         f"{html_style}"
