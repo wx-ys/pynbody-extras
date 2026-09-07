@@ -89,9 +89,6 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
-import numpy as np
-from pynbody.array import SimArray
-
 from pynbodyext.core.calculate.diagnostics.observer import observation_phase, render_observer_report
 from pynbodyext.core.calculate.result.enums import CachePolicy, ErrorPolicy, NodeStatus, RecordPolicy
 from pynbodyext.core.calculate.result.exceptions import CycleError
@@ -103,8 +100,9 @@ from ._engine_types import (
     _NodeExecutionFailure,
     _NodeExecutionState,
 )
+from ._record import ValueRecorder
 from .context import ExecutionContext
-from .input import FilterResult, NodeInput
+from .input import NodeInput
 from .options import RunOptions
 from .progress import NodeProgressEvent, RunProgressEvent
 from .sim_identity import SimIdentityProvider, id_based_sim_identity
@@ -800,51 +798,15 @@ class EvalEngine:
         policy: CachePolicy,
         options: RunOptions,
     ) -> bool:
-        if policy == CachePolicy.NONE:
-            return False
-        if policy == CachePolicy.FULL:
-            return True
-        if getattr(node, "effect", None) is not None and str(node.effect) == "mutating":
-            return False
-        size = self._estimate_cache_bytes(public_value)
-        if isinstance(raw_value, FilterResult):
-            if raw_value.mask is not public_value:
-                size += self._estimate_cache_bytes(raw_value.mask)
-        elif raw_value is not public_value:
-            size += self._estimate_cache_bytes(raw_value)
-        return size <= options.cache_small_value_bytes
+        return ValueRecorder.should_store_runtime_cache(node, raw_value, public_value, policy, options)
 
     def _should_auto_record_public_value(
         self, *, public_value: Any, record_policy: RecordPolicy | None, options: RunOptions
     ) -> bool:
-        if not options.auto_record_cached_values:
-            return False
-        if record_policy != RecordPolicy.SUMMARY:
-            return False
-        limit = options.auto_record_small_value_bytes
-        if limit is None:
-            return False
-        return self._estimate_cache_bytes(public_value) <= limit
+        return ValueRecorder.should_auto_record_public_value(public_value=public_value, record_policy=record_policy, options=options)
 
     def _estimate_cache_bytes(self, value: Any) -> int:
-        size = 2 * 1_000_000
-
-        if value is None or isinstance(value, (bool, int, float, np.generic)):
-            size = 64
-        elif isinstance(value, str):
-            size = len(value.encode("utf-8"))
-        elif isinstance(value, np.ndarray):
-            size = int(value.nbytes)
-        elif isinstance(value, FilterResult):
-            size = self._estimate_cache_bytes(value.mask)
-        elif isinstance(value, dict):
-            size = sum(
-                self._estimate_cache_bytes(key) + self._estimate_cache_bytes(item) for key, item in value.items()
-            )
-        elif isinstance(value, (tuple, list)):
-            size = sum(self._estimate_cache_bytes(item) for item in value)
-
-        return size
+        return ValueRecorder.estimate_cache_bytes(value)
 
     def _store_recorded_values(
         self,
@@ -856,86 +818,18 @@ class EvalEngine:
         had_error: bool = False,
         auto_record_public_value: bool = False,
     ) -> None:
-        policy = node_result.record_policy or RecordPolicy.SUMMARY
-
-        node_result.raw_value = None
-        node_result.value = None
-        node_result.stored_raw = False
-        node_result.stored_value = False
-
-        if is_root:
-            if public_value is not None:
-                node_result.value = public_value
-                node_result.stored_value = True
-            if policy == RecordPolicy.FULL or (
-                had_error and policy == RecordPolicy.ERROR_ONLY and raw_value is not None
-            ):
-                node_result.raw_value = raw_value
-                node_result.stored_raw = True
-            return
-
-        if policy == RecordPolicy.FULL:
-            node_result.raw_value = raw_value
-            node_result.value = public_value
-            node_result.stored_raw = True
-            node_result.stored_value = True
-
-        elif policy == RecordPolicy.ERROR_ONLY:
-            if had_error:
-                if raw_value is not None:
-                    node_result.raw_value = raw_value
-                    node_result.stored_raw = True
-                if public_value is not None:
-                    node_result.value = public_value
-                    node_result.stored_value = True
-
-        elif policy == RecordPolicy.SUMMARY:
-            if auto_record_public_value and public_value is not None:
-                node_result.value = public_value
-                node_result.stored_value = True
-
-        elif policy == RecordPolicy.NONE:
-            node_result.raw_value = None
-            node_result.value = None
+        ValueRecorder.store_recorded_values(
+            node_result,
+            raw_value,
+            public_value,
+            is_root=is_root,
+            had_error=had_error,
+            auto_record_public_value=auto_record_public_value,
+        )
 
     def summarize_value(self, value: Any) -> ValueSummary | None:
         """Create a compact summary used in reports and result nodes."""
-        if value is None:
-            return ValueSummary(python_type="NoneType", preview="None")
-
-        units = None
-        if hasattr(value, "units"):
-            try:
-                units = str(value.units)
-            except Exception:
-                units = None
-
-        shape = None
-        if hasattr(value, "shape"):
-            try:
-                shape = tuple(value.shape)
-            except Exception:
-                shape = None
-
-        dtype = None
-        if hasattr(value, "dtype"):
-            try:
-                dtype = str(value.dtype)
-            except Exception:
-                dtype = None
-
-        if isinstance(value, (int, float, bool, str)):
-            preview = repr(value)
-        elif isinstance(value, np.ndarray):
-            preview = f"ndarray(shape={value.shape}, dtype={value.dtype})"
-        elif isinstance(value, SimArray):
-            preview = f"SimArray(shape={value.shape}, units={units})"
-        else:
-            preview = value.__class__.__name__
-
-        return ValueSummary(
-            python_type=value.__class__.__name__, shape=shape, dtype=dtype, units=units, preview=preview
-        )
+        return ValueRecorder.summarize_value(value)
 
     def make_sim_signature(self, sim: Any) -> tuple[Any, ...]:
         """Return the simulation identity fragment used in cache keys and provenance."""
