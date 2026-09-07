@@ -65,7 +65,7 @@ def test_observer_report_lists_all_nodes_and_phases() -> None:
     result = _result()
     text = result.report_observer()
     # all three nodes + the combined root appear as row heads
-    for name in ("RBelo", "MassSum", "TempMean"):
+    for name in ("RBelow", "MassSum", "TempMean"):
         assert name in text
     assert "calculate" in text
     assert "resolve_params" in text
