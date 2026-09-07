@@ -88,6 +88,7 @@ except Exception:
     psutil = None
     _HAS_PSUTIL = False
 
+from pynbodyext.core.calculate.display import format_mem, format_time
 from pynbodyext.core.calculate.result.result import PerfSummary, PhaseRecord, ResultNode
 
 if TYPE_CHECKING:
@@ -110,29 +111,12 @@ class PerfFormatter:
     @staticmethod
     def format_time(value: float | None) -> str:
         """Format seconds as a compact human-readable duration."""
-        if value is None:
-            return "-"
-        if value < 1e-3:
-            return f"{value * 1e6:.1f} us"
-        if value < 1:
-            return f"{value * 1e3:.2f} ms"
-        if value < 60:
-            return f"{value:.3f} s"
-        return f"{value / 60:.2f} min"
+        return format_time(value)
 
     @staticmethod
     def format_mem(value: int | None) -> str:
         """Format bytes as a compact human-readable memory value."""
-        if value is None:
-            return "-"
-        value_abs = abs(value)
-        if value_abs < 1024:
-            return f"{value:.1f} B"
-        if value_abs < 1024**2:
-            return f"{value / 1024:.1f} KiB"
-        if value_abs < 1024**3:
-            return f"{value / 1024**2:.2f} MiB"
-        return f"{value / 1024**3:.2f} GiB"
+        return format_mem(value)
 
 
 @dataclass(slots=True)
