@@ -226,6 +226,14 @@ from .runtime.input import FilterResult, NodeInput, TransformResult
 from .runtime.options import RunOptions
 from .runtime.progress import NullProgressSink, ProgressSink
 from .runtime.scopes import Scope, ScopeSpec, TransformScope
+from .store import (
+    InMemoryResultStore,
+    RecordRef,
+    ResultRecord,
+    ResultStore,
+    ValueCodec,
+    compute_calculator_key,
+)
 
 __all__ = [
     "CalculatorBase",
@@ -313,4 +321,10 @@ __all__ = [
     "ErrorPolicy",
     "normalize_error_policy",
     "CachePolicy",
+    "ResultStore",
+    "InMemoryResultStore",
+    "ResultRecord",
+    "RecordRef",
+    "ValueCodec",
+    "compute_calculator_key",
 ]
