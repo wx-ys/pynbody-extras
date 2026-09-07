@@ -122,6 +122,7 @@ from pynbodyext.core.calculate.display import (
     html_table,
     mimebundle,
 )
+from pynbodyext.core.calculate.nodes._tree import hidden_label, label_for, render_children
 from pynbodyext.core.calculate.params import (
     DynamicParamSpec,
     RuntimeValueResolver,
@@ -184,99 +185,6 @@ def _merge_dependencies(*groups: list[CalculatorBase[Any, Any]]) -> list[Calcula
             seen.add(key)
             merged.append(dep)
     return merged
-
-
-def _tree_kind_label(kind: str, *, compact: bool) -> str:
-    if not compact:
-        return kind
-    return {"property": "prop", "filter": "filt", "transform": "trans", "calculator": "calc", "combined": "comb"}.get(
-        kind, kind
-    )
-
-
-def _tree_input_node(node: CalculatorBase[Any, Any]) -> CalculatorBase[Any, Any]:
-    return node
-
-
-def _tree_label_for(node: CalculatorBase[Any, Any], *, show_inputs: bool, compact_kinds: bool) -> str:
-    from pynbodyext.core.calculate.result.signature import calculator_pretty_init_args
-
-    label = node.tree_label
-    input_node = _tree_input_node(node)
-
-    if show_inputs:
-        init_text = calculator_pretty_init_args(input_node)
-        if init_text:
-            label = f"{label}({init_text})"
-
-    kind = _tree_kind_label(node.kind, compact=compact_kinds)
-    return f"{label}<{kind}>"
-
-
-def _tree_hidden_label(children: list[CalculatorBase[Any, Any]]) -> str:
-    if not children:
-        return "..."
-
-    descendants = 0
-    stack = list(children)
-    seen: set[int] = set()
-
-    while stack:
-        current = stack.pop()
-        key = id(current)
-        if key in seen:
-            continue
-        seen.add(key)
-        descendants += 1
-        stack.extend(current.children())
-
-    suffix = "node" if descendants == 1 else "nodes"
-    return f"... {descendants} {suffix} hidden"
-
-
-def _tree_render_children(
-    node: CalculatorBase[Any, Any],
-    *,
-    prefix: str,
-    depth: int,
-    max_depth: int | None,
-    max_children: int | None,
-    show_inputs: bool,
-    compact_kinds: bool,
-) -> list[str]:
-    children = node.children()
-    if not children:
-        return []
-
-    if max_depth is not None and depth >= max_depth:
-        return [f"{prefix}└─ {_tree_hidden_label(children)}"]
-
-    visible_children = children if max_children is None else children[:max_children]
-    hidden_children = [] if max_children is None else children[max_children:]
-
-    lines: list[str] = []
-    for index, child in enumerate(visible_children):
-        is_last = index == len(visible_children) - 1 and not hidden_children
-        branch = "└─" if is_last else "├─"
-        lines.append(f"{prefix}{branch} {_tree_label_for(child, show_inputs=show_inputs, compact_kinds=compact_kinds)}")
-
-        child_prefix = prefix + ("   " if is_last else "│  ")
-        lines.extend(
-            _tree_render_children(
-                child,
-                prefix=child_prefix,
-                depth=depth + 1,
-                max_depth=max_depth,
-                max_children=max_children,
-                show_inputs=show_inputs,
-                compact_kinds=compact_kinds,
-            )
-        )
-
-    if hidden_children:
-        lines.append(f"{prefix}└─ {_tree_hidden_label(hidden_children)}")
-
-    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -634,13 +542,13 @@ class _CalculatorDisplayMixin:
             raise ValueError("max_children must be non-negative or None")
 
         calculator = cast("CalculatorBase[Any, Any]", self)
-        lines = [_tree_label_for(calculator, show_inputs=show_inputs, compact_kinds=compact_kinds)]
+        lines = [label_for(calculator, show_inputs=show_inputs, compact_kinds=compact_kinds)]
 
         if max_depth == 0 and calculator.children():
-            lines.append(f"└─ {_tree_hidden_label(calculator.children())}")
+            lines.append(f"└─ {hidden_label(calculator.children())}")
         else:
             lines.extend(
-                _tree_render_children(
+                render_children(
                     calculator,
                     prefix="",
                     depth=1,
