@@ -161,6 +161,9 @@ from .core.calculate import (
     PropertyBase,
     RuntimeCalculatorBase,
     TransformBase,
+    get_repr_style,
+    reset_repr_style,
+    set_repr_style,
 )
 
 __all__ = [
@@ -172,4 +175,7 @@ __all__ = [
     "TransformBase",
     "Pipeline",
     "Param",
+    "get_repr_style",
+    "set_repr_style",
+    "reset_repr_style",
 ]

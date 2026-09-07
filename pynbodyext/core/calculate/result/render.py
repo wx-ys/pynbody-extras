@@ -17,10 +17,6 @@ TreePrinter
 
 Both classes are stateless — every method is a ``@staticmethod``.
 Handler dispatch dicts are populated after each class definition.
-
-Backward-compatibility aliases ``_pretty_calculator`` and
-``_tree_dataclass_args`` are provided for the lazy imports used by
-``signature.py``.
 """
 
 from __future__ import annotations
@@ -553,11 +549,3 @@ TreePrinter._CALCULATOR_HEADERS = {
     "lambda_property": lambda p: "LambdaProperty",
     "generic": TreePrinter.generic_head,
 }
-
-
-# ---------------------------------------------------------------------------
-# Backward-compatibility aliases used by signature.py lazy imports
-# ---------------------------------------------------------------------------
-
-_pretty_calculator = SignaturePrinter.calculator
-_tree_dataclass_args = TreePrinter.dataclass_args

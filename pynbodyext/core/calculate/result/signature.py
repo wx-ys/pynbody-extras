@@ -153,9 +153,9 @@ class CalculatorSignature:
 
     def pretty(self) -> str:
         """Return a compact canonical expression for this signature."""
-        from .render import _pretty_calculator
+        from .render import SignaturePrinter
 
-        return _pretty_calculator(self.payload)
+        return SignaturePrinter.calculator(self.payload)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> CalculatorSignature:
@@ -861,9 +861,9 @@ def calculator_pretty_init_args(calculator: Any, *, inline_array_bytes: int = DE
     if not init_payload:
         return ""
 
-    from .render import _tree_dataclass_args
+    from .render import TreePrinter
 
-    return _tree_dataclass_args({"class": _class_path(calculator), "init": init_payload})
+    return TreePrinter.dataclass_args({"class": _class_path(calculator), "init": init_payload})
 
 
 # ---------------------------------------------------------------------------
