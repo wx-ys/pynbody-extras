@@ -565,18 +565,3 @@ def evaluate_statistic(values: Any, statistic: str, weights: Any | None = None) 
 def is_statistic_name(name: str) -> bool:
     """Return True if *name* is a recognised statistic key."""
     return get_statistic(name) is not None
-
-
-# Legacy: kept so old imports of parse_stat_key still work but now uses dot syntax.
-def parse_stat_key(key: str) -> tuple[str, str] | None:
-    """Deprecated. Use :func:`parse_pipeline_key` instead.
-
-    For backwards-compat only: tries to find a ``"field.stat"`` pattern.
-    """
-    result = parse_pipeline_key(key)
-    if result is None:
-        return None
-    field, transforms, stat, weight_field = result
-    if transforms or weight_field:
-        return None  # old API didn't support pipeline transforms or weights
-    return field, stat.key
