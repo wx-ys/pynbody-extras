@@ -94,7 +94,7 @@ def test_view_object_repr_is_compact_in_plain() -> None:
     assert repr(obj) == "Dummy(a=1)"
 
 
-def test_view_object_html_has_tail_hint_in_github_and_plain() -> None:
+def test_view_object_html_renders_sections_in_github_and_plain() -> None:
     from pynbodyext.core.calculate.display import ViewObject, set_repr_style, reset_repr_style
 
     class Dummy(ViewObject):
@@ -109,7 +109,10 @@ def test_view_object_html_has_tail_hint_in_github_and_plain() -> None:
         set_repr_style(style)
         try:
             html = obj._repr_html_()
-            assert ".config and .tree for details" in html
+            # a view exposes its detail directly: sections are rendered, no hint
+            assert "a=1" in html
+            assert "root{__}child" in html
+            assert "for details" not in html
         finally:
             reset_repr_style()
 
