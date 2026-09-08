@@ -78,3 +78,37 @@ def test_perf_summary_is_reachable() -> None:
     table = ResultRepr.perf_table(result)
     assert table  # non-empty
     assert "Total" in table or "phase" in table.lower()
+
+
+def test_view_object_repr_is_compact_in_plain() -> None:
+    from pynbodyext.core.calculate.display import ViewObject
+
+    class Dummy(ViewObject):
+        def _summary(self):
+            return "Dummy(a=1)"
+
+        def _sections(self):
+            return [("config", "a=1"), ("tree", "root{__}child")]
+
+    obj = Dummy()
+    assert repr(obj) == "Dummy(a=1)"
+
+
+def test_view_object_html_has_tail_hint_in_github_and_plain() -> None:
+    from pynbodyext.core.calculate.display import ViewObject, set_repr_style, reset_repr_style
+
+    class Dummy(ViewObject):
+        def _summary(self):
+            return "Dummy(a=1)"
+
+        def _sections(self):
+            return [("config", "a=1"), ("tree", "root{__}child")]
+
+    obj = Dummy()
+    for style in ("github", "plain"):
+        set_repr_style(style)
+        try:
+            html = obj._repr_html_()
+            assert ".config and .tree for details" in html
+        finally:
+            reset_repr_style()

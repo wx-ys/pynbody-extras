@@ -617,6 +617,55 @@ def mimebundle(text: str, html: str) -> dict[str, str]:
     return {"text/plain": text, "text/html": html}
 
 
+def _view_tail_hint(section_names: list[str]) -> str:
+    """Return a hint line listing the view attributes that expose detail."""
+    attrs = [f".{name}" for name in section_names]
+    if len(attrs) == 1:
+        joined = attrs[0]
+    elif len(attrs) == 2:
+        joined = f"{attrs[0]} and {attrs[1]}"
+    else:
+        joined = ", ".join(attrs[:-1]) + f" and {attrs[-1]}"
+    return f"Use {joined} for details"
+
+
+class ViewObject:
+    """A sectioned repr view rendered across all display styles.
+
+    Subclasses provide ``_summary()`` (compact one-line text) and ``_sections()``
+    (a list of ``(label, body)`` pairs).  The base class turns those into a
+    style-appropriate representation:
+
+    - ``rich``: a full HTML card with collapsible ``<details>`` sections.
+    - ``github`` / ``plain``: a compact summary plus a trailing hint naming the
+      view attributes (``.config``, ``.tree``, ...) that expose the sections.
+    """
+
+    def _summary(self) -> str:
+        raise NotImplementedError
+
+    def _sections(self) -> list[tuple[str, str]]:
+        raise NotImplementedError
+
+    def __repr__(self) -> str:
+        return self._summary()
+
+    def __str__(self) -> str:
+        return self._summary()
+
+    def _repr_html_(self) -> str:
+        summary = self._summary()
+        sections = self._sections()
+        if _style() == "rich":
+            body = "".join(html_details(label, html_pre(body), open=False) for label, body in sections)
+            return html_card(self.__class__.__name__, [("value", summary)], body=body, escape_values=False)
+        hint = _view_tail_hint([label for label, _ in sections])
+        return html_card(self.__class__.__name__, [("value", summary)], body=html_pre(hint), escape_values=False)
+
+    def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, str]:
+        return mimebundle(self._summary(), self._repr_html_())
+
+
 def format_time(value: float | None) -> str:
     """Format a time value in a human-friendly unit."""
     if value is None:
@@ -664,6 +713,7 @@ __all__ = [
     "html_pre",
     "html_card",
     "mimebundle",
+    "ViewObject",
     "format_time",
     "format_mem",
 ]
