@@ -300,8 +300,8 @@ class Result(Generic[T]):
                 first = text.strip().splitlines()
                 return first[0] if first else text.strip()
 
-            def _sections(self) -> list[tuple[str, str]]:
-                return [("execution_tree", text)]
+            def _sections(self) -> list[tuple[str | None, str]]:
+                return [(None, text)]
 
         return _ExecutionTreeView()
 
@@ -318,8 +318,8 @@ class Result(Generic[T]):
                 first = text.strip().splitlines()
                 return first[0] if first else text.strip()
 
-            def _sections(self) -> list[tuple[str, str]]:
-                return [("performance", text)]
+            def _sections(self) -> list[tuple[str | None, str]]:
+                return [(None, text)]
 
         return _PerformanceView()
 
@@ -336,8 +336,8 @@ class Result(Generic[T]):
                 first = text.strip().splitlines()
                 return first[0] if first else text.strip()
 
-            def _sections(self) -> list[tuple[str, str]]:
-                return [("cache", text)]
+            def _sections(self) -> list[tuple[str | None, str]]:
+                return [(None, text)]
 
         return _CacheView()
 

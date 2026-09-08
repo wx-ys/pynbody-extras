@@ -391,7 +391,7 @@ class _CalculatorDisplayMixin:
                     return "config()"
                 return f"config({compact_repr(rows)})"
 
-            def _sections(self) -> list[tuple[str, str]]:
+            def _sections(self) -> list[tuple[str | None, str]]:
                 return [(k or "arg", compact_repr(v, max_length=120)) for k, v in rows]
 
         return _Config()
@@ -409,8 +409,8 @@ class _CalculatorDisplayMixin:
                 first = tree.strip().splitlines()
                 return first[0] if first else tree.strip()
 
-            def _sections(self) -> list[tuple[str, str]]:
-                return [("dependency_tree", tree)]
+            def _sections(self) -> list[tuple[str | None, str]]:
+                return [(None, tree)]
 
         return _Tree()
 

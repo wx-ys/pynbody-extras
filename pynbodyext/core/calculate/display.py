@@ -632,7 +632,7 @@ class ViewObject:
     def _summary(self) -> str:
         raise NotImplementedError
 
-    def _sections(self) -> list[tuple[str, str]]:
+    def _sections(self) -> list[tuple[str | None, str]]:
         raise NotImplementedError
 
     def _title(self) -> str:
@@ -649,10 +649,22 @@ class ViewObject:
         summary = self._summary()
         sections = self._sections()
         if _style() == "rich":
-            body = "".join(html_details(label, html_pre(body), open=False) for label, body in sections)
-            return html_card(self._title(), [("value", summary)], body=body, escape_values=False)
-        body = "".join(html_section(label, html_pre(body)) for label, body in sections)
-        return html_card(self._title(), [("value", summary)], body=body, escape_values=False)
+            body_parts = []
+            for label, body in sections:
+                heading = label if label else summary
+                body_parts.append(html_details(heading, html_pre(body), open=False))
+            return html_card(self._title(), [("value", summary)], body="".join(body_parts), escape_values=False)
+        # github / plain: a content view renders its sections directly (no value row,
+        # no per-section heading), so the body is the detail itself.
+        body_parts = []
+        for label, body in sections:
+            if not body:
+                continue
+            if label:
+                body_parts.append(html_section(label, html_pre(body)))
+            else:
+                body_parts.append(html_pre(body))
+        return f"<h4>{html_escape(self._title())}</h4>" + "".join(body_parts)
 
     def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, str]:
         return mimebundle(self._summary(), self._repr_html_())
