@@ -76,6 +76,7 @@ from pynbodyext.core.calculate.diagnostics.observer import (
 from pynbodyext.core.calculate.display import compact_repr, mimebundle
 
 from .enums import NodeKind, NodeStatus, RecordPolicy
+from .views import ErrorListView, NamedView, WarningListView
 
 if TYPE_CHECKING:
     from pynbodyext.core.calculate.nodes.base import CalculatorBase
@@ -232,7 +233,7 @@ class Result(Generic[T]):
     value: T
     root: ResultNode
     nodes: dict[str, ResultNode]
-    named: dict[str, ResultNode] = field(default_factory=dict)
+    named: dict[str, ResultNode] | NamedView = field(default_factory=NamedView)
     #: The live calculator that produced this result, when known.  Set by the
     #: engine to the root node on a live run, and reconstructed from the stored
     #: ``provenance.calculator_signature_text`` for a result loaded from a store.
@@ -241,11 +242,19 @@ class Result(Generic[T]):
     observations: dict[str, AccessObservation] = field(default_factory=dict)
     provenance: ProvenanceInfo | None = None
     perf_summary: PerfSummary = field(default_factory=PerfSummary)
-    warnings: list[str] = field(default_factory=list)
-    errors: list[ErrorInfo] = field(default_factory=list)
+    warnings: list[str] | WarningListView = field(default_factory=WarningListView)
+    errors: list[ErrorInfo] | ErrorListView = field(default_factory=ErrorListView)
 
     reports: dict[str, str] = field(default_factory=dict)
     diagnostics: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.named, NamedView):
+            self.named = NamedView(self.named) if self.named else NamedView({})
+        if not isinstance(self.errors, ErrorListView):
+            self.errors = ErrorListView(self.errors) if self.errors else ErrorListView([])
+        if not isinstance(self.warnings, WarningListView):
+            self.warnings = WarningListView(self.warnings) if self.warnings else WarningListView([])
 
     def __repr__(self) -> str:
         from .repr import ResultRepr

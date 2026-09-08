@@ -112,3 +112,47 @@ def test_view_object_html_has_tail_hint_in_github_and_plain() -> None:
             assert ".config and .tree for details" in html
         finally:
             reset_repr_style()
+
+
+def test_result_named_is_named_view() -> None:
+    from pynbodyext.core.calculate.result.views import NamedView
+
+    result = _result()
+    assert isinstance(result.named, NamedView)
+
+
+def test_result_named_view_protocol_matches_dict() -> None:
+    result = _result()
+    named = result.named
+    assert "m" in named
+    assert named["m"].label == "MassSum"
+    assert set(named.keys()) == {"p", "m", "t"}
+    assert len(named) == 3
+    assert named == {"p": result.named["p"], "m": result.named["m"], "t": result.named["t"]}
+    assert isinstance(result.named.get("m"), type(result.named["m"]))
+
+
+def test_result_errors_warnings_protocol_matches_list() -> None:
+    import numpy as np
+    import pynbody
+    from pynbodyext.core.calculate import ErrorPolicy, Pipeline, PropertyBase
+
+    @PropertyBase.dataclass
+    class AlwaysFails(PropertyBase[float]):
+        def calculate(self, sim, params=None):
+            raise RuntimeError("boom")
+
+    @PropertyBase.dataclass
+    class Good(PropertyBase[float]):
+        def calculate(self, sim, params=None):
+            return 1.0
+
+    sim = pynbody.new(3)
+    sim["x"] = np.arange(3.0)
+    pipe = Pipeline({"ok": Good(), "bad": AlwaysFails()}, name="p")
+    result = pipe.run(sim, errors=ErrorPolicy.COLLECT)
+    assert bool(result.errors) is True
+    assert len(result.errors) >= 1
+    assert result.errors[0].message == "boom"
+    assert isinstance(list(result.errors)[0].message, str)
+    assert bool(result.warnings) is False
