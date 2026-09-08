@@ -23,6 +23,8 @@ from pynbody import units
 from pynbody.array import SimArray
 
 from pynbodyext.core.calculate.display import (
+    ViewObject,
+    _style,
     compact_repr,
     display_value,
     html_badge,
@@ -375,6 +377,34 @@ class _CalculatorDisplayMixin:
     def _repr_pretty_(self, printer: Any, cycle: bool) -> None:
         printer.text(f"{self.__class__.__name__}(...)" if cycle else repr(self))
 
+    @property
+    def config(self) -> ViewObject:
+        """A view of this calculator's configuration (name/record/scope args)."""
+        rows = self._repr_fields()
+
+        class _Config(ViewObject):
+            def _summary(self) -> str:
+                return f"config({compact_repr(rows)})"
+
+            def _sections(self) -> list[tuple[str, str]]:
+                return [(k or "arg", compact_repr(v, max_length=120)) for k, v in rows]
+
+        return _Config()
+
+    @property
+    def dependency_tree(self) -> ViewObject:
+        """A view of this calculator's dependency tree."""
+        tree = self.format_tree()
+
+        class _Tree(ViewObject):
+            def _summary(self) -> str:
+                return tree
+
+            def _sections(self) -> list[tuple[str, str]]:
+                return [("tree", tree)]
+
+        return _Tree()
+
     def _repr_html_(self) -> str:
         rows: list[tuple[str, Any]] = []
         for key, value in self._repr_summary_rows():
@@ -387,32 +417,33 @@ class _CalculatorDisplayMixin:
             else:
                 rows.append((key, value))
 
-        detail_rows: list[tuple[str, Any]] = []
-        positional_index = 0
-        for key, value in self._repr_fields():  # type: ignore
-            if key is None:
-                positional_index += 1  # type: ignore
-                label = f"arg{positional_index}"
-            else:
-                label = key
-            detail_rows.append((label, compact_repr(value, max_length=220)))
-
         body_parts: list[str] = []
-        if detail_rows:
-            body_parts.append(
-                html_details(
-                    "Configuration",
-                    html_scroll_x(
-                        html_table(
-                            detail_rows,
-                            class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap pynbodyext-calc-monospace",
+        if _style() == "rich":
+            detail_rows: list[tuple[str, Any]] = []
+            positional_index = 0
+            for key, value in self._repr_fields():  # type: ignore
+                if key is None:
+                    positional_index += 1  # type: ignore
+                    label = f"arg{positional_index}"
+                else:
+                    label = key
+                detail_rows.append((label, compact_repr(value, max_length=220)))
+            if detail_rows:
+                body_parts.append(
+                    html_details(
+                        "Configuration",
+                        html_scroll_x(
+                            html_table(
+                                detail_rows,
+                                class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap pynbodyext-calc-monospace",
+                            ),
+                            min_width="56rem",
                         ),
-                        min_width="56rem",
-                    ),
+                    )
                 )
-            )
-
-        body_parts.append(html_details("Dependency tree", html_pre(self.format_tree()), open=False))
+            body_parts.append(html_details("Dependency tree", html_pre(self.format_tree()), open=False))
+        else:
+            body_parts.append(html_pre("Use .config and .dependency_tree for details"))
 
         return html_card(self.__class__.__name__, rows, body="".join(body_parts), escape_values=False)
 

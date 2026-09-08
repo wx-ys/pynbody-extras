@@ -156,3 +156,24 @@ def test_result_errors_warnings_protocol_matches_list() -> None:
     assert result.errors[0].message == "boom"
     assert isinstance(list(result.errors)[0].message, str)
     assert bool(result.warnings) is False
+
+
+def test_calculator_base_config_and_dependency_tree_attributes() -> None:
+    calc = make_pipeline()
+    assert hasattr(calc, "config")
+    assert hasattr(calc, "dependency_tree")
+    assert "Configuration" in calc.config._repr_html_() or "config" in calc.config._summary()
+    assert calc.dependency_tree._summary().startswith("\n")
+
+
+def test_calculator_base_repr_html_tail_hint_in_github_plain() -> None:
+    from pynbodyext.core.calculate.display import set_repr_style, reset_repr_style
+
+    calc = make_pipeline()
+    for style in ("github", "plain"):
+        set_repr_style(style)
+        try:
+            html = calc._repr_html_()
+            assert ".config" in html or ".dependency_tree" in html
+        finally:
+            reset_repr_style()
