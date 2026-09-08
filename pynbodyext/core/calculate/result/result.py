@@ -209,6 +209,23 @@ class PerfSummary:
     cache_store_count: int = 0
 
 
+def _text_view(title: str, text: str) -> ViewObject:
+    """Build a single-section ``ViewObject`` that renders *text* under *title*."""
+
+    class _TextView(ViewObject):
+        def _title(self) -> str:
+            return title
+
+        def _summary(self) -> str:
+            first = text.strip().splitlines()
+            return first[0] if first else text.strip()
+
+        def _sections(self) -> list[tuple[str | None, str]]:
+            return [(None, text)]
+
+    return _TextView()
+
+
 @dataclass(slots=True)
 class Result(Generic[T]):
     """Public result returned by :meth:`CalculatorBase.run`.
@@ -290,56 +307,17 @@ class Result(Generic[T]):
     @property
     def execution_tree(self) -> ViewObject:
         """A view object exposing the runtime execution tree report."""
-        text = self.report_execution_tree()
-
-        class _ExecutionTreeView(ViewObject):
-            def _title(self) -> str:
-                return "Execution tree"
-
-            def _summary(self) -> str:
-                first = text.strip().splitlines()
-                return first[0] if first else text.strip()
-
-            def _sections(self) -> list[tuple[str | None, str]]:
-                return [(None, text)]
-
-        return _ExecutionTreeView()
+        return _text_view("Execution tree", self.report_execution_tree())
 
     @property
     def performance(self) -> ViewObject:
         """A view object exposing the formatted performance report."""
-        text = self.report_perf()
-
-        class _PerformanceView(ViewObject):
-            def _title(self) -> str:
-                return "Performance"
-
-            def _summary(self) -> str:
-                first = text.strip().splitlines()
-                return first[0] if first else text.strip()
-
-            def _sections(self) -> list[tuple[str | None, str]]:
-                return [(None, text)]
-
-        return _PerformanceView()
+        return _text_view("Performance", self.report_perf())
 
     @property
     def cache(self) -> ViewObject:
         """A view object exposing the runtime cache report."""
-        text = self.cache_report()
-
-        class _CacheView(ViewObject):
-            def _title(self) -> str:
-                return "Cache"
-
-            def _summary(self) -> str:
-                first = text.strip().splitlines()
-                return first[0] if first else text.strip()
-
-            def _sections(self) -> list[tuple[str | None, str]]:
-                return [(None, text)]
-
-        return _CacheView()
+        return _text_view("Cache", self.cache_report())
 
     def get_node(self, node_id: str) -> ResultNode:
         """Return a result node by internal node id."""

@@ -667,7 +667,10 @@ class ViewObject:
         return f"<h4>{html_escape(self._title())}</h4>" + "".join(body_parts)
 
     def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, str]:
-        return mimebundle(self._summary(), self._repr_html_())
+        text = self._summary()
+        if _style() == "plain":
+            return {"text/plain": text}
+        return mimebundle(text, self._repr_html_())
 
 
 def format_time(value: float | None) -> str:

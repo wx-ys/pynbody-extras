@@ -27,22 +27,21 @@ class NamedView(ViewObject, dict[str, Any]):
 
     def __init__(self, data: dict[str, Any] | None = None) -> None:
         dict.__init__(self, data or {})
-        self._data = dict(self)
 
     def _title(self) -> str:
         return "Named"
 
     def _summary(self) -> str:
-        return f"named={tuple(self._data.keys())!r}"
+        return f"named={tuple(self.keys())!r}"
 
     def _sections(self) -> list[tuple[str | None, str]]:
-        return [(None, ", ".join(compact_repr(value, max_length=80) for value in self._data.values()))]
+        return [(None, ", ".join(compact_repr(value, max_length=80) for value in self.values()))]
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, NamedView):
-            return dict(self._data) == dict(other._data)
+            return dict(self) == dict(other)
         if isinstance(other, dict):
-            return self._data == other
+            return dict(self) == other
         return NotImplemented
 
 
@@ -53,22 +52,21 @@ class ErrorListView(ViewObject, list[Any]):
 
     def __init__(self, data: list[Any] | None = None) -> None:
         list.__init__(self, data or [])
-        self._data = list(self)
 
     def _title(self) -> str:
         return "Errors"
 
     def _summary(self) -> str:
-        return f"errors={len(self._data)}"
+        return f"errors={len(self)}"
 
     def _sections(self) -> list[tuple[str | None, str]]:
-        return [(None, "\n".join(str(e) for e in self._data))]
+        return [(None, "\n".join(str(e) for e in self))]
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, ErrorListView):
-            return self._data == other._data
+            return list(self) == list(other)
         if isinstance(other, list):
-            return self._data == other
+            return list(self) == other
         return NotImplemented
 
 
@@ -79,20 +77,19 @@ class WarningListView(ViewObject, list[Any]):
 
     def __init__(self, data: list[Any] | None = None) -> None:
         list.__init__(self, data or [])
-        self._data = list(self)
 
     def _title(self) -> str:
         return "Warnings"
 
     def _summary(self) -> str:
-        return f"warnings={len(self._data)}"
+        return f"warnings={len(self)}"
 
     def _sections(self) -> list[tuple[str | None, str]]:
-        return [(None, "\n".join(str(w) for w in self._data))]
+        return [(None, "\n".join(str(w) for w in self))]
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, WarningListView):
-            return self._data == other._data
+            return list(self) == list(other)
         if isinstance(other, list):
-            return self._data == other
+            return list(self) == other
         return NotImplemented

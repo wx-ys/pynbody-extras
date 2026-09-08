@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import re
 
-from pynbodyext.core.calculate.result.repr import ResultRepr
-
 from test_calculate_core import make_pipeline, make_sim
+
+from pynbodyext.core.calculate.result.repr import ResultRepr
 
 
 def _result():
@@ -95,7 +95,7 @@ def test_view_object_repr_is_compact_in_plain() -> None:
 
 
 def test_view_object_html_renders_sections_in_github_and_plain() -> None:
-    from pynbodyext.core.calculate.display import ViewObject, set_repr_style, reset_repr_style
+    from pynbodyext.core.calculate.display import ViewObject, reset_repr_style, set_repr_style
 
     class Dummy(ViewObject):
         def _summary(self):
@@ -138,6 +138,7 @@ def test_result_named_view_protocol_matches_dict() -> None:
 def test_result_errors_warnings_protocol_matches_list() -> None:
     import numpy as np
     import pynbody
+
     from pynbodyext.core.calculate import ErrorPolicy, Pipeline, PropertyBase
 
     @PropertyBase.dataclass
@@ -161,6 +162,22 @@ def test_result_errors_warnings_protocol_matches_list() -> None:
     assert bool(result.warnings) is False
 
 
+def test_named_view_summary_tracks_mutation() -> None:
+    """NamedView must not cache a private copy that drifts from the dict.
+
+    Regression guard: the view class used to keep a ``self._data`` copy while the
+    dict/list protocol mutated in place, so repr/summary diverged from the real
+    contents. Reading the live dict keeps them consistent.
+    """
+    result = _result()
+    named = result.named
+    before_keys = set(named.keys())
+    named["zz"] = named[next(iter(named))]
+    assert "zz" in named
+    assert set(named.keys()) == before_keys | {"zz"}
+    assert "zz" in named._summary()
+
+
 def test_calculator_base_config_and_dependency_tree_attributes() -> None:
     calc = make_pipeline()
     assert hasattr(calc, "config")
@@ -171,7 +188,7 @@ def test_calculator_base_config_and_dependency_tree_attributes() -> None:
 
 
 def test_calculator_base_repr_html_tail_hint_in_github_plain() -> None:
-    from pynbodyext.core.calculate.display import set_repr_style, reset_repr_style
+    from pynbodyext.core.calculate.display import reset_repr_style, set_repr_style
 
     calc = make_pipeline()
     for style in ("github", "plain"):
@@ -198,7 +215,7 @@ def test_result_has_detail_view_attributes() -> None:
 
 
 def test_result_repr_html_tail_hint_in_github_plain() -> None:
-    from pynbodyext.core.calculate.display import set_repr_style, reset_repr_style
+    from pynbodyext.core.calculate.display import reset_repr_style, set_repr_style
 
     result = _result()
     hint = "Use .named, .provenance, .execution_tree, .performance and .cache for details"
