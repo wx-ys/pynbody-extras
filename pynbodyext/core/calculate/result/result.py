@@ -293,11 +293,15 @@ class Result(Generic[T]):
         text = self.report_execution_tree()
 
         class _ExecutionTreeView(ViewObject):
+            def _title(self) -> str:
+                return "Execution tree"
+
             def _summary(self) -> str:
-                return compact_repr(text.strip(), max_length=120)
+                first = text.strip().splitlines()
+                return first[0] if first else text.strip()
 
             def _sections(self) -> list[tuple[str, str]]:
-                return [("tree", text)]
+                return [("execution_tree", text)]
 
         return _ExecutionTreeView()
 
@@ -307,8 +311,12 @@ class Result(Generic[T]):
         text = self.report_perf()
 
         class _PerformanceView(ViewObject):
+            def _title(self) -> str:
+                return "Performance"
+
             def _summary(self) -> str:
-                return compact_repr(text.strip(), max_length=120)
+                first = text.strip().splitlines()
+                return first[0] if first else text.strip()
 
             def _sections(self) -> list[tuple[str, str]]:
                 return [("performance", text)]
@@ -321,8 +329,12 @@ class Result(Generic[T]):
         text = self.cache_report()
 
         class _CacheView(ViewObject):
+            def _title(self) -> str:
+                return "Cache"
+
             def _summary(self) -> str:
-                return compact_repr(text.strip(), max_length=120)
+                first = text.strip().splitlines()
+                return first[0] if first else text.strip()
 
             def _sections(self) -> list[tuple[str, str]]:
                 return [("cache", text)]

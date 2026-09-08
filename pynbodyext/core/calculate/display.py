@@ -620,6 +620,8 @@ def mimebundle(text: str, html: str) -> dict[str, str]:
 def _view_tail_hint(section_names: list[str]) -> str:
     """Return a hint line listing the view attributes that expose detail."""
     attrs = [f".{name}" for name in section_names]
+    if not attrs:
+        return "No further details"
     if len(attrs) == 1:
         joined = attrs[0]
     elif len(attrs) == 2:
@@ -647,6 +649,10 @@ class ViewObject:
     def _sections(self) -> list[tuple[str, str]]:
         raise NotImplementedError
 
+    def _title(self) -> str:
+        """Return a friendly display title (defaults to the class name)."""
+        return self.__class__.__name__
+
     def __repr__(self) -> str:
         return self._summary()
 
@@ -658,9 +664,9 @@ class ViewObject:
         sections = self._sections()
         if _style() == "rich":
             body = "".join(html_details(label, html_pre(body), open=False) for label, body in sections)
-            return html_card(self.__class__.__name__, [("value", summary)], body=body, escape_values=False)
+            return html_card(self._title(), [("value", summary)], body=body, escape_values=False)
         hint = _view_tail_hint([label for label, _ in sections])
-        return html_card(self.__class__.__name__, [("value", summary)], body=html_pre(hint), escape_values=False)
+        return html_card(self._title(), [("value", summary)], body=html_pre(hint), escape_values=False)
 
     def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, str]:
         return mimebundle(self._summary(), self._repr_html_())

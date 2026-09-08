@@ -29,11 +29,14 @@ class NamedView(ViewObject, dict[str, Any]):
         dict.__init__(self, data or {})
         self._data = dict(self)
 
+    def _title(self) -> str:
+        return "Named"
+
     def _summary(self) -> str:
         return f"named={tuple(self._data.keys())!r}"
 
     def _sections(self) -> list[tuple[str, str]]:
-        return [(name, compact_repr(node_value, max_length=100)) for name, node_value in self._data.items()]
+        return [("named", ", ".join(compact_repr(value, max_length=80) for value in self._data.values()))]
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, NamedView):
@@ -52,11 +55,14 @@ class ErrorListView(ViewObject, list[Any]):
         list.__init__(self, data or [])
         self._data = list(self)
 
+    def _title(self) -> str:
+        return "Errors"
+
     def _summary(self) -> str:
         return f"errors={len(self._data)}"
 
     def _sections(self) -> list[tuple[str, str]]:
-        return [(str(i), str(e)) for i, e in enumerate(self._data)]
+        return [("errors", "\n".join(str(e) for e in self._data))]
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, ErrorListView):
@@ -75,11 +81,14 @@ class WarningListView(ViewObject, list[Any]):
         list.__init__(self, data or [])
         self._data = list(self)
 
+    def _title(self) -> str:
+        return "Warnings"
+
     def _summary(self) -> str:
         return f"warnings={len(self._data)}"
 
     def _sections(self) -> list[tuple[str, str]]:
-        return [(str(i), str(w)) for i, w in enumerate(self._data)]
+        return [("warnings", "\n".join(str(w) for w in self._data))]
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, WarningListView):

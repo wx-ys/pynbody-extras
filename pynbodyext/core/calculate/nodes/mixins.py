@@ -380,10 +380,15 @@ class _CalculatorDisplayMixin:
     @property
     def config(self) -> ViewObject:
         """A view of this calculator's configuration (name/record/scope args)."""
-        rows = self._repr_fields()
+        rows = [(k, v) for k, v in self._repr_fields() if k != "scope"]
 
         class _Config(ViewObject):
+            def _title(self) -> str:
+                return "Configuration"
+
             def _summary(self) -> str:
+                if not rows:
+                    return "config()"
                 return f"config({compact_repr(rows)})"
 
             def _sections(self) -> list[tuple[str, str]]:
@@ -397,11 +402,15 @@ class _CalculatorDisplayMixin:
         tree = self.format_tree()
 
         class _Tree(ViewObject):
+            def _title(self) -> str:
+                return "Dependency tree"
+
             def _summary(self) -> str:
-                return tree
+                first = tree.strip().splitlines()
+                return first[0] if first else tree.strip()
 
             def _sections(self) -> list[tuple[str, str]]:
-                return [("tree", tree)]
+                return [("dependency_tree", tree)]
 
         return _Tree()
 

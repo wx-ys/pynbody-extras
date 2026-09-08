@@ -163,7 +163,8 @@ def test_calculator_base_config_and_dependency_tree_attributes() -> None:
     assert hasattr(calc, "config")
     assert hasattr(calc, "dependency_tree")
     assert "Configuration" in calc.config._repr_html_() or "config" in calc.config._summary()
-    assert calc.dependency_tree._summary().startswith("\n")
+    # dependency_tree summary is the root/head line, not the whole multiline tree
+    assert calc.dependency_tree._summary().startswith("p<")
 
 
 def test_calculator_base_repr_html_tail_hint_in_github_plain() -> None:
