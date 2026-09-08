@@ -73,7 +73,7 @@ from pynbodyext.core.calculate.diagnostics.observer import (
     format_observation_access,
     render_observer_report,
 )
-from pynbodyext.core.calculate.display import compact_repr, mimebundle
+from pynbodyext.core.calculate.display import ViewObject, compact_repr, mimebundle
 
 from .enums import NodeKind, NodeStatus, RecordPolicy
 from .views import ErrorListView, NamedView, WarningListView
@@ -286,6 +286,48 @@ class Result(Generic[T]):
     def named_values(self) -> dict[str, Any]:
         """Return public values for named nodes that were materialized."""
         return dict(self.diagnostic("named_values", {}))
+
+    @property
+    def execution_tree(self) -> ViewObject:
+        """A view object exposing the runtime execution tree report."""
+        text = self.report_execution_tree()
+
+        class _ExecutionTreeView(ViewObject):
+            def _summary(self) -> str:
+                return compact_repr(text.strip(), max_length=120)
+
+            def _sections(self) -> list[tuple[str, str]]:
+                return [("tree", text)]
+
+        return _ExecutionTreeView()
+
+    @property
+    def performance(self) -> ViewObject:
+        """A view object exposing the formatted performance report."""
+        text = self.report_perf()
+
+        class _PerformanceView(ViewObject):
+            def _summary(self) -> str:
+                return compact_repr(text.strip(), max_length=120)
+
+            def _sections(self) -> list[tuple[str, str]]:
+                return [("performance", text)]
+
+        return _PerformanceView()
+
+    @property
+    def cache(self) -> ViewObject:
+        """A view object exposing the runtime cache report."""
+        text = self.cache_report()
+
+        class _CacheView(ViewObject):
+            def _summary(self) -> str:
+                return compact_repr(text.strip(), max_length=120)
+
+            def _sections(self) -> list[tuple[str, str]]:
+                return [("cache", text)]
+
+        return _CacheView()
 
     def get_node(self, node_id: str) -> ResultNode:
         """Return a result node by internal node id."""

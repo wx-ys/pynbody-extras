@@ -177,3 +177,31 @@ def test_calculator_base_repr_html_tail_hint_in_github_plain() -> None:
             assert ".config" in html or ".dependency_tree" in html
         finally:
             reset_repr_style()
+
+
+def test_result_has_detail_view_attributes() -> None:
+    """Result must expose .execution_tree/.performance/.cache as view objects."""
+    from pynbodyext.core.calculate.display import ViewObject
+
+    result = _result()
+    assert isinstance(result.execution_tree, ViewObject)
+    assert isinstance(result.performance, ViewObject)
+    assert isinstance(result.cache, ViewObject)
+    # each view must be renderable and non-empty
+    for view in (result.execution_tree, result.performance, result.cache):
+        assert repr(view)
+        assert isinstance(view._repr_html_(), str)
+
+
+def test_result_repr_html_tail_hint_in_github_plain() -> None:
+    from pynbodyext.core.calculate.display import set_repr_style, reset_repr_style
+
+    result = _result()
+    hint = "Use .named, .provenance, .execution_tree, .performance and .cache for details"
+    for style in ("github", "plain"):
+        set_repr_style(style)
+        try:
+            html = result._repr_html_()
+            assert hint in html
+        finally:
+            reset_repr_style()
