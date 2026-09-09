@@ -317,7 +317,7 @@ class Result(Generic[T]):
     @property
     def cache(self) -> ViewObject:
         """A view object exposing the runtime cache report."""
-        return _text_view("Cache", self.cache_report())
+        return _text_view("Cache", self.report_cache())
 
     def get_node(self, node_id: str) -> ResultNode:
         """Return a result node by internal node id."""
@@ -336,10 +336,6 @@ class Result(Generic[T]):
             return node.value
         named_values = self.diagnostic("named_values", {})
         return named_values.get(name, default)
-
-    def value_of(self, name: str, default: Any = None) -> Any:
-        """Alias for :meth:`get`."""
-        return self.get(name, default)
 
     def node(self, id_or_name: str) -> ResultNode:
         """Return a node by node id or registered name."""
@@ -382,10 +378,6 @@ class Result(Generic[T]):
         """Return the runtime cache report."""
         return self.report("cache")
 
-    def cache_report(self) -> str:
-        """Alias for :meth:`report_cache`."""
-        return self.report_cache()
-
     def report_trace_timeline(self, *, show_ids: bool = False, include_observer: bool = True) -> str:
         """Return a trace timeline for the run."""
         lines: list[str] = []
@@ -402,10 +394,6 @@ class Result(Generic[T]):
             )
         return "\n".join(lines)
 
-    def trace_timeline(self, *, show_ids: bool = False, include_observer: bool = True) -> str:
-        """Alias for :meth:`report_trace_timeline`."""
-        return self.report_trace_timeline(show_ids=show_ids, include_observer=include_observer)
-
     def report_trace_tree(self, *, show_ids: bool = False) -> str:
         """Return the stored execution trace tree."""
         text = self.report("trace_tree")
@@ -418,10 +406,6 @@ class Result(Generic[T]):
             else:
                 lines.append(line)
         return "\n".join(lines)
-
-    def trace_tree(self, *, show_ids: bool = False) -> str:
-        """Alias for :meth:`report_trace_tree`."""
-        return self.report_trace_tree(show_ids=show_ids)
 
     def trace_events(self) -> list[Any]:
         """Return raw trace events."""

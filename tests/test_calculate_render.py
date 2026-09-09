@@ -178,6 +178,14 @@ def test_named_view_summary_tracks_mutation() -> None:
     assert "zz" in named._summary()
 
 
+def test_result_removed_aliases_gone() -> None:
+    """Pure aliases that duplicated a canonical method must not be reintroduced."""
+    from pynbodyext.core.calculate.result.result import Result
+
+    for alias in ("value_of", "trace_timeline", "trace_tree", "cache_report"):
+        assert not hasattr(Result, alias), f"removed alias {alias!r} was reintroduced"
+
+
 def test_calculator_base_config_and_dependency_tree_attributes() -> None:
     calc = make_pipeline()
     assert hasattr(calc, "config")
