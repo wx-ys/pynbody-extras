@@ -737,7 +737,23 @@ class _CalculatorRunMixin(Generic[TRaw, TPublic]):
         return engine.run(cast("CalculatorBase[Any, TPublic]", self), sim, merged, store=store)
 
     def value(self, sim: Any, options: RunOptions | None = None, **overrides: Any) -> TPublic:
-        """Evaluate the calculator and return only the public value."""
+        """Evaluate the calculator and return only the public value.
+
+        Parameters
+        ----------
+        sim :
+            A pynbody snapshot or compatible simulation object.
+        options : RunOptions, optional
+            Base run options.  Keyword *overrides* are merged on top.
+        **overrides :
+            RunOptions fields to override for this run (see :meth:`options` for
+            the recognised keys), e.g. ``value(sim, cache=False)``.
+
+        Returns
+        -------
+        TPublic
+            The public value produced by the calculator.
+        """
         return self.run(sim, options=options, **overrides).value
 
     @contextmanager
@@ -821,11 +837,34 @@ class _CalculatorComposeMixin(Generic[TRaw, TPublic]):
         raise NotImplementedError
 
     def named(self: Self, name: str) -> Self:
-        """Return a copy that records this node under ``name``."""
+        """Return a copy that records this node under ``name``.
+
+        Parameters
+        ----------
+        name : str
+            Name used to retrieve the node from :attr:`Result.named`.
+
+        Returns
+        -------
+        Self
+            A new calculator carrying the name.
+        """
         return self._clone(name=name)
 
     def record(self: Self, policy: RecordPolicy) -> Self:
-        """Return a copy with a different result recording policy."""
+        """Return a copy with a different result recording policy.
+
+        Parameters
+        ----------
+        policy : RecordPolicy
+            One of :class:`RecordPolicy` (``FULL``, ``SUMMARY``, ``ERROR_ONLY``,
+            ``NONE``).
+
+        Returns
+        -------
+        Self
+            A new calculator with the recording policy set.
+        """
         return self._clone(record_policy=policy)
 
     def with_filter(self: Self, filt: FilterBase) -> Self:
@@ -834,7 +873,18 @@ class _CalculatorComposeMixin(Generic[TRaw, TPublic]):
         return self._clone(scope=self.scope.with_filter(filt))
 
     def filter(self: Self, filt: FilterBase) -> Self:
-        """Return a calculator evaluated on the subset selected by ``filt``."""
+        """Return a copy evaluated only on the subset selected by ``filt``.
+
+        Parameters
+        ----------
+        filt : FilterBase
+            A filter node producing a boolean mask over the snapshot.
+
+        Returns
+        -------
+        Self
+            A new calculator scoped to the filtered selection.
+        """
         return self._clone(scope=self.scope.with_filter(filt))
 
     def with_transformation(self: Self, transform: TransformBase[Any], *, revert: bool = True) -> Self:
@@ -843,11 +893,37 @@ class _CalculatorComposeMixin(Generic[TRaw, TPublic]):
         return self._clone(scope=self.scope.with_transform(transform, revert=revert))
 
     def transform(self: Self, transform: TransformBase[Any], *, revert: bool = True) -> Self:
-        """Return a calculator evaluated after applying ``transform``."""
+        """Return a copy evaluated after applying ``transform``.
+
+        Parameters
+        ----------
+        transform : TransformBase
+            A transform node applied to the target before the run.
+        revert : bool, default: True
+            If True, the transform is reverted after the run.
+
+        Returns
+        -------
+        Self
+            A new calculator with the transform composed into its scope.
+        """
         return self._clone(scope=self.scope.with_transform(transform, revert=revert))
 
     def keep(self: Self, name: str, policy: RecordPolicy = RecordPolicy.FULL) -> Self:
-        """Name the node and retain its value in the returned result."""
+        """Name the node and retain its value in the returned result.
+
+        Parameters
+        ----------
+        name : str
+            Name used to retrieve the node from :attr:`Result.named`.
+        policy : RecordPolicy, default: RecordPolicy.FULL
+            Recording policy: retain the value (``FULL``) or a summary (``SUMMARY``).
+
+        Returns
+        -------
+        Self
+            A new calculator with the name and recording policy set.
+        """
         return self._clone(name=name, record_policy=policy)
 
     def _with_options(self: Self, **changes: Any) -> Self:
@@ -857,7 +933,43 @@ class _CalculatorComposeMixin(Generic[TRaw, TPublic]):
         return self._clone(default_options=opts)
 
     def options(self: Self, **changes: Any) -> Self:
-        """Return a copy with run options overridden (e.g. ``options(cache=False)``)."""
+        """Return a copy with run options overridden.
+
+        Accepts any ``RunOptions`` field as a keyword argument; unchanged fields
+        keep the calculator's defaults.  This is the general setter; the
+        ``with_*`` helpers are deprecated shorthands for the common ones.
+
+        Parameters
+        ----------
+        **changes :
+            Keyword arguments matching :class:`~pynbodyext.core.calculate.runtime.options.RunOptions`
+            fields.  Recognised keys:
+
+            - ``cache`` (bool): enable the per-run runtime cache.
+            - ``progress`` (bool | str | ProgressSink | list/tuple[ProgressSink] | None):
+              progress reporting configuration (``"run"``, ``"node"``, ``"phase"``,
+              ``"debug"``, ``"bar"``, ``"bar:<verbosity>"``, or ``"bar-only"``).
+            - ``perf_time`` / ``perf_memory`` (bool): time / memory collection.
+            - ``observe`` (bool): diagnostic field-access observation.
+            - ``backend`` (str): future execution-backend label.
+            - ``default_record_policy`` (:class:`RecordPolicy`): policy for nodes
+              without an explicit policy.
+            - ``errors`` (:class:`ErrorPolicy` | str): error handling policy.
+            - ``cache_small_value_bytes`` (int): max public-value size to cache.
+            - ``auto_record_cached_values`` (bool): retain cached SUMMARY values.
+            - ``auto_record_small_value_bytes`` (int | None): max value size to
+              auto-record, or ``None`` to disable.
+
+        Returns
+        -------
+        Self
+            A copy of the calculator with the selected run options overridden.
+
+        Examples
+        --------
+        >>> calc.options(cache=False, progress="phase")
+        >>> calc.options(errors="collect")
+        """
         return self._with_options(**changes)
 
     def with_cache(self: Self, enabled: bool = True) -> Self:
