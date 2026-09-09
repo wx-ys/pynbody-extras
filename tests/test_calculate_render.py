@@ -215,6 +215,25 @@ def test_calculator_base_options_equals_with_setters() -> None:
     assert from_with.default_options.cache is False
 
 
+def test_calculator_base_signature_cache_and_clone_isolation() -> None:
+    """``to_signature()`` is cached per instance, but clones get fresh signatures."""
+    from pynbodyext.core.calculate import FilterBase, Param
+
+    @FilterBase.dataclass
+    class _RB(FilterBase):
+        radius: Param[float] = Param(field_name="r")
+
+        def calculate(self, sim, params=None):
+            return sim["r"] < self.radius
+
+    base = make_pipeline()
+    s1 = base.to_signature()
+    s2 = base.to_signature()
+    assert s1 is s2, "to_signature() must reuse the memoised result"
+
+    cloned = base.filter(_RB(5.0))
+    assert cloned.to_signature() is not s1, "cloned calculator must not reuse the base signature"
+    assert cloned.signature_hash() != base.signature_hash()
 def test_calculator_base_config_and_dependency_tree_attributes() -> None:
     calc = make_pipeline()
     assert hasattr(calc, "config")

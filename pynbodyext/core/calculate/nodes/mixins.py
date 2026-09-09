@@ -141,6 +141,13 @@ class _CalculatorSignatureMixin:
         """Return a structured signature that can reconstruct this calculator when possible."""
         from pynbodyext.core.calculate.result.signature import calculator_to_signature
 
+        if inline_array_bytes == 128:
+            cached = getattr(self, "_signature_cache", None)
+            if cached is not None:
+                return cached
+            cached = calculator_to_signature(self, inline_array_bytes=inline_array_bytes)
+            self._signature_cache = cached
+            return cached
         return calculator_to_signature(self, inline_array_bytes=inline_array_bytes)
 
     @classmethod
@@ -927,6 +934,7 @@ class _CalculatorComposeMixin(Generic[TRaw, TPublic]):
 
     def _clone(self: Self, **changes: Any) -> Self:
         clone = copy.copy(self)
+        clone.__dict__.pop("_signature_cache", None)
         for key, value in changes.items():
             setattr(clone, key, value)
         return clone
