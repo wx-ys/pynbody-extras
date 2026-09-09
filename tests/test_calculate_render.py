@@ -203,6 +203,18 @@ def test_result_find_relations_and_constants() -> None:
     assert result.find("errors") == []
 
 
+def test_calculator_base_options_equals_with_setters() -> None:
+    """``options(**kwargs)`` matches the deprecated per-option setters."""
+    import pytest
+
+    calc = make_pipeline()
+    from_options = calc.options(cache=False)
+    with pytest.warns(DeprecationWarning):
+        from_with = calc.with_cache(False)
+    assert from_options.default_options.cache is False
+    assert from_with.default_options.cache is False
+
+
 def test_calculator_base_config_and_dependency_tree_attributes() -> None:
     calc = make_pipeline()
     assert hasattr(calc, "config")

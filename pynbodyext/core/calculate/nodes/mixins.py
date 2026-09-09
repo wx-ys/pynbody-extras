@@ -15,6 +15,7 @@ Mixins call each other only through instance attributes, resolved by the MRO of
 from __future__ import annotations
 
 import copy
+import warnings
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, TypeVarTuple, Unpack, cast, overload
 
@@ -75,6 +76,14 @@ TPublic = TypeVar("TPublic")
 U = TypeVar("U")
 Ts = TypeVarTuple("Ts")
 Us = TypeVarTuple("Us")
+
+
+def _deprecated(use_instead: str) -> None:
+    warnings.warn(
+        f"use {use_instead} instead; this method is deprecated for interface simplification",
+        DeprecationWarning,
+        stacklevel=3,
+    )
 
 
 def _coerce_unit(value: UnitLike) -> units.UnitBase:
@@ -814,19 +823,21 @@ class _CalculatorComposeMixin(Generic[TRaw, TPublic]):
 
     def with_filter(self: Self, filt: FilterBase) -> Self:
         """Return a calculator evaluated on the subset selected by ``filt``."""
+        _deprecated("filter(filt)")
         return self._clone(scope=self.scope.with_filter(filt))
 
     def filter(self: Self, filt: FilterBase) -> Self:
-        """Alias for :meth:`with_filter`."""
-        return self.with_filter(filt)
+        """Return a calculator evaluated on the subset selected by ``filt``."""
+        return self._clone(scope=self.scope.with_filter(filt))
 
     def with_transformation(self: Self, transform: TransformBase[Any], *, revert: bool = True) -> Self:
         """Return a calculator evaluated after a pre-transform."""
+        _deprecated("transform(transform, revert=revert)")
         return self._clone(scope=self.scope.with_transform(transform, revert=revert))
 
     def transform(self: Self, transform: TransformBase[Any], *, revert: bool = True) -> Self:
         """Return a calculator evaluated after applying ``transform``."""
-        return self.with_transformation(transform, revert=revert)
+        return self._clone(scope=self.scope.with_transform(transform, revert=revert))
 
     def keep(self: Self, name: str, policy: RecordPolicy = RecordPolicy.FULL) -> Self:
         """Name the node and retain its value in the returned result."""
@@ -838,12 +849,18 @@ class _CalculatorComposeMixin(Generic[TRaw, TPublic]):
             setattr(opts, key, value)
         return self._clone(default_options=opts)
 
+    def options(self: Self, **changes: Any) -> Self:
+        """Return a copy with run options overridden (e.g. ``options(cache=False)``)."""
+        return self._with_options(**changes)
+
     def with_cache(self: Self, enabled: bool = True) -> Self:
         """Return a copy with a default cache override."""
+        _deprecated("options(cache=enabled)")
         return self._with_options(cache=enabled)
 
     def with_perf(self: Self, *, time: bool = True, memory: bool = False) -> Self:
         """Return a copy with performance collection defaults."""
+        _deprecated("options(perf_time=time, perf_memory=memory)")
         return self._with_options(perf_time=time, perf_memory=memory)
 
     def with_progress(
@@ -851,18 +868,22 @@ class _CalculatorComposeMixin(Generic[TRaw, TPublic]):
         progress: bool | ProgressVerbosity | ProgressSink | list[ProgressSink] | tuple[ProgressSink, ...] = True,
     ) -> Self:
         """Return a copy with a default progress reporting option."""
+        _deprecated("options(progress=progress)")
         return self._with_options(progress=progress)
 
     def with_observer(self: Self, enabled: bool = True) -> Self:
         """Return a copy with diagnostic field-access observation enabled or disabled."""
+        _deprecated("options(observe=enabled)")
         return self._with_options(observe=enabled)
 
     def with_backend(self: Self, name: str) -> Self:
         """Return a copy with a default backend label."""
+        _deprecated("options(backend=name)")
         return self._with_options(backend=name)
 
     def with_record_policy(self: Self, policy: RecordPolicy) -> Self:
         """Alias for :meth:`record`."""
+        _deprecated("record(policy)")
         return self.record(policy)
 
     def _as_value_property(self) -> PropertyBase[Any]:
