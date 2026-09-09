@@ -89,7 +89,7 @@ def test_engine_collect_policy_records_errors() -> None:
     result = pipe.run(sim, errors=ErrorPolicy.COLLECT)
     assert not result.ok
     assert result.value is None
-    error_labels = {node.label for node in result.find_error_nodes()}
+    error_labels = {node.label for node in result.find("errors")}
     assert {"p", "AlwaysFails"}.issubset(error_labels)
     # The root is recorded as an error because it could not be assembled.
     assert result.root.status.value == "error"
@@ -103,7 +103,7 @@ def test_engine_collect_partial_keeps_successful_values() -> None:
     assert result.value is not None
     assert result.value["ok"] == 4.0
     assert result.value["bad"] is None
-    error_nodes = result.find_error_nodes()
+    error_nodes = result.find("errors")
     badges = [node for node in error_nodes if node.label == "AlwaysFails"]
     assert len(badges) == 1
     assert "boom" in badges[0].error.message

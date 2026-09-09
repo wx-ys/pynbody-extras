@@ -17,13 +17,16 @@ Responsibilities
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pynbodyext.core.calculate.diagnostics.observer import format_observation_access
 from pynbodyext.core.calculate.display import display_value, format_time
 
 from .enums import NodeStatus
 from .result import PhaseRecord, Result, ResultNode
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class ResultQuery:
@@ -43,17 +46,34 @@ class ResultQuery:
         return [candidate for candidate in result.nodes.values() if node_id in candidate.children]
 
     @staticmethod
-    def find(result: Result[Any], query: Any) -> list[ResultNode]:
-        if isinstance(query, ResultNode):
-            resolved = result.nodes.get(query.node_id)
-            return [resolved] if resolved is not None else []
+    def _relational_find(result: Result[Any], rel: str, resolved: ResultNode) -> list[ResultNode]:
+        if rel == "parents":
+            return ResultQuery.parents_of(result, resolved)
+        if rel == "children":
+            return ResultQuery.children_of(result, resolved)
+        if rel == "ancestors":
+            return ResultQuery.ancestors_of(result, resolved)
+        if rel == "descendants":
+            return ResultQuery.descendants_of(result, resolved)
+        if rel == "root":
+            return [result.root]
+        raise ValueError(f"unknown relation {rel!r}; expected parents/children/ancestors/descendants/root")
 
-        if isinstance(query, str):
-            return [
-                node
-                for node in result.nodes.values()
-                if query
-                in {
+    @staticmethod
+    def find(result: Result[Any], query: Any, relative_to: str | ResultNode | None = None) -> list[ResultNode]:
+        if relative_to is not None:
+            resolved = ResultQuery.resolve_node(result, relative_to)
+            return ResultQuery._relational_find(result, query, resolved)
+
+        def predicates() -> Callable[[ResultNode], bool] | None:  # noqa: PLR0911
+            if query in ("errors", "error"):
+                return lambda node: node.error is not None
+            if query in ("*", "all"):
+                return lambda node: True
+            if isinstance(query, ResultNode):
+                return lambda node: node.node_id == query.node_id
+            if isinstance(query, str):
+                return lambda node: query in {
                     node.name,
                     node.display_name,
                     node.calculator_type,
@@ -62,43 +82,40 @@ class ResultQuery:
                     ResultQuery._short_class_name(node.calculator_class_path),
                     ResultQuery._short_class_name(node.semantic_calculator_class_path),
                 }
-            ]
+            if isinstance(query, type):
+                class_path = ResultQuery._class_path(query)
+                class_name = query.__name__
+                return lambda node: (
+                    class_path in {node.semantic_calculator_class_path, node.calculator_class_path}
+                    or node.calculator_type == class_name
+                )
+            cache_key_factory = getattr(query, "cache_key", None)
+            signature_factory = getattr(query, "signature", None)
+            if callable(cache_key_factory):
+                try:
+                    cache_key = cache_key_factory()
+                except TypeError:
+                    cache_key = None
+                if isinstance(cache_key, tuple):
+                    return lambda node: node.signature == cache_key
+            if callable(signature_factory):
+                try:
+                    signature = signature_factory()
+                except TypeError:
+                    signature = None
+                if isinstance(signature, tuple):
+                    return lambda node: node.signature == signature
+            if callable(query):
+                return lambda node: bool(query(node))
+            return None
 
-        if isinstance(query, type):
-            class_path = ResultQuery._class_path(query)
-            class_name = query.__name__
-            return [
-                node
-                for node in result.nodes.values()
-                if class_path in {node.semantic_calculator_class_path, node.calculator_class_path}
-                or node.calculator_type == class_name
-            ]
-
-        cache_key_factory = getattr(query, "cache_key", None)
-        if callable(cache_key_factory):
-            try:
-                cache_key = cache_key_factory()
-            except TypeError:
-                cache_key = None
-            if isinstance(cache_key, tuple):
-                return [node for node in result.nodes.values() if node.signature == cache_key]
-
-        signature_factory = getattr(query, "signature", None)
-        if callable(signature_factory):
-            try:
-                signature = signature_factory()
-            except TypeError:
-                signature = None
-            if isinstance(signature, tuple):
-                return [node for node in result.nodes.values() if node.signature == signature]
-
-        if callable(query):
-            return [node for node in result.nodes.values() if bool(query(node))]
-
-        raise TypeError(
-            "query must be a ResultNode, string, calculator class, "
-            "calculator instance, CalculatorSignature, or predicate"
-        )
+        pred = predicates()
+        if pred is None:
+            raise TypeError(
+                "query must be a ResultNode, string, calculator class, "
+                "calculator instance, CalculatorSignature, or predicate"
+            )
+        return [node for node in result.nodes.values() if pred(node)]
 
     @staticmethod
     def resolve_node(result: Result[Any], node: str | ResultNode) -> ResultNode:

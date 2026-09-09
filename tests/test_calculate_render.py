@@ -186,6 +186,23 @@ def test_result_removed_aliases_gone() -> None:
         assert not hasattr(Result, alias), f"removed alias {alias!r} was reintroduced"
 
 
+def test_result_find_relations_and_constants() -> None:
+    """``Result.find`` supports relation queries and string constants."""
+    result = _result()
+    root = result.root
+    children = result.find("children", relative_to=root)
+    assert {n.label for n in children} == {"MassSum", "TempMean"}
+
+    prop = children[0]
+    assert {n.label for n in result.find("parents", relative_to=prop)} == {"p"}
+    assert {n.label for n in result.find("ancestors", relative_to=prop)} == {"p"}
+    assert {n.label for n in result.find("descendants", relative_to=root)} == {"MassSum", "RBelow", "TempMean"}
+    assert [n.node_id for n in result.find("root", relative_to=prop)] == [root.node_id]
+
+    assert len(result.find("all")) == len(result.nodes)
+    assert result.find("errors") == []
+
+
 def test_calculator_base_config_and_dependency_tree_attributes() -> None:
     calc = make_pipeline()
     assert hasattr(calc, "config")
