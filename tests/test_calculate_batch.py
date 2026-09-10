@@ -8,12 +8,9 @@ materialize -> assemble) cannot silently change batch semantics.
 
 from __future__ import annotations
 
-import numpy as np
-import pynbody
+from calculate_helpers import MassSum, make_pipeline, make_sim
 
 from pynbodyext.core.calculate import ErrorPolicy, PropertyBase
-
-from test_calculate_core import MassSum, make_pipeline, make_sim
 
 
 def test_batch_returns_public_value_per_sim() -> None:
