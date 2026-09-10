@@ -91,7 +91,7 @@ If a field seems to affect caching unexpectedly, check whether its
 from __future__ import annotations
 
 import contextlib
-from dataclasses import MISSING, dataclass, field, fields, is_dataclass
+from dataclasses import MISSING, Field, dataclass, field, fields, is_dataclass
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeAlias, TypeVar, get_origin, overload
 
 from .resolution import DynamicParamSpec, dynamic_value_dependencies
@@ -105,6 +105,54 @@ T = TypeVar("T")
 
 if TYPE_CHECKING:
     DynamicParam: TypeAlias = T | Callable[[Any], T] | CalculatorBase[Any, T]
+
+
+class _ParamField(Field):
+    """The ``dataclasses.Field`` produced by :class:`Param`, with a readable repr.
+
+    A plain ``dataclasses.Field`` repr leaks dataclass internals (``default_factory``
+    sentinels, ``mappingproxy`` metadata, memory addresses).  ``Param`` is a
+    user-facing API, so it returns this thin ``Field`` subclass whose repr shows
+    only the meaningful parameter attributes.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        parts: list[str] = []
+        if self.default is not MISSING:
+            parts.append(f"default={self.default!r}")
+        if self.default_factory is not MISSING:
+            parts.append("default_factory=...")
+        spec = self.metadata.get(_PARAM_METADATA_KEY)
+        if spec is not None:
+            parts.append(f"kind={getattr(spec, 'kind', 'dynamic')!r}")
+            field_name = getattr(spec, "field_name", None)
+            if field_name:
+                parts.append(f"field_name={field_name!r}")
+            if getattr(spec, "target_units", None) is not None:
+                parts.append(f"target_units={spec.target_units!r}")
+            if getattr(spec, "signature", True) is False:
+                parts.append("signature=False")
+        return f"Param({', '.join(parts)})"
+
+
+def _make_param_field(spec: ParamSpec, default: Any, *, init: bool, kw_only: bool) -> Field:
+    """Build a :class:`_ParamField` with the given spec/default (mirrors ``field()``)."""
+    kwargs: dict[str, Any] = {"metadata": _merge_metadata(spec), "init": init, "kw_only": kw_only}
+    if default is not MISSING:
+        kwargs["default"] = default
+    base = field(**kwargs)
+    return _ParamField(
+        base.default,
+        base.default_factory,
+        base.init,
+        base.repr,
+        base.hash,
+        base.compare,
+        base.metadata,
+        base.kw_only,
+    )
 
 
 class Param(Generic[T]):
@@ -187,11 +235,7 @@ class Param(Generic[T]):
             optional_units=optional_units,
             signature=signature,
         )
-
-        kwargs: dict[str, Any] = {"metadata": _merge_metadata(spec), "init": init, "kw_only": kw_only}
-        if default is not MISSING:
-            kwargs["default"] = default
-        return field(**kwargs)
+        return _make_param_field(spec, default, init=init, kw_only=kw_only)
 
     # ── static() classmethod ─────────────────────────────────────────────────
 
@@ -207,10 +251,7 @@ class Param(Generic[T]):
     def static(cls, default: Any = MISSING, *, signature: bool = True, init: bool = True, kw_only: bool = False) -> Any:
         """Create a static (non-dynamic) dataclass field specifier."""
         spec = ParamSpec(name="", kind="static", signature=signature)
-        kwargs: dict[str, Any] = {"metadata": _merge_metadata(spec), "init": init, "kw_only": kw_only}
-        if default is not MISSING:
-            kwargs["default"] = default
-        return field(**kwargs)
+        return _make_param_field(spec, default, init=init, kw_only=kw_only)
 
 
 _PARAM_METADATA_KEY = "pynbodyext_calculate_param"

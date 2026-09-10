@@ -213,6 +213,17 @@ def test_calculator_base_options_overrides_run_options() -> None:
     assert calc.default_options.cache is True
 
 
+def test_param_repr_is_readable() -> None:
+    """``Param(...)`` must not leak dataclasses.Field internals in its repr."""
+    from pynbodyext.core.calculate import Param
+
+    text = repr(Param(default=0.0, field_name="pos"))
+    assert text.startswith("Param(")
+    assert "field_name='pos'" in text
+    assert "mappingproxy" not in text
+    assert "object at 0x" not in text
+
+
 def test_calculator_base_signature_cache_and_clone_isolation() -> None:
     """``to_signature()`` is cached per instance, but clones get fresh signatures."""
     from pynbodyext.core.calculate import FilterBase, Param
