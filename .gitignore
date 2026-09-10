@@ -77,3 +77,6 @@ Thumbs.db
 data/
 
 # uv
+
+# Agent scratch docs (not version-controlled)
+docs/superpowers/
