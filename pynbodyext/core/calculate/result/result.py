@@ -65,6 +65,7 @@ If you care about execution provenance, trace order, or cache behavior, prefer
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
@@ -73,14 +74,23 @@ from pynbodyext.core.calculate.diagnostics.observer import (
     format_observation_access,
     render_observer_report,
 )
-from pynbodyext.core.calculate.display import compact_repr, mimebundle
+from pynbodyext.core.calculate.display import ViewObject, compact_repr, mimebundle
 
 from .enums import NodeKind, NodeStatus, RecordPolicy
+from .views import ErrorListView, NamedView, WarningListView
 
 if TYPE_CHECKING:
     from pynbodyext.core.calculate.nodes.base import CalculatorBase
 
 T = TypeVar("T")
+
+
+def _deprecated(use_instead: str) -> None:
+    warnings.warn(
+        f"use {use_instead} instead; this method is deprecated for interface simplification",
+        DeprecationWarning,
+        stacklevel=3,
+    )
 
 
 @dataclass(slots=True)
@@ -208,6 +218,23 @@ class PerfSummary:
     cache_store_count: int = 0
 
 
+def _text_view(title: str, text: str) -> ViewObject:
+    """Build a single-section ``ViewObject`` that renders *text* under *title*."""
+
+    class _TextView(ViewObject):
+        def _title(self) -> str:
+            return title
+
+        def _summary(self) -> str:
+            first = text.strip().splitlines()
+            return first[0] if first else text.strip()
+
+        def _sections(self) -> list[tuple[str | None, str]]:
+            return [(None, text)]
+
+    return _TextView()
+
+
 @dataclass(slots=True)
 class Result(Generic[T]):
     """Public result returned by :meth:`CalculatorBase.run`.
@@ -232,7 +259,7 @@ class Result(Generic[T]):
     value: T
     root: ResultNode
     nodes: dict[str, ResultNode]
-    named: dict[str, ResultNode] = field(default_factory=dict)
+    named: dict[str, ResultNode] | NamedView = field(default_factory=NamedView)
     #: The live calculator that produced this result, when known.  Set by the
     #: engine to the root node on a live run, and reconstructed from the stored
     #: ``provenance.calculator_signature_text`` for a result loaded from a store.
@@ -241,11 +268,19 @@ class Result(Generic[T]):
     observations: dict[str, AccessObservation] = field(default_factory=dict)
     provenance: ProvenanceInfo | None = None
     perf_summary: PerfSummary = field(default_factory=PerfSummary)
-    warnings: list[str] = field(default_factory=list)
-    errors: list[ErrorInfo] = field(default_factory=list)
+    warnings: list[str] | WarningListView = field(default_factory=WarningListView)
+    errors: list[ErrorInfo] | ErrorListView = field(default_factory=ErrorListView)
 
     reports: dict[str, str] = field(default_factory=dict)
     diagnostics: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.named, NamedView):
+            self.named = NamedView(self.named) if self.named else NamedView({})
+        if not isinstance(self.errors, ErrorListView):
+            self.errors = ErrorListView(self.errors) if self.errors else ErrorListView([])
+        if not isinstance(self.warnings, WarningListView):
+            self.warnings = WarningListView(self.warnings) if self.warnings else WarningListView([])
 
     def __repr__(self) -> str:
         from .repr import ResultRepr
@@ -278,6 +313,21 @@ class Result(Generic[T]):
         """Return public values for named nodes that were materialized."""
         return dict(self.diagnostic("named_values", {}))
 
+    @property
+    def execution_tree(self) -> ViewObject:
+        """A view object exposing the runtime execution tree report."""
+        return _text_view("Execution tree", self.report_execution_tree())
+
+    @property
+    def performance(self) -> ViewObject:
+        """A view object exposing the formatted performance report."""
+        return _text_view("Performance", self.report_perf())
+
+    @property
+    def cache(self) -> ViewObject:
+        """A view object exposing the runtime cache report."""
+        return _text_view("Cache", self.report_cache())
+
     def get_node(self, node_id: str) -> ResultNode:
         """Return a result node by internal node id."""
         return self.nodes[node_id]
@@ -295,10 +345,6 @@ class Result(Generic[T]):
             return node.value
         named_values = self.diagnostic("named_values", {})
         return named_values.get(name, default)
-
-    def value_of(self, name: str, default: Any = None) -> Any:
-        """Alias for :meth:`get`."""
-        return self.get(name, default)
 
     def node(self, id_or_name: str) -> ResultNode:
         """Return a node by node id or registered name."""
@@ -341,10 +387,6 @@ class Result(Generic[T]):
         """Return the runtime cache report."""
         return self.report("cache")
 
-    def cache_report(self) -> str:
-        """Alias for :meth:`report_cache`."""
-        return self.report_cache()
-
     def report_trace_timeline(self, *, show_ids: bool = False, include_observer: bool = True) -> str:
         """Return a trace timeline for the run."""
         lines: list[str] = []
@@ -361,10 +403,6 @@ class Result(Generic[T]):
             )
         return "\n".join(lines)
 
-    def trace_timeline(self, *, show_ids: bool = False, include_observer: bool = True) -> str:
-        """Alias for :meth:`report_trace_timeline`."""
-        return self.report_trace_timeline(show_ids=show_ids, include_observer=include_observer)
-
     def report_trace_tree(self, *, show_ids: bool = False) -> str:
         """Return the stored execution trace tree."""
         text = self.report("trace_tree")
@@ -377,10 +415,6 @@ class Result(Generic[T]):
             else:
                 lines.append(line)
         return "\n".join(lines)
-
-    def trace_tree(self, *, show_ids: bool = False) -> str:
-        """Alias for :meth:`report_trace_tree`."""
-        return self.report_trace_tree(show_ids=show_ids)
 
     def trace_events(self) -> list[Any]:
         """Return raw trace events."""
@@ -427,70 +461,90 @@ class Result(Generic[T]):
 
     def root_children(self) -> list[ResultNode]:
         """Return direct children of the root node."""
-        return self.children_of(self.root)
-
-    def find(self, query: Any) -> list[ResultNode]:
-        """Return nodes matching a calculator class, instance, signature, or predicate."""
         from .query import ResultQuery
 
-        return ResultQuery.find(self, query)
+        return ResultQuery.children_of(self, self.root)
+
+    def find(self, query: Any, relative_to: str | ResultNode | None = None) -> list[ResultNode]:
+        """Return nodes matching a query.
+
+        With ``relative_to=None`` the query selects across all nodes (a node
+        reference, name substring, calculator class/instance, signature, a
+        predicate callable, or the string constants ``"errors"`` / ``"all"``).
+        With ``relative_to`` set to a node (id/name/object) the query is a
+        relation name (``"parents"`` / ``"children"`` / ``"ancestors"`` /
+        ``"descendants"`` / ``"root"``) returning the related nodes.
+        """
+        from .query import ResultQuery
+
+        return ResultQuery.find(self, query, relative_to=relative_to)
 
     def parents_of(self, node: str | ResultNode) -> list[ResultNode]:
         """Return parent nodes for a node id, name, or node object."""
+        _deprecated("Result.find('parents', relative_to=node)")
         from .query import ResultQuery
 
         return ResultQuery.parents_of(self, node)
 
     def parent_of(self, node: str | ResultNode) -> ResultNode | None:
         """Return the unique parent node, or ``None`` for the root."""
+        _deprecated("Result.find('parents', relative_to=node)")
         from .query import ResultQuery
 
         return ResultQuery.parent_of(self, node)
 
     def children_of(self, node: str | ResultNode) -> list[ResultNode]:
         """Return child nodes for a node id, name, or node object."""
+        _deprecated("Result.find('children', relative_to=node)")
         from .query import ResultQuery
 
         return ResultQuery.children_of(self, node)
 
     def ancestors_of(self, node: str | ResultNode) -> list[ResultNode]:
         """Return ancestor nodes in nearest-first order."""
+        _deprecated("Result.find('ancestors', relative_to=node)")
         from .query import ResultQuery
 
         return ResultQuery.ancestors_of(self, node)
 
     def descendants_of(self, node: str | ResultNode) -> list[ResultNode]:
         """Return descendant nodes in depth-first order."""
+        _deprecated("Result.find('descendants', relative_to=node)")
         from .query import ResultQuery
 
         return ResultQuery.descendants_of(self, node)
 
     def phases_of(self, node: str | ResultNode) -> list[PhaseRecord]:
         """Return phase records for a node id, name, or node object."""
+        _deprecated("node.phases")
         from .query import ResultQuery
 
         return ResultQuery.phases_of(self, node)
 
     def walk_depth_first(self) -> list[ResultNode]:
         """Return nodes in depth-first order starting at the root."""
+        _deprecated("Result.iter_nodes()")
         from .query import ResultQuery
 
         return ResultQuery.walk_depth_first(self)
 
     def find_by_kind(self, kind: str) -> list[ResultNode]:
         """Return nodes whose kind matches ``kind``."""
+        _deprecated(f"Result.find(lambda n: str(n.kind) == {kind!r})")
         from .query import ResultQuery
 
         return ResultQuery.find_by_kind(self, kind)
 
     def find_error_nodes(self) -> list[ResultNode]:
         """Return nodes that captured an exception."""
+        _deprecated("Result.find('errors')")
         from .query import ResultQuery
 
         return ResultQuery.find_error_nodes(self)
 
     def describe_node(self, node: str | ResultNode) -> str:
         """Return a detailed text description of one result node."""
+        _deprecated("Result.report('node')")
         from .query import ResultQuery
 
         return ResultQuery.describe_node(self, node)

@@ -15,6 +15,7 @@ Mixins call each other only through instance attributes, resolved by the MRO of
 from __future__ import annotations
 
 import copy
+import warnings
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, TypeVarTuple, Unpack, cast, overload
 
@@ -23,6 +24,8 @@ from pynbody import units
 from pynbody.array import SimArray
 
 from pynbodyext.core.calculate.display import (
+    ViewObject,
+    _style,
     compact_repr,
     display_value,
     html_badge,
@@ -73,6 +76,14 @@ TPublic = TypeVar("TPublic")
 U = TypeVar("U")
 Ts = TypeVarTuple("Ts")
 Us = TypeVarTuple("Us")
+
+
+def _deprecated(use_instead: str) -> None:
+    warnings.warn(
+        f"use {use_instead} instead; this method is deprecated for interface simplification",
+        DeprecationWarning,
+        stacklevel=3,
+    )
 
 
 def _coerce_unit(value: UnitLike) -> units.UnitBase:
@@ -130,6 +141,13 @@ class _CalculatorSignatureMixin:
         """Return a structured signature that can reconstruct this calculator when possible."""
         from pynbodyext.core.calculate.result.signature import calculator_to_signature
 
+        if inline_array_bytes == 128:
+            cached = getattr(self, "_signature_cache", None)
+            if cached is not None:
+                return cached
+            cached = calculator_to_signature(self, inline_array_bytes=inline_array_bytes)
+            self._signature_cache = cached
+            return cached
         return calculator_to_signature(self, inline_array_bytes=inline_array_bytes)
 
     @classmethod
@@ -375,6 +393,43 @@ class _CalculatorDisplayMixin:
     def _repr_pretty_(self, printer: Any, cycle: bool) -> None:
         printer.text(f"{self.__class__.__name__}(...)" if cycle else repr(self))
 
+    @property
+    def config(self) -> ViewObject:
+        """A view of this calculator's configuration (name/record/scope args)."""
+        rows = [(k, v) for k, v in self._repr_fields() if k != "scope"]
+
+        class _Config(ViewObject):
+            def _title(self) -> str:
+                return "Configuration"
+
+            def _summary(self) -> str:
+                if not rows:
+                    return "config()"
+                return f"config({compact_repr(rows)})"
+
+            def _sections(self) -> list[tuple[str | None, str]]:
+                return [(k or "arg", compact_repr(v, max_length=120)) for k, v in rows]
+
+        return _Config()
+
+    @property
+    def dependency_tree(self) -> ViewObject:
+        """A view of this calculator's dependency tree."""
+        tree = self.format_tree()
+
+        class _Tree(ViewObject):
+            def _title(self) -> str:
+                return "Dependency tree"
+
+            def _summary(self) -> str:
+                first = tree.strip().splitlines()
+                return first[0] if first else tree.strip()
+
+            def _sections(self) -> list[tuple[str | None, str]]:
+                return [(None, tree)]
+
+        return _Tree()
+
     def _repr_html_(self) -> str:
         rows: list[tuple[str, Any]] = []
         for key, value in self._repr_summary_rows():
@@ -387,32 +442,33 @@ class _CalculatorDisplayMixin:
             else:
                 rows.append((key, value))
 
-        detail_rows: list[tuple[str, Any]] = []
-        positional_index = 0
-        for key, value in self._repr_fields():  # type: ignore
-            if key is None:
-                positional_index += 1  # type: ignore
-                label = f"arg{positional_index}"
-            else:
-                label = key
-            detail_rows.append((label, compact_repr(value, max_length=220)))
-
         body_parts: list[str] = []
-        if detail_rows:
-            body_parts.append(
-                html_details(
-                    "Configuration",
-                    html_scroll_x(
-                        html_table(
-                            detail_rows,
-                            class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap pynbodyext-calc-monospace",
+        if _style() == "rich":
+            detail_rows: list[tuple[str, Any]] = []
+            positional_index = 0
+            for key, value in self._repr_fields():  # type: ignore
+                if key is None:
+                    positional_index += 1  # type: ignore
+                    label = f"arg{positional_index}"
+                else:
+                    label = key
+                detail_rows.append((label, compact_repr(value, max_length=220)))
+            if detail_rows:
+                body_parts.append(
+                    html_details(
+                        "Configuration",
+                        html_scroll_x(
+                            html_table(
+                                detail_rows,
+                                class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap pynbodyext-calc-monospace",
+                            ),
+                            min_width="56rem",
                         ),
-                        min_width="56rem",
-                    ),
+                    )
                 )
-            )
-
-        body_parts.append(html_details("Dependency tree", html_pre(self.format_tree()), open=False))
+            body_parts.append(html_details("Dependency tree", html_pre(self.format_tree()), open=False))
+        else:
+            body_parts.append(html_pre("Use .config and .dependency_tree for details"))
 
         return html_card(self.__class__.__name__, rows, body="".join(body_parts), escape_values=False)
 
@@ -681,7 +737,23 @@ class _CalculatorRunMixin(Generic[TRaw, TPublic]):
         return engine.run(cast("CalculatorBase[Any, TPublic]", self), sim, merged, store=store)
 
     def value(self, sim: Any, options: RunOptions | None = None, **overrides: Any) -> TPublic:
-        """Evaluate the calculator and return only the public value."""
+        """Evaluate the calculator and return only the public value.
+
+        Parameters
+        ----------
+        sim :
+            A pynbody snapshot or compatible simulation object.
+        options : RunOptions, optional
+            Base run options.  Keyword *overrides* are merged on top.
+        **overrides :
+            RunOptions fields to override for this run (see :meth:`options` for
+            the recognised keys), e.g. ``value(sim, cache=False)``.
+
+        Returns
+        -------
+        TPublic
+            The public value produced by the calculator.
+        """
         return self.run(sim, options=options, **overrides).value
 
     @contextmanager
@@ -765,31 +837,93 @@ class _CalculatorComposeMixin(Generic[TRaw, TPublic]):
         raise NotImplementedError
 
     def named(self: Self, name: str) -> Self:
-        """Return a copy that records this node under ``name``."""
+        """Return a copy that records this node under ``name``.
+
+        Parameters
+        ----------
+        name : str
+            Name used to retrieve the node from :attr:`Result.named`.
+
+        Returns
+        -------
+        Self
+            A new calculator carrying the name.
+        """
         return self._clone(name=name)
 
     def record(self: Self, policy: RecordPolicy) -> Self:
-        """Return a copy with a different result recording policy."""
+        """Return a copy with a different result recording policy.
+
+        Parameters
+        ----------
+        policy : RecordPolicy
+            One of :class:`RecordPolicy` (``FULL``, ``SUMMARY``, ``ERROR_ONLY``,
+            ``NONE``).
+
+        Returns
+        -------
+        Self
+            A new calculator with the recording policy set.
+        """
         return self._clone(record_policy=policy)
 
     def with_filter(self: Self, filt: FilterBase) -> Self:
         """Return a calculator evaluated on the subset selected by ``filt``."""
+        _deprecated("filter(filt)")
         return self._clone(scope=self.scope.with_filter(filt))
 
     def filter(self: Self, filt: FilterBase) -> Self:
-        """Alias for :meth:`with_filter`."""
-        return self.with_filter(filt)
+        """Return a copy evaluated only on the subset selected by ``filt``.
+
+        Parameters
+        ----------
+        filt : FilterBase
+            A filter node producing a boolean mask over the snapshot.
+
+        Returns
+        -------
+        Self
+            A new calculator scoped to the filtered selection.
+        """
+        return self._clone(scope=self.scope.with_filter(filt))
 
     def with_transformation(self: Self, transform: TransformBase[Any], *, revert: bool = True) -> Self:
         """Return a calculator evaluated after a pre-transform."""
+        _deprecated("transform(transform, revert=revert)")
         return self._clone(scope=self.scope.with_transform(transform, revert=revert))
 
     def transform(self: Self, transform: TransformBase[Any], *, revert: bool = True) -> Self:
-        """Return a calculator evaluated after applying ``transform``."""
-        return self.with_transformation(transform, revert=revert)
+        """Return a copy evaluated after applying ``transform``.
+
+        Parameters
+        ----------
+        transform : TransformBase
+            A transform node applied to the target before the run.
+        revert : bool, default: True
+            If True, the transform is reverted after the run.
+
+        Returns
+        -------
+        Self
+            A new calculator with the transform composed into its scope.
+        """
+        return self._clone(scope=self.scope.with_transform(transform, revert=revert))
 
     def keep(self: Self, name: str, policy: RecordPolicy = RecordPolicy.FULL) -> Self:
-        """Name the node and retain its value in the returned result."""
+        """Name the node and retain its value in the returned result.
+
+        Parameters
+        ----------
+        name : str
+            Name used to retrieve the node from :attr:`Result.named`.
+        policy : RecordPolicy, default: RecordPolicy.FULL
+            Recording policy: retain the value (``FULL``) or a summary (``SUMMARY``).
+
+        Returns
+        -------
+        Self
+            A new calculator with the name and recording policy set.
+        """
         return self._clone(name=name, record_policy=policy)
 
     def _with_options(self: Self, **changes: Any) -> Self:
@@ -798,12 +932,54 @@ class _CalculatorComposeMixin(Generic[TRaw, TPublic]):
             setattr(opts, key, value)
         return self._clone(default_options=opts)
 
+    def options(self: Self, **changes: Any) -> Self:
+        """Return a copy with run options overridden.
+
+        Accepts any ``RunOptions`` field as a keyword argument; unchanged fields
+        keep the calculator's defaults.  This is the general setter; the
+        ``with_*`` helpers are deprecated shorthands for the common ones.
+
+        Parameters
+        ----------
+        **changes :
+            Keyword arguments matching :class:`~pynbodyext.core.calculate.runtime.options.RunOptions`
+            fields.  Recognised keys:
+
+            - ``cache`` (bool): enable the per-run runtime cache.
+            - ``progress`` (bool | str | ProgressSink | list/tuple[ProgressSink] | None):
+              progress reporting configuration (``"run"``, ``"node"``, ``"phase"``,
+              ``"debug"``, ``"bar"``, ``"bar:<verbosity>"``, or ``"bar-only"``).
+            - ``perf_time`` / ``perf_memory`` (bool): time / memory collection.
+            - ``observe`` (bool): diagnostic field-access observation.
+            - ``backend`` (str): future execution-backend label.
+            - ``default_record_policy`` (:class:`RecordPolicy`): policy for nodes
+              without an explicit policy.
+            - ``errors`` (:class:`ErrorPolicy` | str): error handling policy.
+            - ``cache_small_value_bytes`` (int): max public-value size to cache.
+            - ``auto_record_cached_values`` (bool): retain cached SUMMARY values.
+            - ``auto_record_small_value_bytes`` (int | None): max value size to
+              auto-record, or ``None`` to disable.
+
+        Returns
+        -------
+        Self
+            A copy of the calculator with the selected run options overridden.
+
+        Examples
+        --------
+        >>> calc.options(cache=False, progress="phase")
+        >>> calc.options(errors="collect")
+        """
+        return self._with_options(**changes)
+
     def with_cache(self: Self, enabled: bool = True) -> Self:
         """Return a copy with a default cache override."""
+        _deprecated("options(cache=enabled)")
         return self._with_options(cache=enabled)
 
     def with_perf(self: Self, *, time: bool = True, memory: bool = False) -> Self:
         """Return a copy with performance collection defaults."""
+        _deprecated("options(perf_time=time, perf_memory=memory)")
         return self._with_options(perf_time=time, perf_memory=memory)
 
     def with_progress(
@@ -811,18 +987,22 @@ class _CalculatorComposeMixin(Generic[TRaw, TPublic]):
         progress: bool | ProgressVerbosity | ProgressSink | list[ProgressSink] | tuple[ProgressSink, ...] = True,
     ) -> Self:
         """Return a copy with a default progress reporting option."""
+        _deprecated("options(progress=progress)")
         return self._with_options(progress=progress)
 
     def with_observer(self: Self, enabled: bool = True) -> Self:
         """Return a copy with diagnostic field-access observation enabled or disabled."""
+        _deprecated("options(observe=enabled)")
         return self._with_options(observe=enabled)
 
     def with_backend(self: Self, name: str) -> Self:
         """Return a copy with a default backend label."""
+        _deprecated("options(backend=name)")
         return self._with_options(backend=name)
 
     def with_record_policy(self: Self, policy: RecordPolicy) -> Self:
         """Alias for :meth:`record`."""
+        _deprecated("record(policy)")
         return self.record(policy)
 
     def _as_value_property(self) -> PropertyBase[Any]:
@@ -866,6 +1046,7 @@ class _CalculatorComposeMixin(Generic[TRaw, TPublic]):
 
     def _clone(self: Self, **changes: Any) -> Self:
         clone = copy.copy(self)
+        clone.__dict__.pop("_signature_cache", None)
         for key, value in changes.items():
             setattr(clone, key, value)
         return clone

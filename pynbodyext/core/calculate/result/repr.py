@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from pynbodyext.core.calculate.display import (
+    _style,
     compact_repr,
     display_value,
     format_mem,
@@ -376,6 +377,10 @@ class ResultRepr:
             rows.append(("named", compact_repr(tuple(result.named.keys()), max_length=96)))
         if result.provenance is not None and result.provenance.calculator_signature_hash is not None:
             rows.append(("signature", result.provenance.calculator_signature_hash[:12]))
+
+        if _style() != "rich":
+            hint = "Use .named, .provenance, .execution_tree, .performance and .cache for details"
+            return html_card("Result", rows, body=html_pre(hint), escape_values=False)
 
         execution_tree_html = html_details(
             "Execution tree", html_pre(result.report_execution_tree()), open=not result.ok

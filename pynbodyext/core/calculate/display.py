@@ -617,6 +617,62 @@ def mimebundle(text: str, html: str) -> dict[str, str]:
     return {"text/plain": text, "text/html": html}
 
 
+class ViewObject:
+    """A sectioned repr view rendered across all display styles.
+
+    Subclasses provide ``_summary()`` (compact one-line text) and ``_sections()``
+    (a list of ``(label, body)`` pairs).  The base class turns those into a
+    style-appropriate representation:
+
+    - ``rich``: a full HTML card with collapsible ``<details>`` sections.
+    - ``github`` / ``plain``: the same sections rendered inline (a view exposes
+      its detail directly, so no ''.attr for details'' hint is needed).
+    """
+
+    def _summary(self) -> str:
+        raise NotImplementedError
+
+    def _sections(self) -> list[tuple[str | None, str]]:
+        raise NotImplementedError
+
+    def _title(self) -> str:
+        """Return a friendly display title (defaults to the class name)."""
+        return self.__class__.__name__
+
+    def __repr__(self) -> str:
+        return self._summary()
+
+    def __str__(self) -> str:
+        return self._summary()
+
+    def _repr_html_(self) -> str:
+        summary = self._summary()
+        sections = self._sections()
+        if _style() == "rich":
+            body_parts = []
+            for label, body in sections:
+                heading = label if label else summary
+                body_parts.append(html_details(heading, html_pre(body), open=False))
+            return html_card(self._title(), [("value", summary)], body="".join(body_parts), escape_values=False)
+        # github / plain: a content view renders its sections directly (no value row,
+        # no per-section heading), so the body is the detail itself.
+        body_parts = []
+        for label, body in sections:
+            if not body:
+                continue
+            if label:
+                body_parts.append(html_section(label, html_pre(body)))
+            else:
+                body_parts.append(html_pre(body))
+        return f"<h4>{html_escape(self._title())}</h4>" + "".join(body_parts)
+
+    def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, str]:
+        text = self._summary()
+        if _style() == "plain":
+            return {"text/plain": text}
+        return mimebundle(text, self._repr_html_())
+
+
 def format_time(value: float | None) -> str:
     """Format a time value in a human-friendly unit."""
     if value is None:
@@ -664,6 +720,7 @@ __all__ = [
     "html_pre",
     "html_card",
     "mimebundle",
+    "ViewObject",
     "format_time",
     "format_mem",
 ]

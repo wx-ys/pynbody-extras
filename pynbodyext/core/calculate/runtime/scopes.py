@@ -58,7 +58,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from pynbodyext.core.calculate.display import compact_repr, display_value, html_card, mimebundle
+from pynbodyext.core.calculate.display import display_value, html_card, mimebundle
 from pynbodyext.core.calculate.result.enums import BuiltinKinds, RevertPolicy, normalize_revert_policy
 
 if TYPE_CHECKING:
@@ -157,20 +157,13 @@ class ScopeSpec:
         return ", ".join(parts) if parts else "empty"
 
     def __repr__(self) -> str:
-        fields: list[str] = []
-        if self.transforms:
-            fields.append(f"transforms={compact_repr(tuple(transform.log_label for transform in self.transforms))}")
-        if self.filter is not None:
-            fields.append(f"filter={compact_repr(self.filter)}")
-        if self.revert_policy != RevertPolicy.ALWAYS:
-            fields.append(f"revert_policy={display_value(self.revert_policy)!r}")
-        return f"ScopeSpec({', '.join(fields)})"
+        return f"ScopeSpec({self.short_label()})"
 
     def _repr_html_(self) -> str:
         return html_card(
             "ScopeSpec",
             [
-                ("transforms", len(self.transforms)),
+                ("transforms", " -> ".join(transform.log_label for transform in self.transforms)),
                 ("filter", self.filter.log_label if self.filter is not None else "-"),
                 ("revert", display_value(self.revert_policy)),
             ],
