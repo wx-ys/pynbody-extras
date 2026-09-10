@@ -203,16 +203,14 @@ def test_result_find_relations_and_constants() -> None:
     assert result.find("errors") == []
 
 
-def test_calculator_base_options_equals_with_setters() -> None:
-    """``options(**kwargs)`` matches the deprecated per-option setters."""
-    import pytest
-
+def test_calculator_base_options_overrides_run_options() -> None:
+    """``options(**kwargs)`` overrides the calculator's default run options."""
     calc = make_pipeline()
-    from_options = calc.options(cache=False)
-    with pytest.warns(DeprecationWarning):
-        from_with = calc.with_cache(False)
-    assert from_options.default_options.cache is False
-    assert from_with.default_options.cache is False
+    overridden = calc.options(cache=False, progress=False)
+    assert overridden.default_options.cache is False
+    assert overridden.default_options.progress is False
+    # original calculator is unchanged (options returns a clone)
+    assert calc.default_options.cache is True
 
 
 def test_calculator_base_signature_cache_and_clone_isolation() -> None:

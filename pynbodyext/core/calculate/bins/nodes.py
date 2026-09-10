@@ -209,7 +209,7 @@ class _BinNodeBase(CalculatorBase[BinNDResult, BinNDResult]):
                 "the subsequent binned result will be derived from the original untransformed data. "
                 "Do you really want this? If so, consider setting revert=False to avoid such behavior."
             )
-        return super().with_transformation(transform, revert=revert)
+        return super().transform(transform, revert=revert)
 
 
 @CalculatorBase.dataclass

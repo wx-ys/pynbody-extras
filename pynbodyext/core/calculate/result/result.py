@@ -65,7 +65,6 @@ If you care about execution provenance, trace order, or cache behavior, prefer
 
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
@@ -83,14 +82,6 @@ if TYPE_CHECKING:
     from pynbodyext.core.calculate.nodes.base import CalculatorBase
 
 T = TypeVar("T")
-
-
-def _deprecated(use_instead: str) -> None:
-    warnings.warn(
-        f"use {use_instead} instead; this method is deprecated for interface simplification",
-        DeprecationWarning,
-        stacklevel=3,
-    )
 
 
 @dataclass(slots=True)
@@ -478,76 +469,6 @@ class Result(Generic[T]):
         from .query import ResultQuery
 
         return ResultQuery.find(self, query, relative_to=relative_to)
-
-    def parents_of(self, node: str | ResultNode) -> list[ResultNode]:
-        """Return parent nodes for a node id, name, or node object."""
-        _deprecated("Result.find('parents', relative_to=node)")
-        from .query import ResultQuery
-
-        return ResultQuery.parents_of(self, node)
-
-    def parent_of(self, node: str | ResultNode) -> ResultNode | None:
-        """Return the unique parent node, or ``None`` for the root."""
-        _deprecated("Result.find('parents', relative_to=node)")
-        from .query import ResultQuery
-
-        return ResultQuery.parent_of(self, node)
-
-    def children_of(self, node: str | ResultNode) -> list[ResultNode]:
-        """Return child nodes for a node id, name, or node object."""
-        _deprecated("Result.find('children', relative_to=node)")
-        from .query import ResultQuery
-
-        return ResultQuery.children_of(self, node)
-
-    def ancestors_of(self, node: str | ResultNode) -> list[ResultNode]:
-        """Return ancestor nodes in nearest-first order."""
-        _deprecated("Result.find('ancestors', relative_to=node)")
-        from .query import ResultQuery
-
-        return ResultQuery.ancestors_of(self, node)
-
-    def descendants_of(self, node: str | ResultNode) -> list[ResultNode]:
-        """Return descendant nodes in depth-first order."""
-        _deprecated("Result.find('descendants', relative_to=node)")
-        from .query import ResultQuery
-
-        return ResultQuery.descendants_of(self, node)
-
-    def phases_of(self, node: str | ResultNode) -> list[PhaseRecord]:
-        """Return phase records for a node id, name, or node object."""
-        _deprecated("node.phases")
-        from .query import ResultQuery
-
-        return ResultQuery.phases_of(self, node)
-
-    def walk_depth_first(self) -> list[ResultNode]:
-        """Return nodes in depth-first order starting at the root."""
-        _deprecated("Result.iter_nodes()")
-        from .query import ResultQuery
-
-        return ResultQuery.walk_depth_first(self)
-
-    def find_by_kind(self, kind: str) -> list[ResultNode]:
-        """Return nodes whose kind matches ``kind``."""
-        _deprecated(f"Result.find(lambda n: str(n.kind) == {kind!r})")
-        from .query import ResultQuery
-
-        return ResultQuery.find_by_kind(self, kind)
-
-    def find_error_nodes(self) -> list[ResultNode]:
-        """Return nodes that captured an exception."""
-        _deprecated("Result.find('errors')")
-        from .query import ResultQuery
-
-        return ResultQuery.find_error_nodes(self)
-
-    def describe_node(self, node: str | ResultNode) -> str:
-        """Return a detailed text description of one result node."""
-        _deprecated("Result.report('node')")
-        from .query import ResultQuery
-
-        return ResultQuery.describe_node(self, node)
 
     def report_node_tree(
         self,
