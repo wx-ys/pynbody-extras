@@ -103,7 +103,34 @@ def _merge_dependencies(*groups: list[CalculatorBase[Any, Any]]) -> list[Calcula
     return merged
 
 
-class _CalculatorSignatureMixin:
+class _CalculatorContract:
+    """Type-only declaration of the ``CalculatorBase`` surface that mixins use.
+
+    The focused mixins below reference members such as ``kind``,
+    ``dependencies``, ``children``, ``signature`` and ``to_signature`` that are
+    implemented by *other* mixins or by :class:`CalculatorBase` itself and are
+    resolved through the composed MRO.  Declaring that contract once here keeps
+    each mixin self-contained for static analysis without scattering runtime
+    ``raise NotImplementedError`` stubs that must never actually run.
+
+    Nothing is defined at runtime: every member lives under ``TYPE_CHECKING``,
+    so the concrete implementation always wins via the MRO.
+    """
+
+    if TYPE_CHECKING:
+        name: str | None
+
+        @property
+        def kind(self) -> NodeKind: ...
+        def signature_payload(self) -> Mapping[str, Any] | None: ...
+        def signature_hash(self, *, length: int = 12) -> str: ...
+        def signature(self) -> tuple[Any, ...]: ...
+        def to_signature(self, *, inline_array_bytes: int = 128) -> CalculatorSignature: ...
+        def dependencies(self) -> list[CalculatorBase[Any, Any]]: ...
+        def children(self) -> list[CalculatorBase[Any, Any]]: ...
+
+
+class _CalculatorSignatureMixin(_CalculatorContract):
     """Identity, hashing, and reconstruction of a calculator.
 
     Kept separate so the save/load system can depend on the structured-signature
@@ -162,7 +189,7 @@ class _CalculatorSignatureMixin:
         return calculator
 
 
-class _CalculatorGraphMixin:
+class _CalculatorGraphMixin(_CalculatorContract):
     """Parameter declaration and dependency-traversal for a calculator node."""
 
     scope: ScopeSpec
@@ -261,7 +288,7 @@ class _CalculatorGraphMixin:
         return self.dependencies()
 
 
-class _CalculatorLoggingMixin:
+class _CalculatorLoggingMixin(_CalculatorContract):
     """Runtime-aware logging helpers for calculator hooks."""
 
     def current_runtime(self) -> Any | None:
@@ -300,33 +327,13 @@ class _CalculatorLoggingMixin:
         self.log("error", message, phase=phase)
 
 
-class _CalculatorDisplayMixin:
+class _CalculatorDisplayMixin(_CalculatorContract):
     """Human-readable and notebook-friendly representation of a calculator."""
 
     name: str | None
     record_policy: RecordPolicy | None
     scope: ScopeSpec
     cache_policy: CachePolicy
-
-    # Method stubs (overridden by the earlier ``_CalculatorSignatureMixin`` /
-    # ``_CalculatorGraphMixin`` bases of ``CalculatorBase``) so this mixin is
-    # self-contained for static analysis without changing runtime MRO.
-    @property
-    def kind(self) -> NodeKind:
-        """Placeholder overridden by ``CalculatorBase.kind``."""
-        raise NotImplementedError
-
-    def signature_payload(self) -> Mapping[str, Any] | None:
-        raise NotImplementedError
-
-    def signature_hash(self, *, length: int = 12) -> str:
-        raise NotImplementedError
-
-    def dependencies(self) -> list[CalculatorBase[Any, Any]]:
-        raise NotImplementedError
-
-    def children(self) -> list[CalculatorBase[Any, Any]]:
-        raise NotImplementedError
 
     @property
     def log_label(self) -> str:
@@ -510,19 +517,10 @@ class _CalculatorDisplayMixin:
         return "\n" + "\n".join(lines)
 
 
-class _CalculatorRunMixin(Generic[TRaw, TPublic]):
+class _CalculatorRunMixin(_CalculatorContract, Generic[TRaw, TPublic]):
     """Public execution entry points and run-option resolution."""
 
     default_options: RunOptions
-
-    # Method stubs (overridden by the earlier ``_CalculatorSignatureMixin``
-    # base of ``CalculatorBase``) so this mixin is self-contained for static
-    # analysis without changing runtime MRO.
-    def signature(self) -> tuple[Any, ...]:
-        raise NotImplementedError
-
-    def to_signature(self, *, inline_array_bytes: int = 128) -> CalculatorSignature:
-        raise NotImplementedError
 
     def __call__(
         self,
@@ -825,16 +823,11 @@ class _CalculatorRunMixin(Generic[TRaw, TPublic]):
         raise TypeError(f"unsupported value type: {type(value)!r}")
 
 
-class _CalculatorComposeMixin(Generic[TRaw, TPublic]):
+class _CalculatorComposeMixin(_CalculatorContract, Generic[TRaw, TPublic]):
     """Scoped composition, cloning, and arithmetic operators for a calculator."""
 
     default_options: RunOptions
     scope: ScopeSpec
-
-    @property
-    def kind(self) -> NodeKind:
-        """Placeholder overridden by ``CalculatorBase.kind``."""
-        raise NotImplementedError
 
     def named(self: Self, name: str) -> Self:
         """Return a copy that records this node under ``name``.
