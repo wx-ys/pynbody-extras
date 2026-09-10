@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 
-from test_calculate_core import make_pipeline, make_sim
+from calculate_helpers import make_pipeline, make_sim
 
 from pynbodyext.core.calculate.result.repr import ResultRepr
 
