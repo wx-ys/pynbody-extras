@@ -159,14 +159,14 @@ class Pipeline(CalculatorBase[dict[str, Any], dict[str, Any]]):
                 except Exception:
                     if ctx.options.errors != ErrorPolicy.COLLECT_PARTIAL:
                         raise
-                    if ctx.last_error_node_id is None:
+                    if ctx.nodes.last_error_id is None:
                         raise
-                    node_result = ctx.node_registry[ctx.last_error_node_id]
+                    node_result = ctx.nodes.registry[ctx.nodes.last_error_id]
                     values[key] = None
                 else:
-                    values[key] = ctx.runtime_store[node_result.node_id].public_value
-                existing = ctx.named_registry.get(key)
+                    values[key] = ctx.nodes.runtime[node_result.node_id].public_value
+                existing = ctx.nodes.named.get(key)
                 if existing is not None and existing != node_result.node_id:
                     raise ValueError(f"Duplicate named pipeline output {key!r}.")
-                ctx.named_registry[key] = node_result.node_id
+                ctx.nodes.named[key] = node_result.node_id
         return values

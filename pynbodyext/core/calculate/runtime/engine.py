@@ -203,9 +203,9 @@ class EvalEngine:
                     finished_at=finished_for_event,
                     elapsed_s=finished_for_event - started,
                     total_nodes=estimated_total_nodes,
-                    node_count=len(ctx.node_registry),
-                    warning_count=len(ctx.warnings),
-                    error_count=len(ctx.errors),
+                    node_count=len(ctx.nodes.registry),
+                    warning_count=len(ctx.records.warnings),
+                    error_count=len(ctx.records.errors),
                 )
             )
             ctx.log("debug", f"run end: {run_label} status={status}")
@@ -213,7 +213,7 @@ class EvalEngine:
         result = self._assemble_result(node=node, ctx=ctx, root=root, run_label=run_label, started=started)
 
         if store is not None and not result.errors:
-            calculator_signature = getattr(ctx, "root_signature", None)
+            calculator_signature = getattr(getattr(ctx, "nodes", None), "root_signature", None)
             if calculator_signature is None:
                 calculator_signature = node.to_signature()
             store.store(result, sim_signature=ctx.sim_signature, calculator_signature=calculator_signature)
@@ -273,7 +273,7 @@ class EvalEngine:
             if options.errors == ErrorPolicy.RAISE:
                 raise
             return None  # type: ignore[return-value]
-        store = ctx.runtime_store.get(root.node_id)
+        store = ctx.nodes.runtime.get(root.node_id)
         if store is None:
             return None  # type: ignore[return-value]
         return store.public_value
@@ -330,7 +330,7 @@ class EvalEngine:
         if ctx.cache.enabled:
             cached_runtime = ctx.cache.get(cache_key)
             if cached_runtime is not None:
-                return ctx.node_registry[cached_runtime.node_id]
+                return ctx.nodes.registry[cached_runtime.node_id]
 
         # Build a ResultNode using the pre-computed or lightly-computed signature
         sig_tuple = node_sig
@@ -442,7 +442,7 @@ class EvalEngine:
         ctx.register_node(node_result)
         is_root = ctx.current_node is None
         if is_root:
-            ctx.root_signature = structured_signature
+            ctx.nodes.root_signature = structured_signature
 
         ctx._evaluation_stack.append(plan.stack_key)
         try:
@@ -469,7 +469,7 @@ class EvalEngine:
         self, node: CalculatorBase[Any, Any], ctx: ExecutionContext, input: NodeInput | None
     ) -> _EvaluationPlan:
         work = input or NodeInput(sim_raw=ctx.sim, sim_current=ctx.sim)
-        work = work.with_mutation_generation(ctx.mutation_generation)
+        work = work.with_mutation_generation(ctx.mutation.generation)
 
         cache_policy = getattr(node, "cache_policy", CachePolicy.AUTO)
         cacheable = bool(getattr(node, "cacheable", True)) and cache_policy != CachePolicy.NONE
@@ -556,7 +556,7 @@ class EvalEngine:
             )
             return None
 
-        cached_node = ctx.node_registry[cached_runtime.node_id]
+        cached_node = ctx.nodes.registry[cached_runtime.node_id]
         parent = ctx.current_node
         if parent is not None:
             if cached_node.node_id not in parent.children:
@@ -640,8 +640,8 @@ class EvalEngine:
         if hasattr(exc, "add_note"):
             location = f"{node_result.display_name} in phase {phase!r}" if phase else node_result.display_name
             exc.add_note(f"pynbodyext.calculate: {location} failed")
-        ctx.last_error_node_id = node_result.node_id
-        ctx.errors.append(node_result.error)
+        ctx.nodes.last_error_id = node_result.node_id
+        ctx.records.errors.append(node_result.error)
 
         summary_source = public_value if public_value is not None else raw_value
         if summary_source is not None:
@@ -676,7 +676,7 @@ class EvalEngine:
                 cache_key = (*plan.observed_cache_prefix, observed_token)
             ctx.cache.set(
                 cache_key,
-                ctx.runtime_store[node_result.node_id],
+                ctx.nodes.runtime[node_result.node_id],
                 index_compatible=plan.observed_cache_prefix is not None,
             )
             stored_in_runtime_cache = True
@@ -697,17 +697,17 @@ class EvalEngine:
         return node_result
 
     def _resolve_failed_root(self, ctx: ExecutionContext) -> ResultNode:
-        if ctx.last_error_node_id is not None:
-            return ctx.node_registry[ctx.last_error_node_id]
-        if ctx.node_registry:
-            return next(reversed(ctx.node_registry.values()))
+        if ctx.nodes.last_error_id is not None:
+            return ctx.nodes.registry[ctx.nodes.last_error_id]
+        if ctx.nodes.registry:
+            return next(reversed(ctx.nodes.registry.values()))
 
         raise RuntimeError("run failed before any result node was registered")
 
     def _build_provenance(
         self, node: CalculatorBase[Any, Any], ctx: ExecutionContext, started: float, finished: float
     ) -> ProvenanceInfo:
-        root_signature = getattr(ctx, "root_signature", None) or node.to_signature()
+        root_signature = getattr(getattr(ctx, "nodes", None), "root_signature", None) or node.to_signature()
         return ProvenanceInfo(
             calculator_signature=root_signature.cache_key(),
             calculator_signature_text=root_signature.to_json(),
@@ -719,29 +719,29 @@ class EvalEngine:
 
     def _collect_reports(self, ctx: ExecutionContext, root: ResultNode, run_label: str) -> dict[str, str]:
         return {
-            "perf": ctx.perf.report_text(ctx.node_registry, title=run_label),
+            "perf": ctx.perf.report_text(ctx.nodes.registry, title=run_label),
             "cache": ctx.cache.report_text(),
-            "observer": render_observer_report(ctx.access_observations.values()),
+            "observer": render_observer_report(ctx.records.access_observations.values()),
             "trace_timeline": ctx.trace.render_timeline(),
-            "trace_tree": ctx.trace.render_tree(ctx.node_registry, root.node_id),
+            "trace_tree": ctx.trace.render_tree(ctx.nodes.registry, root.node_id),
         }
 
     def _collect_diagnostics(self, ctx: ExecutionContext, named: dict[str, ResultNode]) -> dict[str, Any]:
         named_values = {
-            name: ctx.runtime_store[node_result.node_id].public_value
+            name: ctx.nodes.runtime[node_result.node_id].public_value
             for name, node_result in named.items()
-            if node_result.node_id in ctx.runtime_store
+            if node_result.node_id in ctx.nodes.runtime
         }
         return {
             "trace_events": list(ctx.trace.events),
             "cache_events": list(ctx.cache.events),
             "observations": {
-                node_id: observation.as_dict() for node_id, observation in ctx.access_observations.items()
+                node_id: observation.as_dict() for node_id, observation in ctx.records.access_observations.items()
             },
             "observer_events": [
-                event.as_dict() for observation in ctx.access_observations.values() for event in observation.events
+                event.as_dict() for observation in ctx.records.access_observations.values() for event in observation.events
             ],
-            "log_events": list(ctx.log_events),
+            "log_events": list(ctx.records.log_events),
             "named_values": named_values,
         }
 
@@ -759,34 +759,34 @@ class EvalEngine:
         provenance = self._build_provenance(node, ctx, started, finished)
 
         named = {
-            name: ctx.node_registry[node_id]
-            for name, node_id in ctx.named_registry.items()
-            if node_id in ctx.node_registry
+            name: ctx.nodes.registry[node_id]
+            for name, node_id in ctx.nodes.named.items()
+            if node_id in ctx.nodes.registry
         }
 
         reports = self._collect_reports(ctx, root, run_label)
         diagnostics = self._collect_diagnostics(ctx, named)
 
-        perf_summary = ctx.perf.summary(ctx.node_registry, cache_hit_count=ctx.cache.hit_count)
+        perf_summary = ctx.perf.summary(ctx.nodes.registry, cache_hit_count=ctx.cache.hit_count)
         cache_summary = ctx.cache.summary()
         perf_summary.cache_miss_count = int(cache_summary["misses"])
         perf_summary.cache_store_count = int(cache_summary["stores"])
 
         root_value = cast(
-            "TPublic", ctx.runtime_store[root.node_id].public_value if root.node_id in ctx.runtime_store else None
+            "TPublic", ctx.nodes.runtime[root.node_id].public_value if root.node_id in ctx.nodes.runtime else None
         )
 
         result = Result(
             value=root_value,
             root=root,
-            nodes=dict(ctx.node_registry),
+            nodes=dict(ctx.nodes.registry),
             named=named,
             calculator=node,
-            observations=ObservationsView(dict(ctx.access_observations)),
+            observations=ObservationsView(dict(ctx.records.access_observations)),
             provenance=provenance,
             perf_summary=perf_summary,
-            warnings=list(ctx.warnings),
-            errors=list(ctx.errors),
+            warnings=list(ctx.records.warnings),
+            errors=list(ctx.records.errors),
             reports=ReportsView(reports),
             diagnostics=DiagnosticsView(diagnostics),
         )
@@ -794,7 +794,7 @@ class EvalEngine:
 
         root.artifacts.update(reports)
         root.artifacts["execution_tree_report"] = execution_tree_report
-        root.artifacts["log_events"] = list(ctx.log_events)
+        root.artifacts["log_events"] = list(ctx.records.log_events)
         result.reports["execution_tree"] = execution_tree_report
 
         return result
