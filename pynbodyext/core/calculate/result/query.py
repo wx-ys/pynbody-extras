@@ -335,7 +335,7 @@ class ResultQuery:
     @staticmethod
     def _cache_events_by_node(result: Result[Any]) -> dict[str, dict[str, int]]:
         grouped: dict[str, dict[str, int]] = {}
-        for event in result.cache_events():
+        for event in result.diagnostics.cache():
             node_id = getattr(event, "node_id", None)
             if not node_id:
                 continue
@@ -421,7 +421,7 @@ class ResultQuery:
 
         if include_observer:
             access_text = format_observation_access(
-                result.observation_of(node), read_items=3, dirty_items=3, delete_items=2
+                result.observations.of(node), read_items=3, dirty_items=3, delete_items=2
             )
             if access_text:
                 parts.append(access_text)
@@ -471,7 +471,7 @@ class ResultQuery:
             dirty_fields: set[str] = set()
             deletes: set[str] = set()
             for node in nodes:
-                observation = result.observation_of(node)
+                observation = result.observations.of(node)
                 if observation is None:
                     continue
                 reads.update(observation.reads)

@@ -471,7 +471,7 @@ class ResultRepr:
             f"stores: {result.perf_summary.cache_store_count}",
         ]
 
-        events = result.cache_events()
+        events = result.diagnostics.cache()
         if not events:
             return "\n".join(lines)
 

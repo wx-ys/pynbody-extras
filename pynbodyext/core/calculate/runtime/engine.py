@@ -94,6 +94,7 @@ from pynbodyext.core.calculate.diagnostics.observer import observation_phase, re
 from pynbodyext.core.calculate.result.enums import CachePolicy, ErrorPolicy, NodeStatus, RecordPolicy
 from pynbodyext.core.calculate.result.exceptions import CycleError
 from pynbodyext.core.calculate.result.result import ErrorInfo, ProvenanceInfo, Result, ResultNode, ValueSummary
+from pynbodyext.core.calculate.result.views import DiagnosticsView, ObservationsView, ReportsView
 
 from ._engine_types import (
     _EvaluationPlan,
@@ -781,13 +782,13 @@ class EvalEngine:
             nodes=dict(ctx.node_registry),
             named=named,
             calculator=node,
-            observations=dict(ctx.access_observations),
+            observations=ObservationsView(dict(ctx.access_observations)),
             provenance=provenance,
             perf_summary=perf_summary,
             warnings=list(ctx.warnings),
             errors=list(ctx.errors),
-            reports=reports,
-            diagnostics=diagnostics,
+            reports=ReportsView(reports),
+            diagnostics=DiagnosticsView(diagnostics),
         )
         execution_tree_report = result.report_execution_tree()
 

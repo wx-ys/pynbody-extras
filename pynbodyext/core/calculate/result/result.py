@@ -76,7 +76,15 @@ from pynbodyext.core.calculate.diagnostics.observer import (
 from pynbodyext.core.calculate.display import ViewObject, compact_repr, mimebundle
 
 from .enums import NodeKind, NodeStatus, RecordPolicy
-from .views import ErrorListView, NamedView, WarningListView
+from .views import (
+    DiagnosticsView,
+    ErrorListView,
+    NamedView,
+    ObservationsView,
+    ReportsView,
+    WarningListView,
+    as_view,
+)
 
 if TYPE_CHECKING:
     from pynbodyext.core.calculate.nodes.base import CalculatorBase
@@ -256,14 +264,14 @@ class Result(Generic[T]):
     #: ``provenance.calculator_signature_text`` for a result loaded from a store.
     #: Excluded from equality/repr so it does not change result identity.
     calculator: CalculatorBase | None = field(default=None, compare=False, repr=False)
-    observations: dict[str, AccessObservation] = field(default_factory=dict)
+    observations: ObservationsView = field(default_factory=ObservationsView)
     provenance: ProvenanceInfo | None = None
     perf_summary: PerfSummary = field(default_factory=PerfSummary)
     warnings: list[str] | WarningListView = field(default_factory=WarningListView)
     errors: list[ErrorInfo] | ErrorListView = field(default_factory=ErrorListView)
 
-    reports: dict[str, str] = field(default_factory=dict)
-    diagnostics: dict[str, Any] = field(default_factory=dict)
+    reports: ReportsView = field(default_factory=ReportsView)
+    diagnostics: DiagnosticsView = field(default_factory=DiagnosticsView)
 
     def __post_init__(self) -> None:
         if not isinstance(self.named, NamedView):
@@ -272,6 +280,10 @@ class Result(Generic[T]):
             self.errors = ErrorListView(self.errors) if self.errors else ErrorListView([])
         if not isinstance(self.warnings, WarningListView):
             self.warnings = WarningListView(self.warnings) if self.warnings else WarningListView([])
+        self.reports = as_view(self.reports, ReportsView)
+        self.diagnostics = as_view(self.diagnostics, DiagnosticsView)
+        self.observations = as_view(self.observations, ObservationsView, owner=self)
+        self.observations._owner = self
 
     def __repr__(self) -> str:
         from .repr import ResultRepr
@@ -302,7 +314,7 @@ class Result(Generic[T]):
     @property
     def named_values(self) -> dict[str, Any]:
         """Return public values for named nodes that were materialized."""
-        return dict(self.diagnostic("named_values", {}))
+        return dict(self.diagnostics.get("named_values", {}))
 
     @property
     def execution_tree(self) -> ViewObject:
@@ -334,7 +346,7 @@ class Result(Generic[T]):
             return default
         if node.stored_value:
             return node.value
-        named_values = self.diagnostic("named_values", {})
+        named_values = self.diagnostics.get("named_values", {})
         return named_values.get(name, default)
 
     def node(self, id_or_name: str) -> ResultNode:
@@ -358,30 +370,14 @@ class Result(Generic[T]):
         first = self.errors[0]
         raise RuntimeError(f"{first.error_type}: {first.message}")
 
-    def available_reports(self) -> tuple[str, ...]:
-        """Return names of available text reports."""
-        return tuple(self.reports.keys())
-
-    def available_diagnostics(self) -> tuple[str, ...]:
-        """Return names of available diagnostic payloads."""
-        return tuple(self.diagnostics.keys())
-
-    def report(self, name: str, default: str = "") -> str:
-        """Return a named text report."""
-        return self.reports.get(name, default)
-
-    def diagnostic(self, name: str, default: Any = None) -> Any:
-        """Return a named diagnostic payload."""
-        return self.diagnostics.get(name, default)
-
     def report_cache(self) -> str:
         """Return the runtime cache report."""
-        return self.report("cache")
+        return self.reports.get("cache", "")
 
     def report_trace_timeline(self, *, show_ids: bool = False, include_observer: bool = True) -> str:
         """Return a trace timeline for the run."""
         lines: list[str] = []
-        for event in self.trace_events():
+        for event in self.diagnostics.trace():
             node_suffix = f" [{event.node_id}]" if show_ids else ""
             access_suffix = ""
             if include_observer and event.event == "leave":
@@ -396,7 +392,7 @@ class Result(Generic[T]):
 
     def report_trace_tree(self, *, show_ids: bool = False) -> str:
         """Return the stored execution trace tree."""
-        text = self.report("trace_tree")
+        text = self.reports.get("trace_tree", "")
         if show_ids:
             return text
         lines: list[str] = []
@@ -407,43 +403,12 @@ class Result(Generic[T]):
                 lines.append(line)
         return "\n".join(lines)
 
-    def trace_events(self) -> list[Any]:
-        """Return raw trace events."""
-        return list(self.diagnostic("trace_events", []))
-
-    def cache_events(self) -> list[Any]:
-        """Return raw cache events."""
-        return list(self.diagnostic("cache_events", []))
-
-    def log_events(self) -> list[Any]:
-        """Return runtime log events captured during evaluation."""
-        return list(self.diagnostic("log_events", []))
-
-    def observer_events(self) -> list[Any]:
-        """Return raw pynbody field observer events."""
-        return list(self.diagnostic("observer_events", []))
-
-    def access_observations(self) -> dict[str, AccessObservation]:
-        """Return per-node pynbody field access observations."""
-        if self.observations:
-            return dict(self.observations)
-        return {node_id: node.observation for node_id, node in self.nodes.items() if node.observation is not None}
-
-    def observation_of(self, node: str | ResultNode) -> AccessObservation | None:
-        """Return the access observation for one node, if available."""
-        from .query import ResultQuery
-
-        resolved = ResultQuery.resolve_node(self, node)
-        if resolved.observation is not None:
-            return resolved.observation
-        return self.observations.get(resolved.node_id)
-
     def report_observer(self, *, include_empty: bool = False, show_ids: bool = False) -> str:
         """Return a formatted pynbody field observer report."""
         if not include_empty and not show_ids:
-            return self.report("observer")
+            return self.reports.get("observer", "")
         return render_observer_report(
-            self.access_observations().values(), include_empty=include_empty, show_ids=show_ids
+            self.observations.all().values(), include_empty=include_empty, show_ids=show_ids
         )
 
     def iter_nodes(self) -> list[ResultNode]:
