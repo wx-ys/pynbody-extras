@@ -10,6 +10,7 @@ family sub-results (``gas``/``dm``/``star``), and the derived-property registry
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, overload
 
 import numpy as np
@@ -76,6 +77,35 @@ class _CSRBinsView:
     def __iter__(self):
         for i in range(len(self)):
             yield self._data[self._indptr[i] : self._indptr[i + 1]]
+
+
+@dataclass(slots=True)
+class BinCacheView:
+    """Cache / query diagnostics for a binned result.
+
+    Available as ``result.cache`` so the four diagnostic entry points live in
+    one place instead of on the main facade.
+    """
+
+    _owner: Any
+
+    def report(self) -> dict[str, Any]:
+        """Cache hit/miss/store counters for this result."""
+        return self._owner._query_service.cache_report()
+
+    def queries(self) -> list[dict[str, Any]]:
+        """Per-query diagnostics (key, node, timing)."""
+        return self._owner._query_service.query_report()
+
+    @property
+    def num_cached(self) -> int:
+        """Number of query arrays cached on this result."""
+        return self._owner._query_service.num_cached_arr
+
+    @property
+    def total_cached(self) -> int:
+        """Total cached query arrays including nested sub-results."""
+        return self._owner._subresults.total_cached_arr()
 
 
 class BinNDResult(BinPlotMixin):
@@ -288,16 +318,13 @@ class BinNDResult(BinPlotMixin):
         return _CSRBinsView(self._bin_data, self._bin_indptr)
 
     @property
-    def num_cached_arr(self) -> int:
-        return self._query_service.num_cached_arr
+    def cache(self) -> BinCacheView:
+        """Cache / query diagnostics for this result."""
+        return BinCacheView(self)
 
     @property
     def nsubs(self) -> int:
         return self._subresults.count()
-
-    @property
-    def total_cached_arr(self) -> int:
-        return self._subresults.total_cached_arr()
 
     @property
     def edges(self) -> np.ndarray:
@@ -573,12 +600,6 @@ class BinNDResult(BinPlotMixin):
     def _callable_cache_token(self, query: Any) -> Any:
         return self._query_service.callable_cache_token(query)
 
-    def cache_report(self) -> dict[str, Any]:
-        return self._query_service.cache_report()
-
-    def query_report(self) -> list[dict[str, Any]]:
-        return self._query_service.query_report()
-
     # ------------------------------------------------------------------
     # Axis measure type configuration
     # ------------------------------------------------------------------
@@ -745,7 +766,7 @@ class BinNDResult(BinPlotMixin):
     def __repr__(self) -> str:
         parent_flag = "root" if self.is_root else "sub"
         aliases = ",".join(axis.alias for axis in self._axes)
-        return f"<{type(self).__name__} type={parent_flag} ndim={self.ndim} shape={self.shape_bins} axes={aliases} nsubs={self.nsubs} ncache={self.total_cached_arr}>"
+        return f"<{type(self).__name__} type={parent_flag} ndim={self.ndim} shape={self.shape_bins} axes={aliases} nsubs={self.nsubs} ncache={self.cache.total_cached}>"
 
 
 class SubBinNDResult(BinNDResult):

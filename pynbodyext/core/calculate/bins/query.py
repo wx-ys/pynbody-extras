@@ -468,7 +468,7 @@ class BinQueryService:
 
     def cache_report(self) -> dict[str, Any]:
         owner = self._owner
-        return {"queries": self._cache.num_cached, "subresults": owner.nsubs, "total_queries": owner.total_cached_arr}
+        return {"queries": self._cache.num_cached, "subresults": owner.nsubs, "total_queries": owner.cache.total_cached}
 
     def query_report(self) -> list[dict[str, Any]]:
         return list(self._diagnostics.diagnostics)
