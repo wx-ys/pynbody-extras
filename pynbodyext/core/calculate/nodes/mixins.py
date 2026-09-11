@@ -15,7 +15,6 @@ Mixins call each other only through instance attributes, resolved by the MRO of
 from __future__ import annotations
 
 import copy
-import warnings
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, TypeVarTuple, Unpack, cast, overload
 
@@ -76,14 +75,6 @@ TPublic = TypeVar("TPublic")
 U = TypeVar("U")
 Ts = TypeVarTuple("Ts")
 Us = TypeVarTuple("Us")
-
-
-def _deprecated(use_instead: str) -> None:
-    warnings.warn(
-        f"use {use_instead} instead; this method is deprecated for interface simplification",
-        DeprecationWarning,
-        stacklevel=3,
-    )
 
 
 def _coerce_unit(value: UnitLike) -> units.UnitBase:
@@ -860,11 +851,6 @@ class _CalculatorComposeMixin(_CalculatorContract, Generic[TRaw, TPublic]):
         """
         return self._clone(record_policy=policy)
 
-    def with_filter(self: Self, filt: FilterBase) -> Self:
-        """Return a calculator evaluated on the subset selected by ``filt``."""
-        _deprecated("filter(filt)")
-        return self._clone(scope=self.scope.with_filter(filt))
-
     def filter(self: Self, filt: FilterBase) -> Self:
         """Return a copy evaluated only on the subset selected by ``filt``.
 
@@ -879,11 +865,6 @@ class _CalculatorComposeMixin(_CalculatorContract, Generic[TRaw, TPublic]):
             A new calculator scoped to the filtered selection.
         """
         return self._clone(scope=self.scope.with_filter(filt))
-
-    def with_transformation(self: Self, transform: TransformBase[Any], *, revert: bool = True) -> Self:
-        """Return a calculator evaluated after a pre-transform."""
-        _deprecated("transform(transform, revert=revert)")
-        return self._clone(scope=self.scope.with_transform(transform, revert=revert))
 
     def transform(self: Self, transform: TransformBase[Any], *, revert: bool = True) -> Self:
         """Return a copy evaluated after applying ``transform``.
@@ -929,8 +910,7 @@ class _CalculatorComposeMixin(_CalculatorContract, Generic[TRaw, TPublic]):
         """Return a copy with run options overridden.
 
         Accepts any ``RunOptions`` field as a keyword argument; unchanged fields
-        keep the calculator's defaults.  This is the general setter; the
-        ``with_*`` helpers are deprecated shorthands for the common ones.
+        keep the calculator's defaults.
 
         Parameters
         ----------
@@ -960,43 +940,18 @@ class _CalculatorComposeMixin(_CalculatorContract, Generic[TRaw, TPublic]):
 
         Examples
         --------
-        >>> calc.options(cache=False, progress="phase")
-        >>> calc.options(errors="collect")
+        >>> from pynbodyext.calculate import Param, PropertyBase
+        >>> @PropertyBase.dataclass
+        ... class MassSum(PropertyBase[float]):
+        ...     qty: Param[str] = Param("mass")
+        ...     def calculate(self, sim, params=None):
+        ...         return 0.0
+        >>> MassSum().options(cache=False).default_options.cache
+        False
+        >>> MassSum().options(errors="collect").default_options.errors
+        'collect'
         """
         return self._with_options(**changes)
-
-    def with_cache(self: Self, enabled: bool = True) -> Self:
-        """Return a copy with a default cache override."""
-        _deprecated("options(cache=enabled)")
-        return self._with_options(cache=enabled)
-
-    def with_perf(self: Self, *, time: bool = True, memory: bool = False) -> Self:
-        """Return a copy with performance collection defaults."""
-        _deprecated("options(perf_time=time, perf_memory=memory)")
-        return self._with_options(perf_time=time, perf_memory=memory)
-
-    def with_progress(
-        self: Self,
-        progress: bool | ProgressVerbosity | ProgressSink | list[ProgressSink] | tuple[ProgressSink, ...] = True,
-    ) -> Self:
-        """Return a copy with a default progress reporting option."""
-        _deprecated("options(progress=progress)")
-        return self._with_options(progress=progress)
-
-    def with_observer(self: Self, enabled: bool = True) -> Self:
-        """Return a copy with diagnostic field-access observation enabled or disabled."""
-        _deprecated("options(observe=enabled)")
-        return self._with_options(observe=enabled)
-
-    def with_backend(self: Self, name: str) -> Self:
-        """Return a copy with a default backend label."""
-        _deprecated("options(backend=name)")
-        return self._with_options(backend=name)
-
-    def with_record_policy(self: Self, policy: RecordPolicy) -> Self:
-        """Alias for :meth:`record`."""
-        _deprecated("record(policy)")
-        return self.record(policy)
 
     def _as_value_property(self) -> PropertyBase[Any]:
         from .expr import as_property

@@ -53,22 +53,27 @@ class BinResultModel:
 
     @property
     def is_root(self) -> bool:
+        """Whether this model is the root result (has no parent)."""
         return self.parent is None
 
     @property
     def root(self) -> BinResultModel:
+        """The root model of this sub-result's tree."""
         return self if self.parent is None else self.parent.root
 
     @property
     def nbins(self) -> int:
+        """Total number of bins (product of per-axis bin counts)."""
         return int(np.prod(self.shape_bins, dtype=int))
 
     @property
     def total_nbins(self) -> int:
+        """Alias for :attr:`nbins`."""
         return self.nbins
 
     @property
     def unassigned_count(self) -> int:
+        """Number of particles that fall outside every bin."""
         mask = self.valid_mask
         if mask is None:
             return 0
@@ -81,6 +86,7 @@ class BinResultModel:
 
     @property
     def owner(self) -> BinNDResult | None:
+        """The :class:`~.result.BinNDResult` facade that owns this model, if any."""
         return self._owner
 
     def _require_owner(self) -> BinNDResult:
@@ -95,56 +101,70 @@ class BinResultModel:
 
     @property
     def axis(self) -> BinAxisAccessor:
+        """Accessor over this result's axes, keyed by alias or index."""
         return self._require_owner().axis
 
     @property
     def centers(self) -> np.ndarray:
+        """Per-axis bin centers."""
         return self._require_owner().centers
 
     @property
     def mins(self) -> np.ndarray:
+        """Per-axis lower bin edges."""
         return self._require_owner().mins
 
     @property
     def maxs(self) -> np.ndarray:
+        """Per-axis upper bin edges."""
         return self._require_owner().maxs
 
     @property
     def widths(self) -> np.ndarray:
+        """Per-axis bin widths."""
         return self._require_owner().widths
 
     @property
     def edges(self) -> np.ndarray:
+        """Per-axis bin edges (length ``nbins + 1``)."""
         return self._require_owner().edges
 
     def find_axis(self, aliases: set[str]) -> BinAxis:
+        """Return the first axis matching any alias in *aliases*."""
         return self._require_owner().find_axis(aliases)
 
     def multi_index_array(self) -> np.ndarray:
+        """Return an integer array of per-particle bin indices."""
         return self._require_owner().multi_index_array()
 
     def _resolve_axis_measure(self, axis: BinAxis) -> np.ndarray:
         return self._require_owner()._resolve_axis_measure(axis)
 
     def families(self) -> Any:
+        """Return the pynbody families present in this result's snapshot."""
         return self._require_owner().families()
 
     @property
     def gas(self) -> BinResultModel:
+        """Sub-result restricted to the gas family."""
         return self._require_owner().gas._model
 
     @property
     def dm(self) -> BinResultModel:
+        """Sub-result restricted to the dark-matter family."""
         return self._require_owner().dm._model
 
     @property
     def star(self) -> BinResultModel:
+        """Sub-result restricted to the star family."""
         return self._require_owner().star._model
 
     @property
     def g(self) -> BinResultModel:
+        """Short alias for :attr:`gas`."""
         return self._require_owner().g._model
 
     @property
     def s(self) -> BinResultModel:
+        """Short alias for :attr:`star`."""
         return self._require_owner().s._model

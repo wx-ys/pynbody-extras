@@ -86,6 +86,7 @@ runtime layer underneath.
 from __future__ import annotations
 
 import time
+import traceback
 import uuid
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
@@ -626,11 +627,18 @@ class EvalEngine:
         is_root: bool,
     ) -> None:
         node_result.status = NodeStatus.ERROR
+        phase = node_result.phases[-1].phase if node_result.phases else None
         node_result.error = ErrorInfo(
             error_type=exc.__class__.__name__,
             message=str(exc),
-            phase=node_result.phases[-1].phase if node_result.phases else None,
+            phase=phase,
+            traceback_text="".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
         )
+        # Enrich the propagated exception (RAISE path) with node/phase context so the
+        # traceback alone tells the user where it failed.  ``add_note`` is 3.11+.
+        if hasattr(exc, "add_note"):
+            location = f"{node_result.display_name} in phase {phase!r}" if phase else node_result.display_name
+            exc.add_note(f"pynbodyext.calculate: {location} failed")
         ctx.last_error_node_id = node_result.node_id
         ctx.errors.append(node_result.error)
 

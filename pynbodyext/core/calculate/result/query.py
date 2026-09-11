@@ -142,7 +142,8 @@ class ResultQuery:
             return None
         if len(parents) != 1:
             raise ValueError(
-                f"Node {resolved.node_id!r} has {len(parents)} parents; use parents_of() for shared dependencies."
+                f"Node {resolved.node_id!r} has {len(parents)} parents; use "
+                f"Result.find('parents', relative_to=...) for shared dependencies."
             )
         return parents[0]
 

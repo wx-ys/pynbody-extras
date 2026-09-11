@@ -372,9 +372,14 @@ class ExecutionContext:
                     ) as phase_record:
                         record = phase_record
                         yield
-            except Exception:
+            except Exception as exc:
                 status = "error"
-                self.log("error", f"{node_name}:{phase_name} error", node_id=current.node_id, phase=phase_name)
+                self.log(
+                    "error",
+                    f"{node_name}:{phase_name} error: {exc.__class__.__name__}: {exc}",
+                    node_id=current.node_id,
+                    phase=phase_name,
+                )
                 raise
             finally:
                 if record is not None:

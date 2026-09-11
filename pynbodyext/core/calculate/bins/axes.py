@@ -143,6 +143,7 @@ _measure_change_subscribers: weakref.WeakSet = weakref.WeakSet()
 
 
 def axis_matches(axis: BinAxis, names: set[str]) -> bool:
+    """Whether *axis* matches any of *names* (by alias or field prop)."""
     return axis.alias in names or (isinstance(axis.prop, str) and axis.prop in names)
 
 
@@ -170,6 +171,7 @@ class BinAxisAccessor:
 
     @property
     def extent(self) -> list[float]:
+        """``[min0, max0, min1, max1, ...]`` covering every axis."""
         ex: list[float] = []
         for axis in self._axes:
             ex.extend([float(axis.mins[0]), float(axis.maxs[-1])])
@@ -233,10 +235,12 @@ class BinAxisAccessor:
 
 
 def has_axis(names: set[str]) -> BinDerivedCondition:
+    """Return a derived-property condition that is True when any axis matches."""
     return lambda bins: any(axis_matches(axis, names) for axis in bins.axes)
 
 
 def has_axes(*groups: set[str]) -> BinDerivedCondition:
+    """Return a condition that is True only when every alias group has a match."""
     return lambda bins: all(has_axis(group)(bins) for group in groups)
 
 
@@ -347,22 +351,27 @@ class BinAxis:
 
     @property
     def nbins(self) -> int:
+        """Number of bins along this axis."""
         return int(len(self.mins))
 
     @property
     def centers(self) -> np.ndarray:
+        """Bin centers (midpoint of each bin's edges)."""
         return 0.5 * (self.mins + self.maxs)
 
     @property
     def widths(self) -> np.ndarray:
+        """Bin widths (``maxs - mins``)."""
         return self.maxs - self.mins
 
     @property
     def is_continuous(self) -> bool:
+        """Whether adjacent bins share edges (no gaps)."""
         return bool(self.nbins == 1 or np.all(self.maxs[:-1] == self.mins[1:]))
 
     @property
     def edges(self) -> np.ndarray:
+        """Axis edges: a flat array when continuous, else ``(nbins, 2)`` bounds."""
         if self.is_continuous:
             return np.concatenate((self.mins[:1], self.maxs))
         return np.column_stack((np.asarray(self.mins), np.asarray(self.maxs)))
