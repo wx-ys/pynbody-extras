@@ -12,7 +12,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from .arrays import BinsArray
-    from .axes import BinAxis, BinAxisAccessor
+    from .axes import BinAxisAccessor
 
 
 @runtime_checkable
@@ -24,10 +24,9 @@ class _BinQueryable(Protocol):
     inherit :class:`BinPlotMixin` without importing the concrete class.
     """
 
-    axes: tuple[BinAxis, ...]
+    axes: BinAxisAccessor
     shape_bins: tuple[int, ...]
     ndim: int
-    axis: BinAxisAccessor
 
     def __getitem__(self, key: str) -> BinsArray: ...
 
@@ -66,7 +65,7 @@ class BinPlotMixin:
         if ax is None:
             _, ax = plt.subplots()
 
-        x_axis = self.axis[x]
+        x_axis = self.axes[x]
         x_values = np.asarray(x_axis.centers)
         y_arr = np.asarray(self[y]).ravel()
 
@@ -116,4 +115,4 @@ class BinPlotMixin:
             _, ax = plt.subplots(figsize=kwargs.pop("figsize", (5, 5)))
 
         grid = np.asarray(self[field]).reshape(self.shape_bins)
-        return ax.imshow(grid.T, origin="lower", aspect="auto", extent=self.axis.extent, **kwargs)
+        return ax.imshow(grid.T, origin="lower", aspect="auto", extent=self.axes.extent, **kwargs)

@@ -57,7 +57,7 @@ class BinsResultEngine:
 class _CSRBinsView:
     """Backward-compatible list-like view over CSR bin→particle storage.
 
-    Allows existing ``for index, particles in enumerate(bins.bin_indices)``
+    Allows existing ``bins.particles_at_bin``
     patterns to keep working while internal code uses the raw CSR arrays
     ``bin_data`` / ``bin_indptr`` directly.
     """
@@ -106,6 +106,46 @@ class BinCacheView:
     def total_cached(self) -> int:
         """Total cached query arrays including nested sub-results."""
         return self._owner._subresults.total_cached_arr()
+
+
+@dataclass(slots=True)
+class BinQueriesView:
+    """Catalog and explicit evaluation of the per-bin queries a result offers.
+
+    Available as ``result.queries``; groups the former flat ``keys()`` /
+    ``property_keys()`` / ``stat_explicit()`` / ``apply()`` surface.
+    """
+
+    _owner: Any
+
+    def names(self) -> list[str]:
+        """All available query keys (e.g. ``"mass.sum"``, ``"density"``)."""
+        return self._owner._query_service.keys()
+
+    def properties(self) -> list[str]:
+        """Registered derived-property query keys."""
+        return self._owner._query_service.property_keys()
+
+    def explicit(
+        self,
+        field: str,
+        statistic: str,
+        weight: str | Callable[[Any], Any] | Any | None = None,
+        transforms: list[str] | None = None,
+    ) -> BinsArray:
+        """Compute a per-bin statistic explicitly (equivalent to ``bins["field.stat"]``)."""
+        return self._owner._stat_explicit(field, statistic, weight=weight, transforms=transforms)
+
+    def apply(
+        self,
+        query: Callable[[Any], Any] | CalculatorBase[Any, Any],
+        *,
+        name: str | None = None,
+        empty: float = np.nan,
+        vectorized: bool = False,
+    ) -> BinsArray:
+        """Evaluate *query* on each bin's particle subset."""
+        return self._owner._apply(query, name=name, empty=empty, vectorized=vectorized)
 
 
 class BinNDResult(BinPlotMixin):
@@ -276,27 +316,26 @@ class BinNDResult(BinPlotMixin):
         return BinParticlesAccessor(self)
 
     @property
-    def axes(self) -> tuple[BinAxis, ...]:
-        """The bin axes (tuple). For individual lookups prefer ``bins.axis``."""
-        return self._axes
+    def axes(self) -> BinAxisAccessor:
+        """The bin axes: an iterable, indexable accessor over each axis.
+
+        Supports ``for ax in bins.axes``, ``len(bins.axes)``, ``bins.axes[0]``,
+        ``bins.axes["r"]``, ``bins.axes.r``, ``bins.axes.find({...})`` and
+        ``bins.axes.set_measure_type("r", "annulus")``.
+
+        Examples
+        --------
+        >>> bins.axes.r.centers.tolist()
+        [1.0, 3.0, 5.0]
+        >>> bins.axes["r"] is bins.axes[0]
+        True
+        """
+        return BinAxisAccessor(self._axes, owner=self)
 
     @property
     def valid_mask(self) -> np.ndarray:
         """Boolean mask marking particles that were successfully assigned to a bin."""
         return self._valid_mask
-
-    @property
-    def axis(self) -> BinAxisAccessor:
-        """Accessor for individual axes.
-
-        Examples
-        --------
-        >>> bins.axis.r  # axis with alias "r"
-        >>> bins.axis["r"]  # same
-        >>> bins.axis[0]  # first axis
-        >>> bins.axis.set_axis_measure_type("r", "annulus")  # per-instance override
-        """
-        return BinAxisAccessor(self._axes, owner=self)
 
     def _resolve_axis_measure(self, axis: BinAxis) -> np.ndarray:
         """Return the effective per-bin measure for *axis*.
@@ -305,16 +344,6 @@ class BinNDResult(BinPlotMixin):
         overrides first, then the global :attr:`BinAxis.measure` property.
         """
         return self._geometry.axis_measure(axis)
-
-    @property
-    def bin_indices(self) -> _CSRBinsView:
-        """Backward-compatible view over bin→particle indices (CSR format).
-
-        Prefer the raw ``bin_data`` / ``bin_indptr`` arrays for
-        performance-critical code: ``bin_data[bin_indptr[i]:bin_indptr[i+1]]``
-        avoids creating a new Python object per access.
-        """
-        return _CSRBinsView(self._bin_data, self._bin_indptr)
 
     @property
     def cache(self) -> BinCacheView:
@@ -369,17 +398,20 @@ class BinNDResult(BinPlotMixin):
         """
         return BinNDStatAccessor(self)
 
-    def keys(self) -> list[str]:
+    def _ipython_key_completions_(self) -> list[str]:
         return self._query_service.keys()
 
-    def property_keys(self) -> list[str]:
-        return self._query_service.property_keys()
+    @property
+    def queries(self) -> BinQueriesView:
+        """Catalog of per-bin queries available on this result.
 
-    def all_keys(self) -> list[str]:
-        return self.keys()
-
-    def _ipython_key_completions_(self) -> list[str]:
-        return self.all_keys()
+        Examples
+        --------
+        >>> bins.queries.names()          # all query keys, e.g. "mass.sum"
+        >>> bins.queries.properties()     # registered derived-property keys
+        >>> bins.queries.explicit("mass", "sum")
+        """
+        return BinQueriesView(self)
 
     def get_subresult(self, subset: Any, *, _cache_key: Any = None) -> SubBinNDResult:
         return self._subresults.get(subset, cache_key=_cache_key)
@@ -409,13 +441,13 @@ class BinNDResult(BinPlotMixin):
         >>> bins["vr.mean@mass"]  # mass-weighted per-bin mean of vr
         """
         if isinstance(key, str):
-            # Axis properties like "r.center" must be accessed via bins.axis("r").center
+            # Axis properties like "r.center" must be accessed via bins.axes["r"].center
             # String queries only handle: geometry/derived properties and pipeline stat queries
             return self._resolve_query(key)
         if (isinstance(key, CalculatorBase) and not isinstance(key, FilterBase)) or (
             callable(key) and not isinstance(key, (str, bytes))
         ):
-            return self.apply(key)
+            return self._apply(key)
         if isinstance(key, tuple) or isinstance(key, (int, np.integer, slice)) or is_int_sequence(key):
             raise TypeError("Bin selectors must use bins.particles_at_bin[...], not BinNDResult.__getitem__.")
         return self._subresults.from_key(key)
@@ -484,7 +516,7 @@ class BinNDResult(BinPlotMixin):
     def multi_index_array(self) -> np.ndarray:
         return self._geometry.multi_index_array()
 
-    def find_axis(self, aliases: set[str]) -> BinAxis:
+    def _find_axis(self, aliases: set[str]) -> BinAxis:
         """Fetch an axis by a set of accepted aliases / prop names.
 
         Parameters
@@ -504,7 +536,7 @@ class BinNDResult(BinPlotMixin):
 
         Examples
         --------
-        >>> bins.find_axis({"r"}).centers.tolist()
+        >>> bins.axes.find({"r"}).centers.tolist()
         [1.0, 3.0, 5.0]
         """
         return self._geometry.find_axis(aliases)
@@ -520,7 +552,7 @@ class BinNDResult(BinPlotMixin):
     ) -> BinsArray:
         return self._query_service.stat_pipeline(field, transforms, terminal_stat, weight=weight, query_key=query_key)
 
-    def stat_explicit(
+    def _stat_explicit(
         self,
         field: str,
         statistic: str,
@@ -550,13 +582,13 @@ class BinNDResult(BinPlotMixin):
 
         Examples
         --------
-        >>> bins.stat_explicit("mass", "sum")
-        >>> bins.stat_explicit("vz", "mean", transforms=["abs"])
-        >>> bins.stat_explicit("mass", "mean", weight="mass")
+        >>> bins.queries.explicit("mass", "sum")
+        >>> bins.queries.explicit("vz", "mean", transforms=["abs"])
+        >>> bins.queries.explicit("mass", "mean", weight="mass")
         """
         return self._query_service.stat_explicit(field, statistic, weight=weight, transforms=transforms)
 
-    def apply(
+    def _apply(
         self,
         query: Callable[[Any], Any] | CalculatorBase[Any, Any],
         *,
@@ -591,8 +623,8 @@ class BinNDResult(BinPlotMixin):
 
         Examples
         --------
-        >>> bins.apply(lambda sub: sub["vz"].mean())  # per-bin mean of vz
-        >>> bins.apply(lambda sim, pb: np.bincount(pb, minlength=bins.nbins), vectorized=True)  # fast vectorized count
+        >>> bins.queries.apply(lambda sub: sub["vz"].mean())  # per-bin mean of vz
+        >>> bins.queries.apply(lambda sim, pb: np.bincount(pb, minlength=bins.nbins), vectorized=True)  # fast vectorized count
         """
         return self._query_service.apply(query, name=name, empty=empty, vectorized=vectorized)
 
@@ -603,7 +635,7 @@ class BinNDResult(BinPlotMixin):
     # Axis measure type configuration
     # ------------------------------------------------------------------
 
-    def set_axis_measure_type(self, alias: str, type_name: str | None) -> None:
+    def _set_axis_measure_type(self, alias: str, type_name: str | None) -> None:
         """Assign a registered measure type to an axis *alias* — **per-instance**.
 
         Only affects this :class:`BinNDResult` and its subresults.  Other
@@ -628,8 +660,8 @@ class BinNDResult(BinPlotMixin):
 
         Examples
         --------
-        >>> bins.set_axis_measure_type("r", "linear")  # bin widths instead of shell volume
-        >>> bins.set_axis_measure_type("r", None)  # revert to the default measure
+        >>> bins.axes.set_measure_type("r", "linear")  # bin widths instead of shell volume
+        >>> bins.axes.set_measure_type("r", None)  # revert to the default measure
         >>> bins["measure"].shape_bins
         (3,)
         """
@@ -788,7 +820,7 @@ def _bin_measure(bins: BinNDResult) -> np.ndarray:
     """Per-bin physical measure — product of each axis's effective measure.
 
     Respects any per-instance overrides set via
-    :meth:`BinNDResult.set_axis_measure_type`.
+    :meth:`BinAxisAccessor.set_measure_type`.
 
     For a 1-D radial grid this is the shell volume; for a 1-D projected grid
     the annulus area; for a generic ND grid the product of per-axis measures.

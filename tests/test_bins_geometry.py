@@ -24,7 +24,7 @@ def test_measure_override_is_per_instance():
     sim = make_sim()
     a = Bin1D("r", vmin=0, vmax=6, nbins=3)(sim)
     b = Bin1D("r", vmin=0, vmax=6, nbins=3)(sim)
-    b.set_axis_measure_type("r", "linear")
+    b.axes.set_measure_type("r", "linear")
     assert not np.allclose(a["measure"], b["measure"])
 
 

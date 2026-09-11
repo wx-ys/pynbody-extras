@@ -98,7 +98,7 @@ class BinResultModel:
     @property
     def axis(self) -> BinAxisAccessor:
         """Accessor over this result's axes, keyed by alias or index."""
-        return self._require_owner().axis
+        return self._require_owner().axes
 
     @property
     def centers(self) -> np.ndarray:
@@ -127,7 +127,7 @@ class BinResultModel:
 
     def find_axis(self, aliases: set[str]) -> BinAxis:
         """Return the first axis matching any alias in *aliases*."""
-        return self._require_owner().find_axis(aliases)
+        return self._require_owner().axes.find(aliases)
 
     def multi_index_array(self) -> np.ndarray:
         """Return an integer array of per-particle bin indices."""

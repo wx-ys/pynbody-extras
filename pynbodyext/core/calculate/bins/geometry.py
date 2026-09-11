@@ -27,7 +27,7 @@ class BinGeometry:
 
     def _require_1d(self, name: str) -> None:
         if self._provider.ndim != 1:
-            raise AttributeError(f"{name} is ambiguous for ND bins; use bins.axis[alias].{name}.")
+            raise AttributeError(f"{name} is ambiguous for ND bins; use bins.axes[alias].{name}.")
 
     @property
     def centers(self) -> np.ndarray:
