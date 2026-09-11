@@ -409,7 +409,7 @@ class BinQueryService:
         raise KeyError(
             f"Unknown BinND query {key!r}. "
             "Use 'field.stat' syntax (e.g. 'mass.sum') for particle statistics. "
-            "For axis properties use bins.axis('r').center."
+            "For axis properties use bins.axes['r'].center."
         )
 
     def compute_derived(self, spec: BinDerivedSpec) -> BinsArray:

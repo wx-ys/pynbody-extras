@@ -77,7 +77,7 @@ class _BinNodeBase(CalculatorBase[BinNDResult, BinNDResult]):
     def register_axis_property(
         name: str | AxisPropertyFunc, func: AxisPropertyFunc | None = None, *, overwrite: bool = False
     ) -> AxisPropertyFunc | Callable[[AxisPropertyFunc], AxisPropertyFunc]:
-        """Register a dynamic axis property accessible as ``bins.axis.<name>``.
+        """Register a dynamic axis property accessible as ``bins.axes.<name>``.
 
         The property function receives a :class:`BinAxis` and returns an array
         shaped like the axis (``len == nbins``).  Resolves to
@@ -102,7 +102,7 @@ class _BinNodeBase(CalculatorBase[BinNDResult, BinNDResult]):
         >>> @Bin1D.register_axis_property("midpoint", overwrite=True)
         ... def midpoint(axis):
         ...     return axis.mins + 0.5 * axis.widths
-        >>> bins.axis.r.midpoint.tolist()
+        >>> bins.axes.r.midpoint.tolist()
         [1.0, 3.0, 5.0]
         """
         return BinAxis.register_property(cast("Any", name), cast("Any", func), overwrite=overwrite)
@@ -231,7 +231,7 @@ class Bin1D(_BinNodeBase):
     lows, highs : array-like, optional
         Explicit lower/upper bounds per bin (overrides ``vmin``/``vmax``/``nbins``).
     alias : str, optional
-        Short alias used by ``bins.axis.<alias>`` and dictionaries.
+        Short alias used by ``bins.axes.<alias>`` and dictionaries.
     include_rightmost : bool, default: True
         Whether the rightmost edge is included in the last bin.
     out_of_range : {"drop"}, default: "drop"

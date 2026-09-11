@@ -2,7 +2,7 @@
 
 This module provides the :class:`BinAxis` value object (per-axis bin edges,
 centers, widths, and physical measure), the :class:`BinAxisAccessor` used by
-``bins.axis[...]``, the built-in edge algorithms (:func:`register_bin_algorithm`,
+``bins.axes[...]``, the built-in edge algorithms (:func:`register_bin_algorithm`,
 ``BIN_ALGORITHMS``), and the extensible axis-property / measure registries.
 """
 
@@ -148,10 +148,11 @@ def axis_matches(axis: BinAxis, names: set[str]) -> bool:
 
 
 class BinAxisAccessor:
-    """Accessor returned by ``bins.axis`` for convenient axis lookup.
+    """Accessor returned by ``bins.axes`` for convenient axis lookup.
 
     Supports attribute access by alias, string subscript, and integer subscript.
-    It also iterates over all axes and offers :meth:`set_axis_measure_type`.
+    It also iterates over all axes and offers :meth:`find` and
+    :meth:`set_measure_type`.
 
     Examples
     --------
@@ -159,9 +160,9 @@ class BinAxisAccessor:
     >>> sim = pynbody.new(dm=6)
     >>> sim["r"] = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5]
     >>> bins = Bin1D("r", vmin=0, vmax=6, nbins=3)(sim)
-    >>> bins.axis.r.centers.tolist()
+    >>> bins.axes.r.centers.tolist()
     [1.0, 3.0, 5.0]
-    >>> bins.axis["r"] is bins.axis[0]
+    >>> bins.axes["r"] is bins.axes[0]
     True
     """
 
@@ -194,14 +195,17 @@ class BinAxisAccessor:
                 return ax
         raise AttributeError(f"No bin axis {name!r}.")
 
-    def set_axis_measure_type(self, alias: str, type_name: str) -> None:
+    def find(self, aliases: set[str]) -> BinAxis:
+        """Return the axis matching any of *aliases* (alias or prop name)."""
+        if self._owner is None:
+            raise RuntimeError("BinAxisAccessor.find requires an owning BinNDResult.")
+        return self._owner._find_axis(aliases)
+
+    def set_measure_type(self, alias: str, type_name: str | None) -> None:
         """Per-instance override: assign *type_name* to *alias*.
 
         Only affects the owning :class:`BinNDResult` instance — its cached
         density entries are invalidated; no other instance is touched.
-
-        Equivalent to calling :meth:`BinNDResult.set_axis_measure_type`
-        directly.
 
         Parameters
         ----------
@@ -210,11 +214,16 @@ class BinAxisAccessor:
         type_name:
             A measure type name previously registered via
             :meth:`BinAxis.register_measure_type`.  Built-in types include
-            ``"spherical_shell"``, ``"annulus"``, and ``"linear"``.
+            ``"spherical_shell"``, ``"annulus"``, and ``"linear"``.  Pass
+            ``None`` to clear a previously set per-instance override.
         """
         if self._owner is None:
-            raise RuntimeError("BinAxisAccessor.set_axis_measure_type requires an owning BinNDResult.")
-        self._owner.set_axis_measure_type(alias, type_name)
+            raise RuntimeError("BinAxisAccessor.set_measure_type requires an owning BinNDResult.")
+        self._owner._set_axis_measure_type(alias, type_name)
+
+    def set_axis_measure_type(self, alias: str, type_name: str | None) -> None:
+        """Backwards-compatible alias for :meth:`set_measure_type`."""
+        self.set_measure_type(alias, type_name)
 
     def __iter__(self):
         return iter(self._axes)
@@ -454,7 +463,7 @@ class BinAxis:
         """Register a named physical measure type (global).
 
         Measure types can be assigned to axis aliases via
-        :meth:`BinNDResult.set_axis_measure_type` (per-instance) or
+        :meth:`BinAxisAccessor.set_measure_type` (per-instance) or
         :meth:`BinAxis.set_axis_measure_type` (global).  Built-in types:
         ``"spherical_shell"``, ``"annulus"``, ``"linear"``.
 

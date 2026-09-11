@@ -535,7 +535,7 @@ class BinNDStatAccessor:
             bins.stat("mass", "mean", weight="mass")
             bins.stat("vz", "mean", transforms=["abs"])
         """
-        return self._owner.stat_explicit(field, statistic, weight=weight, transforms=transforms)
+        return self._owner._stat_explicit(field, statistic, weight=weight, transforms=transforms)
 
     def keys(self) -> list[str]:
         return STAT_REGISTRY.keys()

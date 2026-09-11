@@ -103,7 +103,7 @@ class BinExecutor:
         )
         result = self.build_result(
             subset,
-            parent.axes,
+            tuple(parent.axes),
             values,
             source_sim=parent.source_sim,
             scope_signature=parent._scope_signature,
