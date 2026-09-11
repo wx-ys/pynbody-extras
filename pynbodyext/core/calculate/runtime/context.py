@@ -110,6 +110,40 @@ class LogEvent:
 
 
 @dataclass(slots=True)
+class _NodeBookkeeping:
+    """Per-run node registry, value store, and naming state."""
+
+    registry: dict[str, ResultNode] = field(default_factory=dict)
+    runtime: dict[str, ExecutionValue] = field(default_factory=dict)
+    named: dict[str, str] = field(default_factory=dict)
+    counter: int = 0
+    last_error_id: str | None = None
+    #: Structured signature of the root calculator, computed once during
+    #: evaluation and reused for provenance assembly (avoids a redundant
+    #: re-serialization of the root node).
+    root_signature: Any | None = None
+
+
+@dataclass(slots=True)
+class _MutationState:
+    """State-mutation generations used to invalidate caches safely."""
+
+    generation: int = 0
+    unknown_generation: int = 0
+    field_generations: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class _RunRecords:
+    """Warnings, errors, logs, and field-access observations for one run."""
+
+    warnings: list[str] = field(default_factory=list)
+    errors: list[ErrorInfo] = field(default_factory=list)
+    log_events: list[LogEvent] = field(default_factory=list)
+    access_observations: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class ExecutionContext:
     """Mutable state shared by all nodes in one calculator run."""
 
@@ -123,23 +157,10 @@ class ExecutionContext:
     trace: TraceCollector = field(default_factory=TraceCollector)
     perf: PerfCollector = field(default_factory=PerfCollector)
 
-    node_registry: dict[str, ResultNode] = field(default_factory=dict)
-    runtime_store: dict[str, ExecutionValue] = field(default_factory=dict)
-    named_registry: dict[str, str] = field(default_factory=dict)
-    warnings: list[str] = field(default_factory=list)
-    errors: list[ErrorInfo] = field(default_factory=list)
-    log_events: list[LogEvent] = field(default_factory=list)
-    access_observations: dict[str, Any] = field(default_factory=dict)
+    nodes: _NodeBookkeeping = field(default_factory=_NodeBookkeeping)
+    mutation: _MutationState = field(default_factory=_MutationState)
+    records: _RunRecords = field(default_factory=_RunRecords)
 
-    _node_counter: int = 0
-    mutation_generation: int = 0
-    unknown_mutation_generation: int = 0
-    field_generations: dict[str, int] = field(default_factory=dict)
-    last_error_node_id: str | None = None
-    #: Structured signature of the root calculator, computed once during
-    #: evaluation and reused for provenance assembly (avoids a redundant
-    #: re-serialization of the root node).
-    root_signature: Any | None = None
     _node_stack: list[ResultNode] = field(default_factory=list)
     _evaluation_stack: list[tuple[int, tuple[Any, ...]]] = field(default_factory=list)
     _progress_sink: ProgressSink = field(init=False)
@@ -150,8 +171,8 @@ class ExecutionContext:
 
     def new_node_id(self) -> str:
         """Allocate a new node id for this run."""
-        self._node_counter += 1
-        return f"{self.run_id}:{self._node_counter}"
+        self.nodes.counter += 1
+        return f"{self.run_id}:{self.nodes.counter}"
 
     @property
     def current_node(self) -> ResultNode | None:
@@ -164,47 +185,47 @@ class ExecutionContext:
 
     def public_value(self, node: CalculatorBase[TRaw, TPublic], input: NodeInput | None = None) -> TPublic:
         node_result = self.evaluate(node, input)
-        return self.runtime_store[node_result.node_id].public_value
+        return self.nodes.runtime[node_result.node_id].public_value
 
     def raw_value(self, node: CalculatorBase[TRaw, TPublic], input: NodeInput | None = None) -> TRaw:
         """Evaluate a dependency and return its raw value."""
         node_result = self.evaluate(node, input)
-        return self.runtime_store[node_result.node_id].raw_value
+        return self.nodes.runtime[node_result.node_id].raw_value
 
     def register_node(self, node_result: ResultNode) -> None:
         """Register a newly created result node."""
-        self.node_registry[node_result.node_id] = node_result
+        self.nodes.registry[node_result.node_id] = node_result
 
         if node_result.name:
-            existing = self.named_registry.get(node_result.name)
+            existing = self.nodes.named.get(node_result.name)
             if existing is not None and existing != node_result.node_id:
-                existing_node = self.node_registry.get(existing)
+                existing_node = self.nodes.registry.get(existing)
                 if existing_node is not None and existing_node.signature == node_result.signature:
-                    node_result.artifacts["duplicate_named_node"] = existing
+                    node_result.run.artifacts["duplicate_named_node"] = existing
                     self.log("debug", f"duplicate named calculator {node_result.name!r}; keeping first registration")
                     return
 
                 raise ValueError(f"Duplicate named calculator node {node_result.name!r}.")
 
-            self.named_registry[node_result.name] = node_result.node_id
+            self.nodes.named[node_result.name] = node_result.node_id
 
     def register_runtime_value(self, node_id: str, raw_value: Any, public_value: Any) -> None:
         """Store raw and public runtime values for a node."""
-        self.runtime_store[node_id] = ExecutionValue(node_id=node_id, raw_value=raw_value, public_value=public_value)
+        self.nodes.runtime[node_id] = ExecutionValue(node_id=node_id, raw_value=raw_value, public_value=public_value)
 
     def advance_mutation_generation(self, reason: str, *, observed_phase: str | None | object = Ellipsis) -> int:
         """Advance the mutation generation after a transform changes state."""
-        self.mutation_generation += 1
+        self.mutation.generation += 1
         fields = self._current_observed_mutation_fields(observed_phase) if self.options.observe else set()
         if fields:
             for field_name in fields:
-                self.field_generations[field_name] = self.mutation_generation
+                self.mutation.field_generations[field_name] = self.mutation.generation
             rendered_fields = ", ".join(sorted(fields))
-            self.log("debug", f"mutation generation {self.mutation_generation}: {reason}; fields={rendered_fields}")
+            self.log("debug", f"mutation generation {self.mutation.generation}: {reason}; fields={rendered_fields}")
         else:
-            self.unknown_mutation_generation = self.mutation_generation
-            self.log("debug", f"mutation generation {self.mutation_generation}: {reason}; fields=*unknown*")
-        return self.mutation_generation
+            self.mutation.unknown_generation = self.mutation.generation
+            self.log("debug", f"mutation generation {self.mutation.generation}: {reason}; fields=*unknown*")
+        return self.mutation.generation
 
     def _current_observed_mutation_fields(self, phase: str | None | object = Ellipsis) -> set[str]:
         try:
@@ -222,20 +243,20 @@ class ExecutionContext:
     def observed_cache_fields(self, node_result: ResultNode) -> frozenset[str]:
         """Return direct and child observed fields that affect this node value."""
         fields: set[str] = set()
-        if node_result.observation is not None:
-            fields.update(node_result.observation.reads)
+        if node_result.run.observation is not None:
+            fields.update(node_result.run.observation.reads)
         for child_id in node_result.children:
-            child = self.node_registry.get(child_id)
+            child = self.nodes.registry.get(child_id)
             if child is None:
                 continue
-            fields.update(child.artifacts.get("observed_cache_fields", ()))
+            fields.update(child.run.artifacts.get("observed_cache_fields", ()))
         return frozenset(fields)
 
     def observed_cache_token(self, fields: frozenset[str]) -> tuple[int, tuple[tuple[str, int], ...]]:
         """Return the current generation token for observed cache fields."""
         return (
-            self.unknown_mutation_generation,
-            tuple((field_name, self.field_generations.get(field_name, 0)) for field_name in sorted(fields)),
+            self.mutation.unknown_generation,
+            tuple((field_name, self.mutation.field_generations.get(field_name, 0)) for field_name in sorted(fields)),
         )
 
     def observed_cache_token_is_current(self, token: Any) -> bool:
@@ -244,18 +265,18 @@ class ExecutionContext:
             unknown_generation, field_items = token
         except Exception:
             return False
-        if unknown_generation != self.unknown_mutation_generation:
+        if unknown_generation != self.mutation.unknown_generation:
             return False
         try:
             return all(
-                self.field_generations.get(field_name, 0) == generation for field_name, generation in field_items
+                self.mutation.field_generations.get(field_name, 0) == generation for field_name, generation in field_items
             )
         except Exception:
             return False
 
     def log(self, level: str, message: str, *, node_id: str | None = None, phase: str | None = None) -> None:
         """Record and emit a runtime log message."""
-        self.log_events.append(
+        self.records.log_events.append(
             LogEvent(timestamp=time.perf_counter(), level=level, node_id=node_id, phase=phase, message=message)
         )
         log_fn = getattr(logger, level, logger.debug)
@@ -274,9 +295,9 @@ class ExecutionContext:
             try:
                 yield observation
             finally:
-                node_result.observation = observation
-                node_result.artifacts["observer"] = observation.as_dict()
-                self.access_observations[node_result.node_id] = observation
+                node_result.run.observation = observation
+                node_result.run.artifacts["observer"] = observation.as_dict()
+                self.records.access_observations[node_result.node_id] = observation
 
     @contextmanager
     def node_scope(self, node_result: ResultNode, node: CalculatorBase[Any, Any]) -> Iterator[None]:
@@ -318,7 +339,7 @@ class ExecutionContext:
             try:
                 from pynbodyext.core.calculate.diagnostics.observer import format_observation_access
 
-                access_summary = format_observation_access(node_result.observation, include_reads=False)
+                access_summary = format_observation_access(node_result.run.observation, include_reads=False)
             except Exception:
                 access_summary = None
             self._progress_sink.on_node_end(
@@ -383,7 +404,7 @@ class ExecutionContext:
                 raise
             finally:
                 if record is not None:
-                    current.phases.append(record)
+                    current.run.phases.append(record)
                     access_summary = None
                     try:
                         from pynbodyext.core.calculate.diagnostics.observer import (

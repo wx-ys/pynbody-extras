@@ -192,7 +192,7 @@ class _BinNodeBase(CalculatorBase[BinNDResult, BinNDResult]):
         --------
         >>> calc = Bin1D("x", vmin=0, vmax=6, nbins=3).with_active(["count", "mass.sum"])
         >>> result = calc(sim)
-        >>> result.cache_report()["queries"] >= 1
+        >>> result.cache.report()["queries"] >= 1
         True
         """
         cl = self._clone()

@@ -36,9 +36,9 @@ class BinSubresultStore:
 
     def total_cached_arr(self) -> int:
         root = self._owner.root
-        total = root.num_cached_arr
+        total = root.cache.num_cached
         for subresult in root._subresults.values():
-            total += subresult.num_cached_arr
+            total += subresult.cache.num_cached
         return total
 
     def get(self, subset: Any, *, cache_key: Any = None) -> SubBinNDResult:

@@ -179,7 +179,7 @@ class PerfCollector:
         finished: list[float] = []
 
         for node in nodes.values():
-            for phase in node.phases:
+            for phase in node.run.phases:
                 started.append(phase.started_at)
                 if phase.finished_at is not None:
                     finished.append(phase.finished_at)
@@ -204,7 +204,7 @@ class PerfCollector:
         for node in nodes.values():
             node_name = node.name or node.kind
             node_label = f"{node_name} [{node.node_id}]"
-            for phase in node.phases:
+            for phase in node.run.phases:
                 lines.append(
                     f"{node_label[:30]:<30} | "
                     f"{phase.phase[:15]:<15} | "

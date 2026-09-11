@@ -82,16 +82,16 @@ class ResultRepr:
             f"kind={display_value(node.kind)!r}",
             f"status={display_value(node.status)!r}",
         ]
-        if node.stored_value:
-            parts.append(f"value={compact_repr(node.value, max_length=60)}")
-        elif node.value_summary is not None:
-            parts.append(f"summary={compact_repr(node.value_summary, max_length=80)}")
+        if node.record.stored_value:
+            parts.append(f"value={compact_repr(node.record.value, max_length=60)}")
+        elif node.record.value_summary is not None:
+            parts.append(f"summary={compact_repr(node.record.value_summary, max_length=80)}")
         if node.children:
             parts.append(f"children={len(node.children)}")
-        if node.error is not None:
-            parts.append(f"error={node.error.error_type!r}")
-        if node.observation is not None and node.observation.event_count:
-            parts.append(f"observer_events={node.observation.event_count}")
+        if node.run.error is not None:
+            parts.append(f"error={node.run.error.error_type!r}")
+        if node.run.observation is not None and node.run.observation.event_count:
+            parts.append(f"observer_events={node.run.observation.event_count}")
         return f"ResultNode({', '.join(parts)})"
 
     # ── ResultNode HTML section helpers ────────────────────────────────────────
@@ -100,20 +100,20 @@ class ResultRepr:
     def _node_value_section(node: ResultNode) -> str:
         """Return the Value fold-out section HTML, or empty string."""
         value_rows: list[tuple[str, Any]] = []
-        if node.value_summary is not None:
-            value_rows.append(("type", node.value_summary.python_type))
-            if node.value_summary.shape is not None:
-                value_rows.append(("shape", node.value_summary.shape))
-            if node.value_summary.dtype is not None:
-                value_rows.append(("dtype", node.value_summary.dtype))
-            if node.value_summary.units is not None:
-                value_rows.append(("units", node.value_summary.units))
-            if node.value_summary.preview is not None:
-                value_rows.append(("preview", node.value_summary.preview))
-        if node.stored_value:
-            value_rows.append(("public value", compact_repr(node.value, max_length=220)))
-        if node.stored_raw:
-            value_rows.append(("raw value", compact_repr(node.raw_value, max_length=220)))
+        if node.record.value_summary is not None:
+            value_rows.append(("type", node.record.value_summary.python_type))
+            if node.record.value_summary.shape is not None:
+                value_rows.append(("shape", node.record.value_summary.shape))
+            if node.record.value_summary.dtype is not None:
+                value_rows.append(("dtype", node.record.value_summary.dtype))
+            if node.record.value_summary.units is not None:
+                value_rows.append(("units", node.record.value_summary.units))
+            if node.record.value_summary.preview is not None:
+                value_rows.append(("preview", node.record.value_summary.preview))
+        if node.record.stored_value:
+            value_rows.append(("public value", compact_repr(node.record.value, max_length=220)))
+        if node.record.stored_raw:
+            value_rows.append(("raw value", compact_repr(node.record.raw_value, max_length=220)))
         if not value_rows:
             return ""
         return html_details(
@@ -130,7 +130,7 @@ class ResultRepr:
     @staticmethod
     def _node_phases_section(node: ResultNode) -> str:
         """Return the Phases fold-out section HTML, or empty string."""
-        if not node.phases:
+        if not node.run.phases:
             return ""
         phase_rows = [
             [
@@ -141,7 +141,7 @@ class ResultRepr:
                 format_mem(phase.rss_used),
                 html_badge(phase.status, tone=ResultRepr._tone_for_status(phase.status)),
             ]
-            for phase in node.phases
+            for phase in node.run.phases
         ]
         return html_details(
             "Phases",
@@ -159,13 +159,13 @@ class ResultRepr:
     @staticmethod
     def _node_observer_section(node: ResultNode) -> str:
         """Return Observer count table + fields fold-out HTML, or empty string."""
-        if node.observation is None:
+        if node.run.observation is None:
             return ""
         observation_rows = [
-            ("events", node.observation.event_count),
-            ("reads", len(node.observation.reads)),
-            ("dirty", len(node.observation.dirty_fields)),
-            ("deletes", len(node.observation.deletes)),
+            ("events", node.run.observation.event_count),
+            ("reads", len(node.run.observation.reads)),
+            ("dirty", len(node.run.observation.dirty_fields)),
+            ("deletes", len(node.run.observation.deletes)),
         ]
         counts_html = html_details(
             "Observer",
@@ -179,12 +179,12 @@ class ResultRepr:
         )
 
         observer_lines: list[str] = []
-        if node.observation.reads:
-            observer_lines.append(f"reads: {ResultRepr._format_field_set(node.observation.reads)}")
-        if node.observation.dirty_fields:
-            observer_lines.append(f"dirty: {ResultRepr._format_field_set(node.observation.dirty_fields)}")
-        if node.observation.deletes:
-            observer_lines.append(f"deletes: {ResultRepr._format_field_set(node.observation.deletes)}")
+        if node.run.observation.reads:
+            observer_lines.append(f"reads: {ResultRepr._format_field_set(node.run.observation.reads)}")
+        if node.run.observation.dirty_fields:
+            observer_lines.append(f"dirty: {ResultRepr._format_field_set(node.run.observation.dirty_fields)}")
+        if node.run.observation.deletes:
+            observer_lines.append(f"deletes: {ResultRepr._format_field_set(node.run.observation.deletes)}")
         fields_html = (
             html_details("Observer fields", html_pre("\n".join(observer_lines)), open=False) if observer_lines else ""
         )
@@ -193,17 +193,17 @@ class ResultRepr:
     @staticmethod
     def _node_error_section(node: ResultNode) -> str:
         """Return Error section HTML, or empty string."""
-        if node.error is None:
+        if node.run.error is None:
             return ""
-        error_rows = [("type", node.error.error_type), ("message", node.error.message)]
-        if node.error.phase is not None:
-            error_rows.append(("phase", node.error.phase))
+        error_rows = [("type", node.run.error.error_type), ("message", node.run.error.message)]
+        if node.run.error.phase is not None:
+            error_rows.append(("phase", node.run.error.phase))
         error_html = html_section(
             "Error",
             html_scroll_x(html_table(error_rows, class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap")),
         )
-        if node.error.traceback_text:
-            error_html += html_details("Traceback", html_pre(node.error.traceback_text), open=True)
+        if node.run.error.traceback_text:
+            error_html += html_details("Traceback", html_pre(node.run.error.traceback_text), open=True)
         return error_html
 
     @staticmethod
@@ -218,32 +218,32 @@ class ResultRepr:
                 " ".join(
                     [
                         html_badge(
-                            "value" if node.stored_value else "value: no", tone="ok" if node.stored_value else "neutral"
+                            "value" if node.record.stored_value else "value: no", tone="ok" if node.record.stored_value else "neutral"
                         ),
                         html_badge(
-                            "raw" if node.stored_raw else "raw: no", tone="ok" if node.stored_raw else "neutral"
+                            "raw" if node.record.stored_raw else "raw: no", tone="ok" if node.record.stored_raw else "neutral"
                         ),
                     ]
                 ),
             ),
         ]
 
-        if node.calculator_type is not None:
-            rows.append(("calculator", node.calculator_type))
+        if node.class_info.calculator_type is not None:
+            rows.append(("calculator", node.class_info.calculator_type))
 
-        semantic_class = node.semantic_calculator_class_path or node.calculator_class_path
+        semantic_class = node.class_info.semantic_calculator_class_path or node.class_info.calculator_class_path
         if semantic_class is not None:
             rows.append(("class", ResultRepr._short_class_name(semantic_class)))
 
-        if node.record_policy is not None:
-            rows.append(("record", html_badge(display_value(node.record_policy), tone="neutral")))
+        if node.record.policy is not None:
+            rows.append(("record", html_badge(display_value(node.record.policy), tone="neutral")))
 
         metrics_section = html_metric_grid(
             [
                 ("parents", len(node.parent_ids)),
                 ("children", len(node.children)),
-                ("phases", len(node.phases)),
-                ("events", node.observation.event_count if node.observation is not None else 0),
+                ("phases", len(node.run.phases)),
+                ("events", node.run.observation.event_count if node.run.observation is not None else 0),
             ]
         )
 
@@ -341,13 +341,13 @@ class ResultRepr:
         """Return the Errors section HTML, or empty string."""
         error_rows: list[list[Any]] = []
         for node in ResultQuery.find_error_nodes(result)[:8]:
-            if node.error is None:
+            if node.run.error is None:
                 continue
             error_rows.append(
                 [
                     ResultQuery.node_label(node, show_ref=True, show_kind=True),
-                    node.error.phase or "-",
-                    f"{node.error.error_type}: {node.error.message}",
+                    node.run.error.phase or "-",
+                    f"{node.run.error.error_type}: {node.run.error.message}",
                 ]
             )
         remaining_slots = max(0, 8 - len(error_rows))
@@ -435,7 +435,7 @@ class ResultRepr:
 
         for node in nodes:
             node_label = ResultQuery.node_label(node, show_ids=show_ids, show_ref=True, show_kind=True, max_width=30)
-            for phase in node.phases:
+            for phase in node.run.phases:
                 lines.append(
                     f"{node_label:<30} | "
                     f"{phase.phase[:15]:<15} | "
@@ -471,7 +471,7 @@ class ResultRepr:
             f"stores: {result.perf_summary.cache_store_count}",
         ]
 
-        events = result.cache_events()
+        events = result.diagnostics.cache()
         if not events:
             return "\n".join(lines)
 
@@ -564,7 +564,7 @@ class ResultRepr:
             if error_nodes:
                 error_section.append("nodes:")
                 for node in error_nodes:
-                    phase = node.error.phase if node.error is not None else None
+                    phase = node.run.error.phase if node.run.error is not None else None
                     phase_suffix = f" phase={phase}" if phase else ""
                     label = ResultQuery.node_label(node, show_ids=show_ids, show_ref=True, show_kind=True)
                     error_section.append(f"- {label}{phase_suffix}")

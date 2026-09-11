@@ -67,7 +67,7 @@ class ResultQuery:
 
         def predicates() -> Callable[[ResultNode], bool] | None:  # noqa: PLR0911
             if query in ("errors", "error"):
-                return lambda node: node.error is not None
+                return lambda node: node.run.error is not None
             if query in ("*", "all"):
                 return lambda node: True
             if isinstance(query, ResultNode):
@@ -76,18 +76,18 @@ class ResultQuery:
                 return lambda node: query in {
                     node.name,
                     node.display_name,
-                    node.calculator_type,
-                    node.calculator_class_path,
-                    node.semantic_calculator_class_path,
-                    ResultQuery._short_class_name(node.calculator_class_path),
-                    ResultQuery._short_class_name(node.semantic_calculator_class_path),
+                    node.class_info.calculator_type,
+                    node.class_info.calculator_class_path,
+                    node.class_info.semantic_calculator_class_path,
+                    ResultQuery._short_class_name(node.class_info.calculator_class_path),
+                    ResultQuery._short_class_name(node.class_info.semantic_calculator_class_path),
                 }
             if isinstance(query, type):
                 class_path = ResultQuery._class_path(query)
                 class_name = query.__name__
                 return lambda node: (
-                    class_path in {node.semantic_calculator_class_path, node.calculator_class_path}
-                    or node.calculator_type == class_name
+                    class_path in {node.class_info.semantic_calculator_class_path, node.class_info.calculator_class_path}
+                    or node.class_info.calculator_type == class_name
                 )
             cache_key_factory = getattr(query, "cache_key", None)
             signature_factory = getattr(query, "signature", None)
@@ -195,7 +195,7 @@ class ResultQuery:
 
     @staticmethod
     def phases_of(result: Result[Any], node: str | ResultNode) -> list[PhaseRecord]:
-        return list(ResultQuery.resolve_node(result, node).phases)
+        return list(ResultQuery.resolve_node(result, node).run.phases)
 
     @staticmethod
     def walk_depth_first(result: Result[Any]) -> list[ResultNode]:
@@ -215,7 +215,7 @@ class ResultQuery:
 
     @staticmethod
     def find_error_nodes(result: Result[Any]) -> list[ResultNode]:
-        return [node for node in result.nodes.values() if node.error is not None]
+        return [node for node in result.nodes.values() if node.run.error is not None]
 
     @staticmethod
     def describe_node(result: Result[Any], node: str | ResultNode) -> str:
@@ -225,27 +225,27 @@ class ResultQuery:
             f"name: {resolved.name}",
             f"kind: {resolved.kind}",
             f"status: {resolved.status}",
-            f"calculator_type: {resolved.calculator_type}",
-            f"record_policy: {resolved.record_policy}",
-            f"stored_value: {resolved.stored_value}",
-            f"stored_raw: {resolved.stored_raw}",
+            f"calculator_type: {resolved.class_info.calculator_type}",
+            f"record_policy: {resolved.record.policy}",
+            f"stored_value: {resolved.record.stored_value}",
+            f"stored_raw: {resolved.record.stored_raw}",
             f"parents: {len(ResultQuery.parents_of(result, resolved))}",
             f"children: {len(resolved.children)}",
-            f"phases: {len(resolved.phases)}",
+            f"phases: {len(resolved.run.phases)}",
         ]
-        if resolved.semantic_calculator_class_path is not None:
-            lines.append(f"semantic_class: {resolved.semantic_calculator_class_path}")
-        if resolved.value_summary is not None:
-            lines.append(f"value_type: {resolved.value_summary.python_type}")
-            if resolved.value_summary.preview:
-                lines.append(f"preview: {resolved.value_summary.preview}")
-        if resolved.error is not None:
-            lines.append(f"error: {resolved.error.error_type}: {resolved.error.message}")
-        if resolved.observation is not None:
-            lines.append(f"observer_events: {resolved.observation.event_count}")
-            lines.append(f"observer_reads: {len(resolved.observation.reads)}")
-            lines.append(f"observer_dirty: {len(resolved.observation.dirty_fields)}")
-            lines.append(f"observer_deletes: {len(resolved.observation.deletes)}")
+        if resolved.class_info.semantic_calculator_class_path is not None:
+            lines.append(f"semantic_class: {resolved.class_info.semantic_calculator_class_path}")
+        if resolved.record.value_summary is not None:
+            lines.append(f"value_type: {resolved.record.value_summary.python_type}")
+            if resolved.record.value_summary.preview:
+                lines.append(f"preview: {resolved.record.value_summary.preview}")
+        if resolved.run.error is not None:
+            lines.append(f"error: {resolved.run.error.error_type}: {resolved.run.error.message}")
+        if resolved.run.observation is not None:
+            lines.append(f"observer_events: {resolved.run.observation.event_count}")
+            lines.append(f"observer_reads: {len(resolved.run.observation.reads)}")
+            lines.append(f"observer_dirty: {len(resolved.run.observation.dirty_fields)}")
+            lines.append(f"observer_deletes: {len(resolved.run.observation.deletes)}")
         return "\n".join(lines)
 
     @staticmethod
@@ -327,7 +327,7 @@ class ResultQuery:
 
     @staticmethod
     def _node_elapsed_s(node: ResultNode) -> float | None:
-        values = [phase.elapsed_s for phase in node.phases if phase.elapsed_s is not None]
+        values = [phase.elapsed_s for phase in node.run.phases if phase.elapsed_s is not None]
         if not values:
             return None
         return sum(values)
@@ -335,7 +335,7 @@ class ResultQuery:
     @staticmethod
     def _cache_events_by_node(result: Result[Any]) -> dict[str, dict[str, int]]:
         grouped: dict[str, dict[str, int]] = {}
-        for event in result.cache_events():
+        for event in result.diagnostics.cache():
             node_id = getattr(event, "node_id", None)
             if not node_id:
                 continue
@@ -375,9 +375,9 @@ class ResultQuery:
 
     @staticmethod
     def _value_suffix(node: ResultNode) -> str:
-        if node.value_summary is None:
+        if node.record.value_summary is None:
             return ""
-        summary = node.value_summary
+        summary = node.record.value_summary
         parts = [summary.python_type]
         if summary.shape is not None:
             parts.append(f"shape={summary.shape!r}")
@@ -404,8 +404,8 @@ class ResultQuery:
         if hit_occurrence:
             return f"{label}  [cache=hit]"
 
-        if node.error is not None:
-            parts.append(f"error={node.error.error_type}")
+        if node.run.error is not None:
+            parts.append(f"error={node.run.error.error_type}")
         elif node.status != NodeStatus.OK:
             parts.append(f"status={display_value(node.status)}")
 
@@ -421,7 +421,7 @@ class ResultQuery:
 
         if include_observer:
             access_text = format_observation_access(
-                result.observation_of(node), read_items=3, dirty_items=3, delete_items=2
+                result.observations.of(node), read_items=3, dirty_items=3, delete_items=2
             )
             if access_text:
                 parts.append(access_text)
@@ -471,7 +471,7 @@ class ResultQuery:
             dirty_fields: set[str] = set()
             deletes: set[str] = set()
             for node in nodes:
-                observation = result.observation_of(node)
+                observation = result.observations.of(node)
                 if observation is None:
                     continue
                 reads.update(observation.reads)

@@ -384,7 +384,7 @@ class TransformChain(TransformBase[tuple[TransformStep, ...]]):
                 target=last.target,
                 sim_after=work.sim_current,
                 revertible=any(step.result.revertible for step in steps),
-                artifacts={"step_count": len(steps), "mutation_generation": ctx.mutation_generation},
+                artifacts={"step_count": len(steps), "mutation_generation": ctx.mutation.generation},
             )
         except Exception:
             if steps:

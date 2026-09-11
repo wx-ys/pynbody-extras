@@ -21,6 +21,8 @@ if TYPE_CHECKING:
     from pynbodyext.core.calculate.runtime.input import NodeInput
     from pynbodyext.core.calculate.runtime.options import RunOptions
 
+from .context import _MutationState
+
 
 @dataclass(slots=True)
 class _EvaluationPlan:
@@ -74,14 +76,14 @@ class _MinimalBatchContext:
     **zero** sub-objects beyond itself.
     """
 
-    __slots__ = ("sim", "sim_signature", "options", "engine", "mutation_generation", "_node_stack", "_evaluation_stack")
+    __slots__ = ("sim", "sim_signature", "options", "engine", "mutation", "_node_stack", "_evaluation_stack")
 
     def __init__(self, sim: Any, options: RunOptions, engine: EvalEngine) -> None:
         self.sim = sim
         self.sim_signature: tuple[()] = ()
         self.options = options
         self.engine = engine
-        self.mutation_generation = 0
+        self.mutation = _MutationState()
         self._node_stack: list[Any] = [_DUMMY_NODE_RESULT]
         self._evaluation_stack: list[Any] = []
 
