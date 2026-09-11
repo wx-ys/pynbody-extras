@@ -19,6 +19,7 @@ from pynbody.snapshot import SimSnap
 
 from pynbodyext.core.calculate.nodes.base import CalculatorBase
 from pynbodyext.core.calculate.nodes.filters import FilterBase
+from pynbodyext.util.arrays import get_array
 
 from .accessors import BinParticlesAccessor
 from .axes import BinAxisAccessor, BinDerivedCondition, BinDerivedFunc, BinMeasureResolver, axis_matches
@@ -891,7 +892,7 @@ def _vcirc(bins: BinNDResult) -> np.ndarray:
     points[:, 0] = rr * np.cos(aa)
     points[:, 1] = rr * np.sin(aa)
 
-    softening = sim["smooth"] if "smooth" in sim.keys() else None
+    softening = get_array(sim, "smooth")
     # A softening kernel must accompany any softening length (KernelKind.No is
     # only valid with no softenings).  Plummer with eps=0 reduces to Newtonian,
     # so it is exact whenever sim['smooth'] is present.
