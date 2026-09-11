@@ -201,7 +201,7 @@ class ExecutionContext:
             if existing is not None and existing != node_result.node_id:
                 existing_node = self.nodes.registry.get(existing)
                 if existing_node is not None and existing_node.signature == node_result.signature:
-                    node_result.artifacts["duplicate_named_node"] = existing
+                    node_result.run.artifacts["duplicate_named_node"] = existing
                     self.log("debug", f"duplicate named calculator {node_result.name!r}; keeping first registration")
                     return
 
@@ -243,13 +243,13 @@ class ExecutionContext:
     def observed_cache_fields(self, node_result: ResultNode) -> frozenset[str]:
         """Return direct and child observed fields that affect this node value."""
         fields: set[str] = set()
-        if node_result.observation is not None:
-            fields.update(node_result.observation.reads)
+        if node_result.run.observation is not None:
+            fields.update(node_result.run.observation.reads)
         for child_id in node_result.children:
             child = self.nodes.registry.get(child_id)
             if child is None:
                 continue
-            fields.update(child.artifacts.get("observed_cache_fields", ()))
+            fields.update(child.run.artifacts.get("observed_cache_fields", ()))
         return frozenset(fields)
 
     def observed_cache_token(self, fields: frozenset[str]) -> tuple[int, tuple[tuple[str, int], ...]]:
@@ -295,8 +295,8 @@ class ExecutionContext:
             try:
                 yield observation
             finally:
-                node_result.observation = observation
-                node_result.artifacts["observer"] = observation.as_dict()
+                node_result.run.observation = observation
+                node_result.run.artifacts["observer"] = observation.as_dict()
                 self.records.access_observations[node_result.node_id] = observation
 
     @contextmanager
@@ -339,7 +339,7 @@ class ExecutionContext:
             try:
                 from pynbodyext.core.calculate.diagnostics.observer import format_observation_access
 
-                access_summary = format_observation_access(node_result.observation, include_reads=False)
+                access_summary = format_observation_access(node_result.run.observation, include_reads=False)
             except Exception:
                 access_summary = None
             self._progress_sink.on_node_end(
@@ -404,7 +404,7 @@ class ExecutionContext:
                 raise
             finally:
                 if record is not None:
-                    current.phases.append(record)
+                    current.run.phases.append(record)
                     access_summary = None
                     try:
                         from pynbodyext.core.calculate.diagnostics.observer import (

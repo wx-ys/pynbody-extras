@@ -106,7 +106,7 @@ def test_engine_collect_partial_keeps_successful_values() -> None:
     error_nodes = result.find("errors")
     badges = [node for node in error_nodes if node.label == "AlwaysFails"]
     assert len(badges) == 1
-    assert "boom" in badges[0].error.message
+    assert "boom" in badges[0].run.error.message
 
 
 def test_transform_chain_composes_steps() -> None:

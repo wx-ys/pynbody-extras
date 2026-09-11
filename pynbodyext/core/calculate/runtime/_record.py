@@ -98,47 +98,47 @@ class ValueRecorder:
         had_error: bool = False,
         auto_record_public_value: bool = False,
     ) -> None:
-        policy = node_result.record_policy or RecordPolicy.SUMMARY
+        policy = node_result.record.policy or RecordPolicy.SUMMARY
 
-        node_result.raw_value = None
-        node_result.value = None
-        node_result.stored_raw = False
-        node_result.stored_value = False
+        node_result.record.raw_value = None
+        node_result.record.value = None
+        node_result.record.stored_raw = False
+        node_result.record.stored_value = False
 
         if is_root:
             if public_value is not None:
-                node_result.value = public_value
-                node_result.stored_value = True
+                node_result.record.value = public_value
+                node_result.record.stored_value = True
             if policy == RecordPolicy.FULL or (
                 had_error and policy == RecordPolicy.ERROR_ONLY and raw_value is not None
             ):
-                node_result.raw_value = raw_value
-                node_result.stored_raw = True
+                node_result.record.raw_value = raw_value
+                node_result.record.stored_raw = True
             return
 
         if policy == RecordPolicy.FULL:
-            node_result.raw_value = raw_value
-            node_result.value = public_value
-            node_result.stored_raw = True
-            node_result.stored_value = True
+            node_result.record.raw_value = raw_value
+            node_result.record.value = public_value
+            node_result.record.stored_raw = True
+            node_result.record.stored_value = True
 
         elif policy == RecordPolicy.ERROR_ONLY:
             if had_error:
                 if raw_value is not None:
-                    node_result.raw_value = raw_value
-                    node_result.stored_raw = True
+                    node_result.record.raw_value = raw_value
+                    node_result.record.stored_raw = True
                 if public_value is not None:
-                    node_result.value = public_value
-                    node_result.stored_value = True
+                    node_result.record.value = public_value
+                    node_result.record.stored_value = True
 
         elif policy == RecordPolicy.SUMMARY:
             if auto_record_public_value and public_value is not None:
-                node_result.value = public_value
-                node_result.stored_value = True
+                node_result.record.value = public_value
+                node_result.record.stored_value = True
 
         elif policy == RecordPolicy.NONE:
-            node_result.raw_value = None
-            node_result.value = None
+            node_result.record.raw_value = None
+            node_result.record.value = None
 
     @staticmethod
     def summarize_value(value: Any) -> ValueSummary | None:

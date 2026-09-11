@@ -93,7 +93,15 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 from pynbodyext.core.calculate.diagnostics.observer import observation_phase, render_observer_report
 from pynbodyext.core.calculate.result.enums import CachePolicy, ErrorPolicy, NodeStatus, RecordPolicy
 from pynbodyext.core.calculate.result.exceptions import CycleError
-from pynbodyext.core.calculate.result.result import ErrorInfo, ProvenanceInfo, Result, ResultNode, ValueSummary
+from pynbodyext.core.calculate.result.result import (
+    ErrorInfo,
+    NodeClassInfo,
+    NodeRecord,
+    ProvenanceInfo,
+    Result,
+    ResultNode,
+    ValueSummary,
+)
 from pynbodyext.core.calculate.result.views import DiagnosticsView, ObservationsView, ReportsView
 
 from ._engine_types import (
@@ -345,10 +353,11 @@ class EvalEngine:
             signature=display_sig,
             name=node.name,
             display_name=node.log_label,
-            calculator_type=node.__class__.__name__,
-            calculator_class_path=self._class_path(node),
-            semantic_calculator_class_path=None,
-            record_policy=node.record_policy or ctx.options.default_record_policy,
+            class_info=NodeClassInfo(
+                calculator_type=node.__class__.__name__,
+                calculator_class_path=self._class_path(node),
+            ),
+            record=NodeRecord(policy=node.record_policy or ctx.options.default_record_policy),
         )
         ctx.register_node(node_result)
 
@@ -594,10 +603,12 @@ class EvalEngine:
             signature=structured_signature.cache_key(),
             name=node.name,
             display_name=node.log_label,
-            calculator_type=node.__class__.__name__,
-            calculator_class_path=self._class_path(node),
-            semantic_calculator_class_path=self._semantic_calculator_class_path(structured_signature.payload),
-            record_policy=node.record_policy or ctx.options.default_record_policy,
+            class_info=NodeClassInfo(
+                calculator_type=node.__class__.__name__,
+                calculator_class_path=self._class_path(node),
+                semantic_calculator_class_path=self._semantic_calculator_class_path(structured_signature.payload),
+            ),
+            record=NodeRecord(policy=node.record_policy or ctx.options.default_record_policy),
         )
 
     def _execute_node_body(
@@ -628,8 +639,8 @@ class EvalEngine:
         is_root: bool,
     ) -> None:
         node_result.status = NodeStatus.ERROR
-        phase = node_result.phases[-1].phase if node_result.phases else None
-        node_result.error = ErrorInfo(
+        phase = node_result.run.phases[-1].phase if node_result.run.phases else None
+        node_result.run.error = ErrorInfo(
             error_type=exc.__class__.__name__,
             message=str(exc),
             phase=phase,
@@ -641,11 +652,11 @@ class EvalEngine:
             location = f"{node_result.display_name} in phase {phase!r}" if phase else node_result.display_name
             exc.add_note(f"pynbodyext.calculate: {location} failed")
         ctx.nodes.last_error_id = node_result.node_id
-        ctx.records.errors.append(node_result.error)
+        ctx.records.errors.append(node_result.run.error)
 
         summary_source = public_value if public_value is not None else raw_value
         if summary_source is not None:
-            node_result.value_summary = self.summarize_value(summary_source)
+            node_result.record.value_summary = self.summarize_value(summary_source)
 
         self._store_recorded_values(
             node_result, raw_value=raw_value, public_value=public_value, is_root=is_root, had_error=True
@@ -671,8 +682,8 @@ class EvalEngine:
             if plan.observed_cache_prefix is not None:
                 observed_fields = ctx.observed_cache_fields(node_result)
                 observed_token = ctx.observed_cache_token(observed_fields)
-                node_result.artifacts["observed_cache_fields"] = tuple(sorted(observed_fields))
-                node_result.artifacts["observed_cache_token"] = observed_token
+                node_result.run.artifacts["observed_cache_fields"] = tuple(sorted(observed_fields))
+                node_result.run.artifacts["observed_cache_token"] = observed_token
                 cache_key = (*plan.observed_cache_prefix, observed_token)
             ctx.cache.set(
                 cache_key,
@@ -681,7 +692,7 @@ class EvalEngine:
             )
             stored_in_runtime_cache = True
 
-        node_result.value_summary = self.summarize_value(state.public_value)
+        node_result.record.value_summary = self.summarize_value(state.public_value)
         node_result.status = NodeStatus.OK
         self._store_recorded_values(
             node_result=node_result,
@@ -691,7 +702,7 @@ class EvalEngine:
             had_error=False,
             auto_record_public_value=stored_in_runtime_cache
             and self._should_auto_record_public_value(
-                public_value=state.public_value, record_policy=node_result.record_policy, options=ctx.options
+                public_value=state.public_value, record_policy=node_result.record.policy, options=ctx.options
             ),
         )
         return node_result
@@ -792,9 +803,9 @@ class EvalEngine:
         )
         execution_tree_report = result.report_execution_tree()
 
-        root.artifacts.update(reports)
-        root.artifacts["execution_tree_report"] = execution_tree_report
-        root.artifacts["log_events"] = list(ctx.records.log_events)
+        root.run.artifacts.update(reports)
+        root.run.artifacts["execution_tree_report"] = execution_tree_report
+        root.run.artifacts["log_events"] = list(ctx.records.log_events)
         result.reports["execution_tree"] = execution_tree_report
 
         return result

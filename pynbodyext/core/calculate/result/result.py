@@ -140,6 +140,37 @@ class ErrorInfo:
 
 
 @dataclass(slots=True)
+class NodeClassInfo:
+    """Calculator class identity recorded for a node (for reporting/grouping)."""
+
+    calculator_type: str | None = None
+    calculator_class_path: str | None = None
+    semantic_calculator_class_path: str | None = None
+
+
+@dataclass(slots=True)
+class NodeRecord:
+    """The value a node retains, per its recording policy."""
+
+    policy: RecordPolicy | None = None
+    raw_value: Any = None
+    value: Any = None
+    value_summary: ValueSummary | None = None
+    stored_raw: bool = False
+    stored_value: bool = False
+
+
+@dataclass(slots=True)
+class NodeRunState:
+    """Execution bookkeeping captured while a node ran."""
+
+    phases: list[PhaseRecord] = field(default_factory=list)
+    artifacts: dict[str, Any] = field(default_factory=dict)
+    observation: AccessObservation | None = None
+    error: ErrorInfo | None = None
+
+
+@dataclass(slots=True)
 class ResultNode:
     """Execution record for one evaluated calculator node."""
 
@@ -149,23 +180,13 @@ class ResultNode:
     status: NodeStatus = NodeStatus.PENDING
     name: str | None = None
     display_name: str | None = None
-    calculator_type: str | None = None
-    calculator_class_path: str | None = None
-    semantic_calculator_class_path: str | None = None
 
-    record_policy: RecordPolicy | None = None
-    raw_value: Any = None
-    value: Any = None
-    value_summary: ValueSummary | None = None
-    stored_raw: bool = False
-    stored_value: bool = False
+    class_info: NodeClassInfo = field(default_factory=NodeClassInfo)
+    record: NodeRecord = field(default_factory=NodeRecord)
+    run: NodeRunState = field(default_factory=NodeRunState)
 
     parent_ids: list[str] = field(default_factory=list)
     children: list[str] = field(default_factory=list)
-    phases: list[PhaseRecord] = field(default_factory=list)
-    artifacts: dict[str, Any] = field(default_factory=dict)
-    observation: AccessObservation | None = None
-    error: ErrorInfo | None = None
 
     @property
     def label(self) -> str:
@@ -344,8 +365,8 @@ class Result(Generic[T]):
         node = self.named.get(name)
         if node is None:
             return default
-        if node.stored_value:
-            return node.value
+        if node.record.stored_value:
+            return node.record.value
         named_values = self.diagnostics.get("named_values", {})
         return named_values.get(name, default)
 

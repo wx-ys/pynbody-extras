@@ -161,8 +161,8 @@ class ResultRecord:
 
         named: dict[str, dict[str, Any]] = {}
         for name, node in result.named.items():
-            if node.stored_value and node.value is not None:
-                named[name] = codec.encode(node.value)
+            if node.record.stored_value and node.record.value is not None:
+                named[name] = codec.encode(node.record.value)
 
         return cls(
             schema=RESULT_STORE_SCHEMA,
@@ -179,7 +179,13 @@ class ResultRecord:
     def to_result(self, codec: ValueCodec) -> Result:
         """Reconstruct a :class:`Result` from a stored record."""
         from pynbodyext.core.calculate.result.enums import BuiltinKinds, NodeStatus
-        from pynbodyext.core.calculate.result.result import PerfSummary, ProvenanceInfo, Result, ResultNode
+        from pynbodyext.core.calculate.result.result import (
+            NodeRecord,
+            PerfSummary,
+            ProvenanceInfo,
+            Result,
+            ResultNode,
+        )
 
         value = codec.decode(self.value)
 
@@ -195,9 +201,7 @@ class ResultRecord:
                 status=NodeStatus.OK,
                 name=name,
                 display_name=name,
-                value=decoded,
-                stored_value=True,
-                value_summary=_value_summary(decoded),
+                record=NodeRecord(value=decoded, stored_value=True, value_summary=_value_summary(decoded)),
             )
 
         root = ResultNode(
@@ -207,9 +211,7 @@ class ResultRecord:
             status=NodeStatus.OK,
             name=self.pretty_key,
             display_name=self.pretty_key,
-            value=value,
-            stored_value=True,
-            value_summary=_value_summary(value),
+            record=NodeRecord(value=value, stored_value=True, value_summary=_value_summary(value)),
         )
 
         nodes: dict[str, ResultNode] = {"stored:1": root}

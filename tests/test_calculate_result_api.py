@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from calculate_helpers import make_pipeline, make_sim
-from pynbodyext.core.calculate.result.result import Result
+
+from pynbodyext.core.calculate.result.result import Result, ResultNode
 from pynbodyext.core.calculate.result.views import DiagnosticsView, ObservationsView, ReportsView
 
 
@@ -54,3 +55,27 @@ def test_consolidated_result_members_removed() -> None:
         "access_observations",
     ):
         assert not hasattr(Result, name), f"Result.{name} should be folded into a view"
+
+
+def test_result_node_fields_are_grouped() -> None:
+    """ResultNode exposes grouped sub-objects instead of 21 flat fields."""
+    import dataclasses
+
+    names = {f.name for f in dataclasses.fields(ResultNode)}
+    assert {"class_info", "record", "run"} <= names
+    flat = {
+        "calculator_type",
+        "calculator_class_path",
+        "semantic_calculator_class_path",
+        "record_policy",
+        "raw_value",
+        "value",
+        "value_summary",
+        "stored_raw",
+        "stored_value",
+        "phases",
+        "artifacts",
+        "observation",
+        "error",
+    }
+    assert names & flat == set(), f"ungrouped fields remain: {names & flat}"
