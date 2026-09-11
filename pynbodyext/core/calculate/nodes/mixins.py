@@ -940,8 +940,16 @@ class _CalculatorComposeMixin(_CalculatorContract, Generic[TRaw, TPublic]):
 
         Examples
         --------
-        >>> calc.options(cache=False, progress="phase")
-        >>> calc.options(errors="collect")
+        >>> from pynbodyext.calculate import Param, PropertyBase
+        >>> @PropertyBase.dataclass
+        ... class MassSum(PropertyBase[float]):
+        ...     qty: Param[str] = Param("mass")
+        ...     def calculate(self, sim, params=None):
+        ...         return 0.0
+        >>> MassSum().options(cache=False).default_options.cache
+        False
+        >>> MassSum().options(errors="collect").default_options.errors
+        'collect'
         """
         return self._with_options(**changes)
 
