@@ -176,6 +176,7 @@ class BinNDResult(BinPlotMixin):
             self.source_sim = model.source_sim
             self._axes = model.axes
             self.shape_bins = model.shape_bins
+            self.nbins = int(np.prod(self.shape_bins, dtype=int))
             self.ndim = model.ndim
             self._bin_data = model.bin_data
             self._bin_indptr = model.bin_indptr
@@ -193,6 +194,7 @@ class BinNDResult(BinPlotMixin):
             self.source_sim = source_sim
             self._axes = axes
             self.shape_bins = tuple(axis.nbins for axis in axes)
+            self.nbins = int(np.prod(self.shape_bins, dtype=int))
             self.ndim = len(axes)
             self._bin_data = bin_data
             self._bin_indptr = bin_indptr
@@ -247,11 +249,8 @@ class BinNDResult(BinPlotMixin):
         return self._parent
 
     @property
-    def nbins(self) -> int:
-        return int(np.prod(self.shape_bins, dtype=int))
-
-    @property
     def total_nbins(self) -> int:
+        """Alias for :attr:`nbins`."""
         return self.nbins
 
     @property

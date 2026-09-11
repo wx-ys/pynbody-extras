@@ -41,6 +41,7 @@ class BinResultModel:
         self.source_sim = source_sim
         self.axes = axes
         self.shape_bins = tuple(axis.nbins for axis in axes)
+        self.nbins = int(np.prod(self.shape_bins, dtype=int))
         self.ndim = len(axes)
         self.bin_data = bin_data
         self.bin_indptr = bin_indptr
@@ -60,11 +61,6 @@ class BinResultModel:
     def root(self) -> BinResultModel:
         """The root model of this sub-result's tree."""
         return self if self.parent is None else self.parent.root
-
-    @property
-    def nbins(self) -> int:
-        """Total number of bins (product of per-axis bin counts)."""
-        return int(np.prod(self.shape_bins, dtype=int))
 
     @property
     def total_nbins(self) -> int:
