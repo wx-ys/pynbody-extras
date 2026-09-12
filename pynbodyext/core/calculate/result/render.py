@@ -57,6 +57,69 @@ def _import_object(path: str) -> Any:
     return obj
 
 
+def _default_init_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Encode the constructor defaults of a node that shows no explicit arguments.
+
+    Signature payloads omit parameters left at their default, so a calculator
+    whose parameters are *all* defaults carries an empty init payload and would
+    render as a bare class name.  ``ParamContain`` says nothing about what the
+    node does, so those defaults are spelled out instead —
+    ``ParamContain(0.5, "r", "mass")``.
+    """
+    class_path = payload.get("class")
+    if not isinstance(class_path, str):
+        return {}
+    try:
+        from dataclasses import fields as dataclass_fields
+
+        from .signature import DEFAULT_INLINE_ARRAY_BYTES, _Encoder, _field_default
+
+        cls = _import_object(class_path)
+        field_map = {field.name: field for field in dataclass_fields(cls)}
+        defaults: dict[str, Any] = {}
+        for spec in collect_param_specs(cls):
+            item = field_map.get(spec.name)
+            if item is None or not item.init or not spec.signature:
+                continue
+            has_default, default = _field_default(item)
+            if not has_default:
+                continue
+            encoded = _Encoder.encode_value(default, f"init.{spec.name}", DEFAULT_INLINE_ARRAY_BYTES)
+            defaults[spec.name] = encoded.value
+        return defaults
+    except Exception:
+        return {}
+
+
+def _display_init_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return the init payload to display, filling in defaults where needed."""
+    init = payload.get("init")
+    if init:
+        return init
+    return _default_init_payload(payload)
+
+
+def _field_order(payload: dict[str, Any], init: dict[str, Any]) -> list[str]:
+    """Return *payload*'s signature field names in declaration order."""
+    try:
+        cls = _import_object(str(payload["class"]))
+        return [spec.name for spec in collect_param_specs(cls) if spec.signature]
+    except Exception:
+        return list(init)
+
+
+def _dataclass_arg_parts(
+    init: dict[str, Any], field_order: list[str], render_value: Callable[[Any], str]
+) -> list[str]:
+    """Render init entries as positional parts when they form a leading run."""
+    names = list(init)
+    if field_order[: len(names)] == names:
+        return [render_value(init[name]) for name in names]
+    ordered = [name for name in field_order if name in init]
+    ordered += sorted(name for name in init if name not in ordered)
+    return [f"{name}={render_value(init[name])}" for name in ordered]
+
+
 # ---------------------------------------------------------------------------
 # SignaturePrinter
 # ---------------------------------------------------------------------------
@@ -152,24 +215,10 @@ class SignaturePrinter:
     @staticmethod
     def dataclass_args(payload: dict[str, Any]) -> str:
         """Render a dataclass calculator's init arguments."""
-        init = payload.get("init", {})
+        init = _display_init_payload(payload)
         if not init:
             return ""
-        field_order: list[str] = []
-        try:
-            cls = _import_object(payload["class"])
-            field_order = [s.name for s in collect_param_specs(cls) if s.signature]
-        except Exception:
-            field_order = list(init)
-        names = list(init)
-        positional = field_order[: len(names)] == names
-        if positional:
-            parts = [SignaturePrinter.value(init[n]) for n in names]
-        else:
-            ordered = [n for n in field_order if n in init]
-            ordered += sorted(n for n in init if n not in ordered)
-            parts = [f"{n}={SignaturePrinter.value(init[n])}" for n in ordered]
-        return ", ".join(parts)
+        return ", ".join(_dataclass_arg_parts(init, _field_order(payload, init), SignaturePrinter.value))
 
     @staticmethod
     def scope_suffix(scope: dict[str, Any]) -> str:
@@ -353,8 +402,10 @@ SignaturePrinter._CALCULATOR_HANDLERS = {
 class TreePrinter:
     """Renders calculator signature payloads as short tree node labels.
 
-    Labels are intentionally compact (often just the class name) for use
-    in multi-line tree displays.  Use as::
+    Labels are intentionally compact: a node keeps just the arguments it was
+    given, plus the defaults of a node that was given none (see
+    :func:`_display_init_payload`), so a label stays self-describing without
+    repeating every default of every node.  Use as::
 
         TreePrinter.calculator_head(payload)  # -> "MyCalc"
         TreePrinter.dataclass_args(payload)  # -> "42, mass=True"
@@ -474,7 +525,15 @@ class TreePrinter:
 
     @staticmethod
     def dataclass_head(payload: dict[str, Any]) -> str:
-        return _short_class_name(str(payload.get("class", "Calculator")))
+        """Label a nested dataclass node as ``Name(args)``.
+
+        Arguments are included here (unlike a bare :meth:`dataclass_args` call)
+        so that a calculator nested inside another node's arguments reads like
+        the expression that built it: ``Sphere(0.5 * ParamContain(0.5, "r", "mass"))``.
+        """
+        name = _short_class_name(str(payload.get("class", "Calculator")))
+        args = TreePrinter.dataclass_args(payload)
+        return f"{name}({args})" if args else name
 
     @staticmethod
     def bound_head(payload: dict[str, Any]) -> str:
@@ -526,24 +585,10 @@ class TreePrinter:
     @staticmethod
     def dataclass_args(payload: dict[str, Any]) -> str:
         """Render a dataclass calculator's init arguments for tree display."""
-        init = payload.get("init", {})
+        init = _display_init_payload(payload)
         if not init:
             return ""
-        field_order: list[str] = []
-        try:
-            cls = _import_object(payload["class"])
-            field_order = [s.name for s in collect_param_specs(cls) if s.signature]
-        except Exception:
-            field_order = list(init)
-        names = list(init)
-        positional = field_order[: len(names)] == names
-        if positional:
-            parts = [TreePrinter.value(init[n]) for n in names]
-        else:
-            ordered = [n for n in field_order if n in init]
-            ordered += sorted(n for n in init if n not in ordered)
-            parts = [f"{n}={TreePrinter.value(init[n])}" for n in ordered]
-        return ", ".join(parts)
+        return ", ".join(_dataclass_arg_parts(init, _field_order(payload, init), TreePrinter.value))
 
 
 # Populate handler dicts.

@@ -309,7 +309,7 @@ def test_scoped_node_tree_label_is_not_a_raw_payload() -> None:
     """A scoped node labels with its base name; the scope shows as a child."""
     tree = _scoped_contain().format_tree()
     assert "'node'" not in tree
-    assert tree.strip().startswith("ParamContain<prop>")
+    assert tree.strip().startswith('ParamContain(0.5, "r", "mass")<prop>')
     assert "└─ AndFilter<filt>" in tree
 
 
@@ -317,7 +317,7 @@ def test_scoped_node_pretty_is_not_a_raw_payload() -> None:
     """``pretty()`` is the human/store-facing key and must render, not dump a dict."""
     pretty = _scoped_contain().to_signature().pretty()
     assert "'node'" not in pretty
-    assert pretty.startswith("ParamContain().filter(")
+    assert pretty.startswith('ParamContain(0.5, "r", "mass").filter(')
 
 
 def test_nested_scoped_argument_renders_compactly() -> None:
@@ -328,7 +328,27 @@ def test_nested_scoped_argument_renders_compactly() -> None:
     node = ShiftVelTo().filter(Sphere(0.5 * _scoped_contain()) & FamilyFilter("stars"))
     tree = node.format_tree()
     assert "'node'" not in tree
-    assert "Sphere(0.5 * ParamContain)<filt>" in tree
+    assert 'Sphere(0.5 * ParamContain(0.5, "r", "mass"))<filt>' in tree
+
+
+def test_all_default_node_spells_out_its_defaults() -> None:
+    """A node whose parameters are all defaults must describe itself.
+
+    Otherwise it renders as a bare class name (``ParamContain``), which tells
+    the reader nothing about what the node computes.
+    """
+    from pynbodyext.properties import ParamContain
+
+    assert repr(ParamContain()) == 'ParamContain(0.5, "r", "mass")'
+    assert ParamContain().to_signature().pretty() == 'ParamContain(0.5, "r", "mass")'
+
+
+def test_node_with_explicit_argument_keeps_compact_label() -> None:
+    """Defaults stay hidden when the node already shows a meaningful argument."""
+    from pynbodyext.filters import Sphere
+
+    assert repr(Sphere("30 kpc")) == 'Sphere("30 kpc")'
+    assert Sphere("30 kpc").format_tree().strip() == 'Sphere("30 kpc")<filt>'
 
 
 def _scoped_chain():
