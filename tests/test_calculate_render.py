@@ -291,3 +291,98 @@ def test_result_repr_html_tail_hint_in_github_plain() -> None:
             assert hint in html
         finally:
             reset_repr_style()
+
+
+def _scoped_contain():
+    """``ParamContain().filter(...)`` — a property carrying a filter scope.
+
+    A non-transform calculator takes its scope through ``ScopeSpec``, which the
+    signature encodes as a ``{"node": "scoped", ...}`` wrapper.
+    """
+    from pynbodyext.filters import FamilyFilter, Sphere
+    from pynbodyext.properties import ParamContain
+
+    return ParamContain().filter(Sphere("30 kpc") & FamilyFilter("stars"))
+
+
+def test_scoped_node_tree_label_is_not_a_raw_payload() -> None:
+    """A scoped node labels with its base name; the scope shows as a child."""
+    tree = _scoped_contain().format_tree()
+    assert "'node'" not in tree
+    assert tree.strip().startswith("ParamContain<prop>")
+    assert "└─ AndFilter<filt>" in tree
+
+
+def test_scoped_node_pretty_is_not_a_raw_payload() -> None:
+    """``pretty()`` is the human/store-facing key and must render, not dump a dict."""
+    pretty = _scoped_contain().to_signature().pretty()
+    assert "'node'" not in pretty
+    assert pretty.startswith("ParamContain().filter(")
+
+
+def test_nested_scoped_argument_renders_compactly() -> None:
+    """The reported case: a scoped property nested in another node's init args."""
+    from pynbodyext.filters import FamilyFilter, Sphere
+    from pynbodyext.transforms import ShiftVelTo
+
+    node = ShiftVelTo().filter(Sphere(0.5 * _scoped_contain()) & FamilyFilter("stars"))
+    tree = node.format_tree()
+    assert "'node'" not in tree
+    assert "Sphere(0.5 * ParamContain)<filt>" in tree
+
+
+def _scoped_chain():
+    """The reported chain: transforms holding scope-filtered properties as args."""
+    from pynbodyext.filters import FamilyFilter, Sphere
+    from pynbodyext.properties import AngMomVec, ParamContain
+    from pynbodyext.transforms import AlignVec, ShiftPosTo, ShiftVelTo, WrapBox
+
+    re = ParamContain().filter(Sphere("30 kpc") & FamilyFilter("stars"))
+    return (
+        WrapBox()
+        .then(ShiftPosTo("ssc"))
+        .then(ShiftVelTo().filter(Sphere(0.5 * re) & FamilyFilter("stars")))
+        .then(AlignVec(AngMomVec().filter(Sphere(2 * re) & FamilyFilter("stars"))))
+        .revert(False)
+    )
+
+
+def _walk(node, seen: set[int] | None = None):
+    seen = set() if seen is None else seen
+    if id(node) in seen:
+        return
+    seen.add(id(node))
+    yield node
+    for child in node.children():
+        yield from _walk(child, seen)
+
+
+def test_scoped_chain_renders_no_raw_payloads_anywhere() -> None:
+    """No node in the graph may leak its encoded payload into a display string.
+
+    This guards the whole class of bug reported for scoped properties: every
+    signature payload node type needs a renderer in both printers, otherwise
+    nested arguments and ``pretty()`` fall back to ``repr(dict)``.
+    """
+    chain = _scoped_chain()
+    assert "'node'" not in chain.format_tree()
+    for node in _walk(chain):
+        assert "'node'" not in node.format_tree(), node.tree_label
+        assert "'node'" not in node.to_signature().pretty(), node.tree_label
+
+
+def test_both_printers_cover_every_payload_node_type() -> None:
+    """Both printers must dispatch on every ``payload["node"]`` type.
+
+    The scoped-property regression happened because a payload node type existed
+    in the encoder with no renderer, so both printers silently fell back to
+    ``repr(payload)``.  Keep the dispatch tables in sync with the node types the
+    signature can carry.
+    """
+    from pynbodyext.core.calculate.result.render import SignaturePrinter, TreePrinter
+    from pynbodyext.core.calculate.result.signature import _Decoder
+
+    # Decoder-known node types, plus the two non-constructible display-only ones.
+    node_types = set(_Decoder._SPECIAL_DECODERS) | {"dataclass", "lambda_property", "generic"}
+    assert node_types <= set(SignaturePrinter._CALCULATOR_HANDLERS)
+    assert node_types <= set(TreePrinter._CALCULATOR_HEADERS)

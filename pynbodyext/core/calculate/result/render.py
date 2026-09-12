@@ -261,6 +261,17 @@ class SignaturePrinter:
         return SignaturePrinter.calculator(payload["base"]) + SignaturePrinter.scope_suffix(payload.get("scope", {}))
 
     @staticmethod
+    def scoped_calculator(payload: dict[str, Any]) -> str:
+        """Render a scope-wrapped calculator as ``<base>.filter(...)``/``.transform(...)``.
+
+        ``ScopeSpec`` (from ``.filter(...)``/``.then(...)`` on a non-transform
+        calculator) is encoded as a ``scoped`` wrapper rather than as fields on
+        the base payload, so the base and the scope have to be rendered
+        separately just like :meth:`bound_calculator` does.
+        """
+        return SignaturePrinter.calculator(payload["base"]) + SignaturePrinter.scope_suffix(payload.get("scope", {}))
+
+    @staticmethod
     def combined_calculator(payload: dict[str, Any]) -> str:
         items = ", ".join(SignaturePrinter.calculator(i) for i in payload.get("items", ()))
         return f"CombinedCalculator({items})"
@@ -322,6 +333,7 @@ SignaturePrinter._VALUE_HANDLERS = {
 SignaturePrinter._CALCULATOR_HANDLERS = {
     "dataclass": SignaturePrinter.dataclass_calculator,
     "bound": SignaturePrinter.bound_calculator,
+    "scoped": SignaturePrinter.scoped_calculator,
     "combined": SignaturePrinter.combined_calculator,
     "transform_chain": SignaturePrinter.transform_chain,
     "filter_op": SignaturePrinter.filter_,
@@ -469,6 +481,11 @@ class TreePrinter:
         return TreePrinter.calculator_head(payload["base"])
 
     @staticmethod
+    def scoped_head(payload: dict[str, Any]) -> str:
+        """Label a scope-wrapped node by its base; the scope renders as a child."""
+        return TreePrinter.calculator_head(payload["base"])
+
+    @staticmethod
     def transform_chain_head(payload: dict[str, Any]) -> str:
         return _short_class_name(str(payload.get("class", "TransformChain")))
 
@@ -540,6 +557,7 @@ TreePrinter._VALUE_HANDLERS = {
 TreePrinter._CALCULATOR_HEADERS = {
     "dataclass": TreePrinter.dataclass_head,
     "bound": TreePrinter.bound_head,
+    "scoped": TreePrinter.scoped_head,
     "transform_chain": TreePrinter.transform_chain_head,
     "combined": lambda p: "CombinedCalculator",
     "filter_op": TreePrinter.filter_op_head,
