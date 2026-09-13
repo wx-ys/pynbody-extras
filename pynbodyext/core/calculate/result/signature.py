@@ -840,12 +840,19 @@ def calculator_from_signature(signature: CalculatorSignature | dict[str, Any] | 
 
 
 def calculator_pretty_init_args(calculator: Any, *, inline_array_bytes: int = DEFAULT_INLINE_ARRAY_BYTES) -> str:
-    """Return a pretty-printed string of the calculator's init arguments."""
+    """Return a pretty-printed string of the calculator's init arguments.
+
+    Parameters left at their default are omitted, except on a node that would
+    otherwise render with no arguments at all: there the defaults are spelled
+    out, so ``ParamContain`` shows up as ``ParamContain(0.5, "r", "mass")``
+    rather than as a bare, uninformative class name.
+    """
     if not is_dataclass(calculator):
         return ""
 
     field_map = {f.name: f for f in dataclass_fields(type(calculator))}  # type: ignore[arg-type]
-    init_payload: dict[str, Any] = {}
+    explicit: dict[str, Any] = {}
+    defaults: dict[str, Any] = {}
 
     for spec in collect_param_specs(type(calculator)):
         item = field_map.get(spec.name)
@@ -853,11 +860,13 @@ def calculator_pretty_init_args(calculator: Any, *, inline_array_bytes: int = DE
             continue
         value = getattr(calculator, spec.name)
         has_default, default = _field_default(item)
-        if has_default and _encoded_values_equal(value, default, inline_array_bytes):
-            continue
         enc = _Encoder.encode_value(value, f"init.{spec.name}", inline_array_bytes)
-        init_payload[spec.name] = enc.value
+        if has_default and _encoded_values_equal(value, default, inline_array_bytes):
+            defaults[spec.name] = enc.value
+        else:
+            explicit[spec.name] = enc.value
 
+    init_payload = explicit or defaults
     if not init_payload:
         return ""
 
