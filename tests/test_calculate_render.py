@@ -244,12 +244,30 @@ def test_calculator_base_signature_cache_and_clone_isolation() -> None:
     assert cloned.to_signature() is not s1, "cloned calculator must not reuse the base signature"
     assert cloned.signature_hash() != base.signature_hash()
 def test_calculator_base_config_and_dependency_tree_attributes() -> None:
+    """Configuration and the dependency tree ride on existing entry points.
+
+    ``.config`` was a pure view of the summary rows (name/record/scope) and
+    ``.dependency_tree`` a pure view of ``format_tree()``.  Both were folded
+    back: the rows now appear in the repr card, and ``format_tree()`` returns a
+    renderable :class:`TextReport`.
+    """
+    from pynbodyext.core.calculate.display import TextReport
+
     calc = make_pipeline()
-    assert hasattr(calc, "config")
-    assert hasattr(calc, "dependency_tree")
-    assert "Configuration" in calc.config._repr_html_() or "config" in calc.config._summary()
-    # dependency_tree summary is the root/head line, not the whole multiline tree
-    assert calc.dependency_tree._summary().startswith("p<")
+    assert not hasattr(calc, "config")
+    assert not hasattr(calc, "dependency_tree")
+    tree = calc.format_tree()
+    assert isinstance(tree, TextReport)
+    # still a plain str for every existing caller
+    assert tree.strip().startswith("p<")
+    assert isinstance(tree._repr_html_(), str)
+    # the old ``.config`` rows (name/record/scope) now live in the summary card
+    from calculate_helpers import MassSum, RBelow
+
+    from pynbodyext.core.calculate import RecordPolicy
+
+    scoped = MassSum().filter(RBelow(5.0)).record(RecordPolicy.SUMMARY)
+    assert {row[0] for row in scoped._repr_summary_rows()} >= {"label", "record", "scope"}
 
 
 def test_calculator_base_repr_html_tail_hint_in_github_plain() -> None:
@@ -260,30 +278,34 @@ def test_calculator_base_repr_html_tail_hint_in_github_plain() -> None:
         set_repr_style(style)
         try:
             html = calc._repr_html_()
-            assert ".config" in html or ".dependency_tree" in html
+            assert ".format_tree" in html
         finally:
             reset_repr_style()
 
 
 def test_result_has_detail_view_attributes() -> None:
-    """Result must expose .execution_tree/.performance/.cache as view objects."""
-    from pynbodyext.core.calculate.display import ViewObject
+    """Reports are reachable through the report methods, not view attributes.
+
+    ``.execution_tree`` / ``.performance`` / ``.cache`` duplicated
+    ``report_execution_tree()`` / ``report_perf()`` / ``report_cache()``; the
+    methods now return renderable ``TextReport`` strings instead.
+    """
+    from pynbodyext.core.calculate.display import TextReport
 
     result = _result()
-    assert isinstance(result.execution_tree, ViewObject)
-    assert isinstance(result.performance, ViewObject)
-    assert isinstance(result.cache, ViewObject)
-    # each view must be renderable and non-empty
-    for view in (result.execution_tree, result.performance, result.cache):
-        assert repr(view)
-        assert isinstance(view._repr_html_(), str)
+    for name in ("execution_tree", "performance", "cache"):
+        assert not hasattr(result, name), f"view-only attribute {name!r} was reintroduced"
+    for report in (result.report_execution_tree(), result.report_perf(), result.report_cache()):
+        assert isinstance(report, TextReport)
+        assert repr(report)
+        assert isinstance(report._repr_html_(), str)
 
 
 def test_result_repr_html_tail_hint_in_github_plain() -> None:
     from pynbodyext.core.calculate.display import reset_repr_style, set_repr_style
 
     result = _result()
-    hint = "Use .named, .provenance, .execution_tree, .performance and .cache for details"
+    hint = "Use .named, .errors, .warnings, .provenance, .perf_summary and .reports for details"
     for style in ("github", "plain"):
         set_repr_style(style)
         try:
@@ -291,6 +313,120 @@ def test_result_repr_html_tail_hint_in_github_plain() -> None:
             assert hint in html
         finally:
             reset_repr_style()
+
+
+def test_provenance_shows_the_same_fields_in_every_style() -> None:
+    """Regression: ``result.provenance`` used to dump its raw dataclass repr.
+
+    The rich ``Result`` card folded provenance open with a clean table, while
+    ``result.provenance`` itself printed every encoded signature payload.  Both
+    must now show the same fields; only the markup differs.
+    """
+    from pynbodyext.core.calculate.display import html_escape, reset_repr_style, set_repr_style
+
+    result = _result()
+    provenance = result.provenance
+    assert provenance is not None
+    rows = provenance._display_rows()
+    assert [label for label, _ in rows] == ["calculator hash", "sim signature", "wall time"]
+
+    summary = repr(provenance)
+    assert summary.startswith("Provenance(")
+    assert "calculator hash" in summary
+    assert "('dict'," not in summary  # no raw encoded payload
+
+    set_repr_style("rich")
+    try:
+        card = result._repr_html_()
+    finally:
+        reset_repr_style()
+
+    for style in ("rich", "github"):
+        set_repr_style(style)
+        try:
+            standalone = provenance._repr_html_()
+        finally:
+            reset_repr_style()
+        for label, value in rows:
+            assert html_escape(label) in standalone
+            assert html_escape(str(value)) in standalone
+            assert html_escape(label) in card
+
+
+def test_value_objects_self_render_instead_of_leaking_a_dataclass_repr() -> None:
+    """Every user-facing value object renders; none prints a bare dataclass repr."""
+    result = _result()
+    node = result.get_named("m")
+    summary = node.record.value_summary
+    assert summary is not None
+
+    for obj in (result.provenance, result.perf_summary, result.reports, result.diagnostics, result.observations, summary):
+        text = repr(obj)
+        assert text
+        assert "object at 0x" not in text
+        assert "('dict'," not in text
+        html = obj._repr_html_()
+        assert isinstance(html, str) and html
+
+
+def test_error_info_is_renderable() -> None:
+    from pynbodyext.core.calculate.result.result import ErrorInfo
+
+    error = ErrorInfo(error_type="RuntimeError", message="boom", phase="calculate", traceback_text="Traceback ...")
+    assert "boom" in repr(error)
+    assert "phase='calculate'" in repr(error)
+    html = error._repr_html_()
+    assert "boom" in html
+    assert "Traceback ..." in html
+
+
+def test_text_report_is_a_str_that_renders() -> None:
+    from pynbodyext.core.calculate.display import TextReport, reset_repr_style, set_repr_style
+
+    report = TextReport("Node tree", "root\n└─ leaf")
+    # str behaviour is preserved for every existing caller
+    assert report == "root\n└─ leaf"
+    assert report.splitlines() == ["root", "└─ leaf"]
+    assert repr(report) == repr("root\n└─ leaf")
+
+    for style in ("rich", "github", "plain"):
+        set_repr_style(style)
+        try:
+            html = report._repr_html_()
+            assert "Node tree" in html
+            assert "leaf" in html
+        finally:
+            reset_repr_style()
+
+
+def test_run_options_text_and_html_list_the_same_fields() -> None:
+    """A curated text repr must not hide rows the HTML table shows."""
+    from pynbodyext.core.calculate import RunOptions
+    from pynbodyext.core.calculate.display import html_escape
+
+    options = RunOptions()
+    text = repr(options)
+    html = options._repr_html_()
+    for name, label, _value in options._fields():
+        assert f"{name}=" in text, f"RunOptions repr omits {name!r}"
+        assert html_escape(label) in html
+
+
+def test_result_card_reuses_the_report_methods() -> None:
+    """The rich card must render exactly what the report methods return."""
+    from pynbodyext.core.calculate.display import html_escape, reset_repr_style, set_repr_style
+
+    result = _result()
+    reports = (result.report_execution_tree(), result.report_perf(), result.report_cache())
+
+    set_repr_style("rich")
+    try:
+        html = result._repr_html_()
+    finally:
+        reset_repr_style()
+
+    for report in reports:
+        assert html_escape(str(report)) in html, f"{report.report_title!r} body differs from the card"
 
 
 def _scoped_contain():
