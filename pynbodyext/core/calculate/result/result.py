@@ -73,12 +73,21 @@ from pynbodyext.core.calculate.diagnostics.observer import (
     format_observation_access,
     render_observer_report,
 )
-from pynbodyext.core.calculate.display import ViewObject, compact_repr, mimebundle
+from pynbodyext.core.calculate.display import (
+    InfoView,
+    TextReport,
+    compact_repr,
+    format_mem,
+    format_time,
+    html_pre,
+    mimebundle,
+)
 
 from .enums import NodeKind, NodeStatus, RecordPolicy
 from .views import (
     DiagnosticsView,
     ErrorListView,
+    NamedValuesView,
     NamedView,
     ObservationsView,
     ReportsView,
@@ -92,8 +101,8 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
-@dataclass(slots=True)
-class ValueSummary:
+@dataclass(slots=True, repr=False)
+class ValueSummary(InfoView):
     """Compact description of a runtime value."""
 
     python_type: str
@@ -102,21 +111,21 @@ class ValueSummary:
     units: str | None = None
     preview: str | None = None
 
-    def __repr__(self) -> str:
-        parts = [self.python_type]
+    def _display_rows(self) -> list[tuple[str, Any]]:
+        rows: list[tuple[str, Any]] = [("type", self.python_type)]
         if self.shape is not None:
-            parts.append(f"shape={self.shape!r}")
+            rows.append(("shape", self.shape))
         if self.dtype is not None:
-            parts.append(f"dtype={self.dtype!r}")
+            rows.append(("dtype", self.dtype))
         if self.units is not None:
-            parts.append(f"units={self.units!r}")
+            rows.append(("units", self.units))
         if self.preview is not None:
-            parts.append(f"preview={compact_repr(self.preview, max_length=40)}")
-        return f"ValueSummary({', '.join(parts)})"
+            rows.append(("preview", compact_repr(self.preview, max_length=160)))
+        return rows
 
 
-@dataclass(slots=True)
-class PhaseRecord:
+@dataclass(slots=True, repr=False)
+class PhaseRecord(InfoView):
     """Timing and memory information for one node phase."""
 
     phase: str
@@ -128,15 +137,34 @@ class PhaseRecord:
     rss_used: int | None = None
     status: str = "ok"
 
+    def _display_rows(self) -> list[tuple[str, Any]]:
+        return [
+            ("phase", self.phase),
+            ("elapsed", format_time(self.elapsed_s)),
+            ("memory", format_mem(self.memory_used)),
+            ("peak", format_mem(self.memory_peak)),
+            ("rss", format_mem(self.rss_used)),
+            ("status", self.status),
+        ]
 
-@dataclass(slots=True)
-class ErrorInfo:
+
+@dataclass(slots=True, repr=False)
+class ErrorInfo(InfoView):
     """Structured error information captured during evaluation."""
 
     error_type: str
     message: str
     phase: str | None = None
     traceback_text: str | None = None
+
+    def _display_rows(self) -> list[tuple[str, Any]]:
+        rows: list[tuple[str, Any]] = [("type", self.error_type), ("message", self.message)]
+        if self.phase is not None:
+            rows.append(("phase", self.phase))
+        return rows
+
+    def _display_body(self) -> str:
+        return html_pre(self.traceback_text) if self.traceback_text else ""
 
 
 @dataclass(slots=True)
@@ -214,9 +242,15 @@ class ResultNode:
         return mimebundle(repr(self), self._repr_html_())
 
 
-@dataclass(slots=True)
-class ProvenanceInfo:
-    """Provenance metadata describing the calculator and simulation input."""
+@dataclass(slots=True, repr=False)
+class ProvenanceInfo(InfoView):
+    """Provenance metadata describing the calculator and simulation input.
+
+    Renders the same rows in every display style, so typing ``result.provenance``
+    in a notebook shows the calculator hash / simulation identity / wall time
+    exactly as the ``Result`` card does — in the ``rich`` card, the ``github``
+    ``<table>`` or the plain-text summary.
+    """
 
     calculator_signature: tuple[Any, ...]
     sim_signature: tuple[Any, ...]
@@ -225,9 +259,23 @@ class ProvenanceInfo:
     calculator_signature_text: str | None = None
     calculator_signature_hash: str | None = None
 
+    def _display_title(self) -> str:
+        return "Provenance"
 
-@dataclass(slots=True)
-class PerfSummary:
+    def _display_rows(self) -> list[tuple[str, Any]]:
+        rows: list[tuple[str, Any]] = []
+        if self.calculator_signature_hash is not None:
+            rows.append(("calculator hash", self.calculator_signature_hash))
+        elif self.calculator_signature_text is not None:
+            rows.append(("calculator", compact_repr(self.calculator_signature_text, max_length=180)))
+        rows.append(("sim signature", compact_repr(self.sim_signature, max_length=180)))
+        if self.finished_at is not None:
+            rows.append(("wall time", format_time(self.finished_at - self.started_at)))
+        return rows
+
+
+@dataclass(slots=True, repr=False)
+class PerfSummary(InfoView):
     """Aggregate performance counters for a calculator run."""
 
     total_time_s: float | None = None
@@ -237,22 +285,18 @@ class PerfSummary:
     cache_miss_count: int = 0
     cache_store_count: int = 0
 
+    def _display_title(self) -> str:
+        return "Performance"
 
-def _text_view(title: str, text: str) -> ViewObject:
-    """Build a single-section ``ViewObject`` that renders *text* under *title*."""
-
-    class _TextView(ViewObject):
-        def _title(self) -> str:
-            return title
-
-        def _summary(self) -> str:
-            first = text.strip().splitlines()
-            return first[0] if first else text.strip()
-
-        def _sections(self) -> list[tuple[str | None, str]]:
-            return [(None, text)]
-
-    return _TextView()
+    def _display_rows(self) -> list[tuple[str, Any]]:
+        return [
+            ("time", format_time(self.total_time_s)),
+            ("nodes", self.node_count),
+            ("phases", self.phase_count),
+            ("cache hits", self.cache_hit_count),
+            ("cache misses", self.cache_miss_count),
+            ("cache stores", self.cache_store_count),
+        ]
 
 
 @dataclass(slots=True)
@@ -333,24 +377,38 @@ class Result(Generic[T]):
         return len(self.nodes)
 
     @property
-    def named_values(self) -> dict[str, Any]:
-        """Return public values for named nodes that were materialized."""
-        return dict(self.diagnostics.get("named_values", {}))
+    def named_values(self) -> NamedValuesView:
+        """Public values for named nodes that were materialized.
+
+        Renders as the ``Named values`` section of the result card.
+        """
+        return NamedValuesView(self.diagnostics.get("named_values", {}))
 
     @property
-    def execution_tree(self) -> ViewObject:
-        """A view object exposing the runtime execution tree report."""
-        return _text_view("Execution tree", self.report_execution_tree())
+    def execution_tree(self) -> TextReport:
+        """The execution tree, annotated with runtime diagnostics.
+
+        Renders as the ``Execution tree`` section of the result card.  For a
+        truncated or id-annotated tree, use
+        :meth:`pynbodyext.core.calculate.result.query.ResultQuery.execution_tree`.
+        """
+        from .query import ResultQuery
+
+        return TextReport("Execution tree", ResultQuery.execution_tree(self))
 
     @property
-    def performance(self) -> ViewObject:
-        """A view object exposing the formatted performance report."""
-        return _text_view("Performance", self.report_perf())
+    def performance(self) -> TextReport:
+        """The formatted performance report (the card's ``Performance`` section)."""
+        from .repr import ResultRepr
+
+        return TextReport("Performance", ResultRepr.perf_table(self))
 
     @property
-    def cache(self) -> ViewObject:
-        """A view object exposing the runtime cache report."""
-        return _text_view("Cache", self.report_cache())
+    def cache(self) -> TextReport:
+        """The runtime cache report (the card's ``Cache`` section)."""
+        from .repr import ResultRepr
+
+        return TextReport("Runtime Cache", ResultRepr.cache_section(self))
 
     def get_node(self, node_id: str) -> ResultNode:
         """Return a result node by internal node id."""
@@ -391,11 +449,7 @@ class Result(Generic[T]):
         first = self.errors[0]
         raise RuntimeError(f"{first.error_type}: {first.message}")
 
-    def report_cache(self) -> str:
-        """Return the runtime cache report."""
-        return self.reports.get("cache", "")
-
-    def report_trace_timeline(self, *, show_ids: bool = False, include_observer: bool = True) -> str:
+    def report_trace_timeline(self, *, show_ids: bool = False, include_observer: bool = True) -> TextReport:
         """Return a trace timeline for the run."""
         lines: list[str] = []
         for event in self.diagnostics.trace():
@@ -409,27 +463,28 @@ class Result(Generic[T]):
             lines.append(
                 f"{'  ' * event.depth}{event.node_name}{node_suffix} {event.phase}:{event.event}{access_suffix}"
             )
-        return "\n".join(lines)
+        return TextReport("Trace timeline", "\n".join(lines))
 
-    def report_trace_tree(self, *, show_ids: bool = False) -> str:
+    def report_trace_tree(self, *, show_ids: bool = False) -> TextReport:
         """Return the stored execution trace tree."""
         text = self.reports.get("trace_tree", "")
         if show_ids:
-            return text
+            return TextReport("Trace tree", text)
         lines: list[str] = []
         for line in text.splitlines():
             if " [" in line and line.endswith("]"):
                 lines.append(line.rsplit(" [", 1)[0])
             else:
                 lines.append(line)
-        return "\n".join(lines)
+        return TextReport("Trace tree", "\n".join(lines))
 
-    def report_observer(self, *, include_empty: bool = False, show_ids: bool = False) -> str:
+    def report_observer(self, *, include_empty: bool = False, show_ids: bool = False) -> TextReport:
         """Return a formatted pynbody field observer report."""
         if not include_empty and not show_ids:
-            return self.reports.get("observer", "")
-        return render_observer_report(
-            self.observations.all().values(), include_empty=include_empty, show_ids=show_ids
+            return TextReport("Observer", self.reports.get("observer", ""))
+        return TextReport(
+            "Observer",
+            render_observer_report(self.observations.all().values(), include_empty=include_empty, show_ids=show_ids),
         )
 
     def iter_nodes(self) -> list[ResultNode]:
@@ -463,52 +518,20 @@ class Result(Generic[T]):
         show_ids: bool = False,
         max_depth: int | None = None,
         max_children: int | None = None,
-    ) -> str:
+    ) -> TextReport:
         """Return a tree view of evaluated nodes."""
         from .query import ResultQuery
 
-        return ResultQuery.node_tree(self, node=node, show_ids=show_ids, max_depth=max_depth, max_children=max_children)
-
-    def report_execution_tree(
-        self,
-        node: str | ResultNode | None = None,
-        *,
-        show_ids: bool = False,
-        max_depth: int | None = None,
-        max_children: int | None = None,
-        include_perf: bool = True,
-        include_cache: bool = True,
-        include_observer: bool = True,
-        include_values: bool = False,
-    ) -> str:
-        """Return a tree report annotated with runtime diagnostics."""
-        from .query import ResultQuery
-
-        return ResultQuery.execution_tree(
-            self,
-            node=node,
-            show_ids=show_ids,
-            max_depth=max_depth,
-            max_children=max_children,
-            include_perf=include_perf,
-            include_cache=include_cache,
-            include_observer=include_observer,
-            include_values=include_values,
+        return TextReport(
+            "Node tree",
+            ResultQuery.node_tree(self, node=node, show_ids=show_ids, max_depth=max_depth, max_children=max_children),
         )
 
-    def report_perf(
-        self, *, show_ids: bool = False, max_depth: int | None = None, max_children: int | None = None
-    ) -> str:
-        """Return a formatted performance report."""
-        from .repr import ResultRepr
-
-        return ResultRepr.perf_table(self, show_ids=show_ids, max_depth=max_depth, max_children=max_children)
-
-    def report_summary(self) -> str:
+    def report_summary(self) -> TextReport:
         """Return a compact text summary of the run."""
         from .repr import ResultRepr
 
-        return ResultRepr.summary(self)
+        return TextReport("Summary", ResultRepr.summary(self))
 
     def report_pipeline(
         self,
@@ -521,18 +544,21 @@ class Result(Generic[T]):
         show_ids: bool = False,
         max_depth: int | None = None,
         max_children: int | None = None,
-    ) -> str:
+    ) -> TextReport:
         """Return a multi-section text report for the run."""
         from .repr import ResultRepr
 
-        return ResultRepr.pipeline_report(
-            self,
-            include_perf=include_perf,
-            include_trace=include_trace,
-            include_cache=include_cache,
-            include_errors=include_errors,
-            include_execution_tree=include_execution_tree,
-            show_ids=show_ids,
-            max_depth=max_depth,
-            max_children=max_children,
+        return TextReport(
+            "Pipeline",
+            ResultRepr.pipeline_report(
+                self,
+                include_perf=include_perf,
+                include_trace=include_trace,
+                include_cache=include_cache,
+                include_errors=include_errors,
+                include_execution_tree=include_execution_tree,
+                show_ids=show_ids,
+                max_depth=max_depth,
+                max_children=max_children,
+            ),
         )

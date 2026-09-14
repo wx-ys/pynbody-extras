@@ -1,8 +1,8 @@
 """Tree-labeling and rendering helpers for calculator dependency graphs.
 
 These are pure functions that translate a calculator node (or a group of nodes)
-into the multi-line tree strings shown by ``CalculatorBase.format_tree`` and the
-node-tree report.  They operate on the duck-typed node surface — ``kind``,
+into the multi-line tree strings shown by ``CalculatorBase.dependency_tree`` and
+the node-tree report.  They operate on the duck-typed node surface — ``kind``,
 ``tree_label``, and ``children()`` — so they stay independent of the concrete
 class hierarchy in :mod:`pynbodyext.core.calculate.nodes.base`.
 """
@@ -111,3 +111,43 @@ def render_children(
         lines.append(f"{prefix}└─ {hidden_label(hidden_children)}")
 
     return lines
+
+
+def render_tree(
+    node: CalculatorBase[Any, Any],
+    *,
+    max_depth: int | None = None,
+    max_children: int | None = None,
+    show_inputs: bool = True,
+    compact_kinds: bool = True,
+) -> str:
+    """Render *node* and its dependencies as a multi-line dependency tree.
+
+    The tree ``CalculatorBase.dependency_tree`` shows.  ``max_depth`` /
+    ``max_children`` truncate a large graph (elided subtrees are summarised),
+    which is why the parameterised builder lives here rather than on the
+    attribute itself.
+    """
+    if max_depth is not None and max_depth < 0:
+        raise ValueError("max_depth must be non-negative or None")
+    if max_children is not None and max_children < 0:
+        raise ValueError("max_children must be non-negative or None")
+
+    lines = [label_for(node, show_inputs=show_inputs, compact_kinds=compact_kinds)]
+
+    if max_depth == 0 and node.children():
+        lines.append(f"└─ {hidden_label(node.children())}")
+    else:
+        lines.extend(
+            render_children(
+                node,
+                prefix="",
+                depth=1,
+                max_depth=max_depth,
+                max_children=max_children,
+                show_inputs=show_inputs,
+                compact_kinds=compact_kinds,
+            )
+        )
+
+    return "\n" + "\n".join(lines)

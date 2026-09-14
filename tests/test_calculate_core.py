@@ -190,9 +190,9 @@ def test_calculator_base_mixin_surface_is_intact() -> None:
     # Mixin-provided surface still present on a concrete instance.
     for meth in (
         "run", "__call__", "value", "batch", "signature", "signature_text",
-        "signature_hash", "to_signature", "from_signature", "format_tree",
+        "signature_hash", "to_signature", "from_signature", "dependency_tree",
         "named", "record", "filter", "transform", "keep", "options",
-        "config", "dependency_tree", "dependencies", "children",
+        "dependencies", "children",
         "resolve_params_for_sim", "resolve_dynamic_params", "resolve_dynamic_param",
         "has_dynamic_param", "dynamic_param_names", "dynamic_param_spec",
         "is_dynamic_value", "debug", "info", "warning", "error",

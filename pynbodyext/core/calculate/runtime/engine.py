@@ -801,7 +801,7 @@ class EvalEngine:
             reports=ReportsView(reports),
             diagnostics=DiagnosticsView(diagnostics),
         )
-        execution_tree_report = result.report_execution_tree()
+        execution_tree_report = result.execution_tree
 
         root.run.artifacts.update(reports)
         root.run.artifacts["execution_tree_report"] = execution_tree_report

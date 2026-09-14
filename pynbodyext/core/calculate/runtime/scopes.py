@@ -58,7 +58,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from pynbodyext.core.calculate.display import display_value, html_card, mimebundle
+from pynbodyext.core.calculate.display import InfoView, display_value
 from pynbodyext.core.calculate.result.enums import BuiltinKinds, RevertPolicy, normalize_revert_policy
 
 if TYPE_CHECKING:
@@ -69,8 +69,22 @@ if TYPE_CHECKING:
     from pynbodyext.core.calculate.nodes.transforms import TransformBase
 
 
+def _scope_rows(spec: ScopeSpec) -> list[tuple[str, Any]]:
+    """Rows describing a scope; shared by :class:`ScopeSpec` and :class:`Scope`.
+
+    Both objects used to build their own table, and disagreed: ``Scope`` showed
+    the number of transforms where ``ScopeSpec`` showed their names.
+    """
+    transforms = " -> ".join(transform.log_label for transform in spec.transforms) or "-"
+    return [
+        ("transforms", transforms),
+        ("filter", spec.filter.log_label if spec.filter is not None else "-"),
+        ("revert", display_value(spec.revert_policy)),
+    ]
+
+
 @dataclass(frozen=True, slots=True)
-class ScopeSpec:
+class ScopeSpec(InfoView):
     """Immutable scope specification used internally by bound calculators."""
 
     transforms: tuple[TransformBase[Any], ...] = ()
@@ -159,21 +173,11 @@ class ScopeSpec:
     def __repr__(self) -> str:
         return f"ScopeSpec({self.short_label()})"
 
-    def _repr_html_(self) -> str:
-        return html_card(
-            "ScopeSpec",
-            [
-                ("transforms", " -> ".join(transform.log_label for transform in self.transforms)),
-                ("filter", self.filter.log_label if self.filter is not None else "-"),
-                ("revert", display_value(self.revert_policy)),
-            ],
-        )
-
-    def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, str]:
-        return mimebundle(repr(self), self._repr_html_())
+    def _display_rows(self) -> list[tuple[str, Any]]:
+        return _scope_rows(self)
 
 
-class Scope:
+class Scope(InfoView):
     """User-facing scope builder for filters and transforms.
 
     Parameters
@@ -261,18 +265,8 @@ class Scope:
     def _repr_pretty_(self, printer: Any, cycle: bool) -> None:
         printer.text("Scope(...)" if cycle else repr(self))
 
-    def _repr_html_(self) -> str:
-        return html_card(
-            "Scope",
-            [
-                ("transforms", len(self.spec.transforms)),
-                ("filter", self.spec.filter.log_label if self.spec.filter is not None else "-"),
-                ("revert", display_value(self.spec.revert_policy)),
-            ],
-        )
-
-    def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, str]:
-        return mimebundle(repr(self), self._repr_html_())
+    def _display_rows(self) -> list[tuple[str, Any]]:
+        return _scope_rows(self.spec)
 
 
 TransformScope = Scope

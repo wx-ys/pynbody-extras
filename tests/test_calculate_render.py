@@ -244,12 +244,29 @@ def test_calculator_base_signature_cache_and_clone_isolation() -> None:
     assert cloned.to_signature() is not s1, "cloned calculator must not reuse the base signature"
     assert cloned.signature_hash() != base.signature_hash()
 def test_calculator_base_config_and_dependency_tree_attributes() -> None:
+    """The dependency tree is an attribute, named after the card section.
+
+    ``.config`` was a pure view of the summary rows (name/record/scope), so it
+    was folded into the repr card.  The tree is one thing, reachable as
+    ``.dependency_tree`` — no ``format_tree()`` call, and no second name.
+    """
+    from pynbodyext.core.calculate.display import TextReport
+
     calc = make_pipeline()
-    assert hasattr(calc, "config")
-    assert hasattr(calc, "dependency_tree")
-    assert "Configuration" in calc.config._repr_html_() or "config" in calc.config._summary()
-    # dependency_tree summary is the root/head line, not the whole multiline tree
-    assert calc.dependency_tree._summary().startswith("p<")
+    assert not hasattr(calc, "config")
+    assert not hasattr(calc, "format_tree")
+    tree = calc.dependency_tree
+    assert isinstance(tree, TextReport)
+    # still a plain str for every existing caller
+    assert tree.strip().startswith("p<")
+    assert isinstance(tree._repr_html_(), str)
+    # the old ``.config`` rows (name/record/scope) now live in the summary card
+    from calculate_helpers import MassSum, RBelow
+
+    from pynbodyext.core.calculate import RecordPolicy
+
+    scoped = MassSum().filter(RBelow(5.0)).record(RecordPolicy.SUMMARY)
+    assert {row[0] for row in scoped._repr_summary_rows()} >= {"label", "record", "scope"}
 
 
 def test_calculator_base_repr_html_tail_hint_in_github_plain() -> None:
@@ -260,30 +277,38 @@ def test_calculator_base_repr_html_tail_hint_in_github_plain() -> None:
         set_repr_style(style)
         try:
             html = calc._repr_html_()
-            assert ".config" in html or ".dependency_tree" in html
+            assert ".dependency_tree" in html
         finally:
             reset_repr_style()
 
 
-def test_result_has_detail_view_attributes() -> None:
-    """Result must expose .execution_tree/.performance/.cache as view objects."""
-    from pynbodyext.core.calculate.display import ViewObject
+def test_result_section_attributes_render_without_a_call() -> None:
+    """Each card section is reachable as an attribute of the same name.
+
+    ``.execution_tree`` / ``.performance`` / ``.cache`` used to be both a
+    ``report_*()`` method and a view-only property; they are now one attribute
+    that renders a :class:`TextReport`.
+    """
+    from pynbodyext.core.calculate.display import TextReport
 
     result = _result()
-    assert isinstance(result.execution_tree, ViewObject)
-    assert isinstance(result.performance, ViewObject)
-    assert isinstance(result.cache, ViewObject)
-    # each view must be renderable and non-empty
-    for view in (result.execution_tree, result.performance, result.cache):
-        assert repr(view)
-        assert isinstance(view._repr_html_(), str)
+    for method in ("report_execution_tree", "report_perf", "report_cache"):
+        assert not hasattr(result, method), f"superseded method {method!r} was reintroduced"
+    for name in ("execution_tree", "performance", "cache"):
+        report = getattr(result, name)
+        assert isinstance(report, TextReport), name
+        assert repr(report)
+        assert isinstance(report._repr_html_(), str)
 
 
 def test_result_repr_html_tail_hint_in_github_plain() -> None:
     from pynbodyext.core.calculate.display import reset_repr_style, set_repr_style
 
     result = _result()
-    hint = "Use .named, .provenance, .execution_tree, .performance and .cache for details"
+    hint = (
+        "Use .named_values, .warnings, .errors, .provenance, "
+        ".execution_tree, .performance and .cache for details"
+    )
     for style in ("github", "plain"):
         set_repr_style(style)
         try:
@@ -291,6 +316,191 @@ def test_result_repr_html_tail_hint_in_github_plain() -> None:
             assert hint in html
         finally:
             reset_repr_style()
+
+
+def test_provenance_shows_the_same_fields_in_every_style() -> None:
+    """Regression: ``result.provenance`` used to dump its raw dataclass repr.
+
+    The rich ``Result`` card folded provenance open with a clean table, while
+    ``result.provenance`` itself printed every encoded signature payload.  Both
+    must now show the same fields; only the markup differs.
+    """
+    from pynbodyext.core.calculate.display import html_escape, reset_repr_style, set_repr_style
+
+    result = _result()
+    provenance = result.provenance
+    assert provenance is not None
+    rows = provenance._display_rows()
+    assert [label for label, _ in rows] == ["calculator hash", "sim signature", "wall time"]
+
+    summary = repr(provenance)
+    assert summary.startswith("Provenance(")
+    assert "calculator hash" in summary
+    assert "('dict'," not in summary  # no raw encoded payload
+
+    set_repr_style("rich")
+    try:
+        card = result._repr_html_()
+    finally:
+        reset_repr_style()
+
+    for style in ("rich", "github"):
+        set_repr_style(style)
+        try:
+            standalone = provenance._repr_html_()
+        finally:
+            reset_repr_style()
+        for label, value in rows:
+            assert html_escape(label) in standalone
+            assert html_escape(str(value)) in standalone
+            assert html_escape(label) in card
+
+
+def test_value_objects_self_render_instead_of_leaking_a_dataclass_repr() -> None:
+    """Every user-facing value object renders; none prints a bare dataclass repr."""
+    result = _result()
+    node = result.get_named("m")
+    summary = node.record.value_summary
+    assert summary is not None
+
+    for obj in (result.provenance, result.perf_summary, result.reports, result.diagnostics, result.observations, summary):
+        text = repr(obj)
+        assert text
+        assert "object at 0x" not in text
+        assert "('dict'," not in text
+        html = obj._repr_html_()
+        assert isinstance(html, str) and html
+
+
+def test_error_info_is_renderable() -> None:
+    from pynbodyext.core.calculate.result.result import ErrorInfo
+
+    error = ErrorInfo(error_type="RuntimeError", message="boom", phase="calculate", traceback_text="Traceback ...")
+    assert "boom" in repr(error)
+    assert "phase='calculate'" in repr(error)
+    html = error._repr_html_()
+    assert "boom" in html
+    assert "Traceback ..." in html
+
+
+def test_text_report_is_a_str_that_renders() -> None:
+    from pynbodyext.core.calculate.display import TextReport, reset_repr_style, set_repr_style
+
+    report = TextReport("Node tree", "root\n└─ leaf")
+    # str behaviour is preserved for every existing caller
+    assert report == "root\n└─ leaf"
+    assert report.splitlines() == ["root", "└─ leaf"]
+    assert repr(report) == repr("root\n└─ leaf")
+
+    for style in ("rich", "github", "plain"):
+        set_repr_style(style)
+        try:
+            html = report._repr_html_()
+            assert "Node tree" in html
+            assert "leaf" in html
+        finally:
+            reset_repr_style()
+
+
+def test_run_options_text_and_html_list_the_same_fields() -> None:
+    """A curated text repr must not hide rows the HTML table shows."""
+    from pynbodyext.core.calculate import RunOptions
+    from pynbodyext.core.calculate.display import html_escape
+
+    options = RunOptions()
+    text = repr(options)
+    html = options._repr_html_()
+    for name, label, _value in options._fields():
+        assert f"{name}=" in text, f"RunOptions repr omits {name!r}"
+        assert html_escape(label) in html
+
+
+def test_result_card_reuses_the_section_attributes() -> None:
+    """The rich card must render exactly what the section attributes return."""
+    from pynbodyext.core.calculate.display import html_escape, reset_repr_style, set_repr_style
+
+    result = _result()
+    reports = (result.execution_tree, result.performance, result.cache)
+
+    set_repr_style("rich")
+    try:
+        html = result._repr_html_()
+    finally:
+        reset_repr_style()
+
+    for report in reports:
+        assert html_escape(str(report)) in html, f"{report.report_title!r} body differs from the card"
+
+
+_CARD_TITLE_RE = re.compile(
+    r"<summary>([^<]+)</summary>" r"|<div class='pynbodyext-calc-section-title'>([^<]+)</div>"
+)
+
+
+def _card_titles(html: str) -> list[str]:
+    """Section titles of a rendered card, in document order."""
+    return [summary or section for summary, section in _CARD_TITLE_RE.findall(html)]
+
+
+def _snake(title: str) -> str:
+    return title.lower().replace(" ", "_")
+
+
+def test_result_card_sections_are_nameable_attributes() -> None:
+    """Every card section is reachable as an attribute of the same name.
+
+    This is the contract behind the github/plain hint: a reader sees a section
+    title in the rich card, and the same name (snake_cased) as an attribute
+    whose repr shows that section — no method call.
+    """
+    from pynbodyext.core.calculate.display import reset_repr_style, set_repr_style
+    from pynbodyext.core.calculate.result.result import ErrorInfo
+
+    result = _result()
+    result.warnings.append("synthetic warning")
+    result.errors.append(ErrorInfo(error_type="RuntimeError", message="synthetic error"))
+
+    set_repr_style("rich")
+    try:
+        titles = _card_titles(result._repr_html_())
+    finally:
+        reset_repr_style()
+
+    assert titles == ["Named values", "Warnings", "Errors", "Provenance", "Execution tree", "Performance", "Cache"]
+    for title in titles:
+        assert hasattr(result, _snake(title)), f"section {title!r} has no .{_snake(title)} attribute"
+
+    set_repr_style("github")
+    try:
+        hint_html = result._repr_html_()
+    finally:
+        reset_repr_style()
+    for title in titles:
+        assert f".{_snake(title)}" in hint_html
+    assert "()" not in hint_html.split("<pre>")[1]
+
+
+def test_calculator_card_section_is_a_nameable_attribute() -> None:
+    from pynbodyext.core.calculate.display import reset_repr_style, set_repr_style
+
+    calc = make_pipeline()
+    set_repr_style("rich")
+    try:
+        titles = _card_titles(calc._repr_html_())
+    finally:
+        reset_repr_style()
+
+    assert titles == ["Dependency tree"]
+    for title in titles:
+        assert hasattr(calc, _snake(title))
+
+    set_repr_style("github")
+    try:
+        hint_html = calc._repr_html_()
+    finally:
+        reset_repr_style()
+    assert ".dependency_tree" in hint_html
+    assert "()" not in hint_html.split("<pre>")[1]
 
 
 def _scoped_contain():
@@ -307,7 +517,7 @@ def _scoped_contain():
 
 def test_scoped_node_tree_label_is_not_a_raw_payload() -> None:
     """A scoped node labels with its base name; the scope shows as a child."""
-    tree = _scoped_contain().format_tree()
+    tree = _scoped_contain().dependency_tree
     assert "'node'" not in tree
     assert tree.strip().startswith('ParamContain(0.5, "r", "mass")<prop>')
     assert "└─ AndFilter<filt>" in tree
@@ -326,7 +536,7 @@ def test_nested_scoped_argument_renders_compactly() -> None:
     from pynbodyext.transforms import ShiftVelTo
 
     node = ShiftVelTo().filter(Sphere(0.5 * _scoped_contain()) & FamilyFilter("stars"))
-    tree = node.format_tree()
+    tree = node.dependency_tree
     assert "'node'" not in tree
     assert 'Sphere(0.5 * ParamContain(0.5, "r", "mass"))<filt>' in tree
 
@@ -348,7 +558,7 @@ def test_node_with_explicit_argument_keeps_compact_label() -> None:
     from pynbodyext.filters import Sphere
 
     assert repr(Sphere("30 kpc")) == 'Sphere("30 kpc")'
-    assert Sphere("30 kpc").format_tree().strip() == 'Sphere("30 kpc")<filt>'
+    assert Sphere("30 kpc").dependency_tree.strip() == 'Sphere("30 kpc")<filt>'
 
 
 def _scoped_chain():
@@ -385,9 +595,9 @@ def test_scoped_chain_renders_no_raw_payloads_anywhere() -> None:
     nested arguments and ``pretty()`` fall back to ``repr(dict)``.
     """
     chain = _scoped_chain()
-    assert "'node'" not in chain.format_tree()
+    assert "'node'" not in chain.dependency_tree
     for node in _walk(chain):
-        assert "'node'" not in node.format_tree(), node.tree_label
+        assert "'node'" not in node.dependency_tree, node.tree_label
         assert "'node'" not in node.to_signature().pretty(), node.tree_label
 
 

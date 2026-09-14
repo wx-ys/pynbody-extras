@@ -94,6 +94,8 @@ import contextlib
 from dataclasses import MISSING, Field, dataclass, field, fields, is_dataclass
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeAlias, TypeVar, get_origin, overload
 
+from pynbodyext.core.calculate.display import InfoView
+
 from .resolution import DynamicParamSpec, dynamic_value_dependencies
 
 if TYPE_CHECKING:
@@ -107,34 +109,43 @@ if TYPE_CHECKING:
     DynamicParam: TypeAlias = T | Callable[[Any], T] | CalculatorBase[Any, T]
 
 
-class _ParamField(Field):
+class _ParamField(Field, InfoView):
     """The ``dataclasses.Field`` produced by :class:`Param`, with a readable repr.
 
     A plain ``dataclasses.Field`` repr leaks dataclass internals (``default_factory``
     sentinels, ``mappingproxy`` metadata, memory addresses).  ``Param`` is a
     user-facing API, so it returns this thin ``Field`` subclass whose repr shows
-    only the meaningful parameter attributes.
+    only the meaningful parameter attributes — and, through :class:`InfoView`,
+    the same attributes as an HTML table in every display style.
     """
 
     __slots__ = ()
 
-    def __repr__(self) -> str:
-        parts: list[str] = []
+    def _display_title(self) -> str:
+        return "Param"
+
+    def _display_rows(self) -> list[tuple[str, Any]]:
+        """The meaningful parameter attributes, in display order."""
+        rows: list[tuple[str, Any]] = []
         if self.default is not MISSING:
-            parts.append(f"default={self.default!r}")
+            rows.append(("default", self.default))
         if self.default_factory is not MISSING:
-            parts.append("default_factory=...")
+            rows.append(("default_factory", "..."))
         spec = self.metadata.get(_PARAM_METADATA_KEY)
         if spec is not None:
-            parts.append(f"kind={getattr(spec, 'kind', 'dynamic')!r}")
+            rows.append(("kind", getattr(spec, "kind", "dynamic")))
             field_name = getattr(spec, "field_name", None)
             if field_name:
-                parts.append(f"field_name={field_name!r}")
+                rows.append(("field_name", field_name))
             if getattr(spec, "target_units", None) is not None:
-                parts.append(f"target_units={spec.target_units!r}")
+                rows.append(("target_units", spec.target_units))
             if getattr(spec, "signature", True) is False:
-                parts.append("signature=False")
-        return f"Param({', '.join(parts)})"
+                rows.append(("signature", False))
+        return rows
+
+    def __repr__(self) -> str:
+        parts = ", ".join(f"{key}={value!r}" for key, value in self._display_rows())
+        return f"Param({parts})"
 
 
 def _make_param_field(spec: ParamSpec, default: Any, *, init: bool, kw_only: bool) -> Field:

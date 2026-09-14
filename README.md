@@ -78,7 +78,7 @@ re = (ParamContain("r",0.5,"mass")
     )
 )
 # see the structure of the pipeline:
-print(re.format_tree())
+print(re.dependency_tree)
 ```
 ```
 └─ ParamContain<property>

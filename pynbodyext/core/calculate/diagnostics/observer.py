@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Literal
 
+from pynbodyext.core.calculate.display import InfoView
+
 FieldOperation = Literal["read", "dirty", "delete", "derive"]
 
 _MAX_REPR_LENGTH = 120
@@ -61,8 +63,8 @@ class AccessEvent:
         }
 
 
-@dataclass(slots=True)
-class AccessObservation:
+@dataclass(slots=True, repr=False)
+class AccessObservation(InfoView):
     """Observed snapshot fields for one calculator node execution."""
 
     node_id: str
@@ -72,6 +74,16 @@ class AccessObservation:
     deletes: set[str] = field(default_factory=set)
     derived_fields: set[str] = field(default_factory=set)
     events: list[AccessEvent] = field(default_factory=list)
+
+    def _display_rows(self) -> list[tuple[str, Any]]:
+        return [
+            ("node", self.node_label),
+            ("events", len(self.events)),
+            ("reads", len(self.reads)),
+            ("dirty", len(self.dirty_fields)),
+            ("deletes", len(self.deletes)),
+            ("derived", len(self.derived_fields)),
+        ]
 
     @property
     def writes(self) -> set[str]:
