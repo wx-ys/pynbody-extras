@@ -1,0 +1,345 @@
+/* Card theme for the calculator display layer.
+ *
+ * Source of truth for the classes emitted by the html_* helpers in
+ * `display.py`; the rendered `<style>` block is built from this file (see
+ * `HTML_STYLE`). Package data: `[tool.setuptools.package-data]` in
+ * `pyproject.toml`. The class contract is pinned by
+ * `tests/test_calculate_render.py::test_card_css_is_a_packaged_file_defining_every_emitted_class`.
+ */
+.pynbodyext-calc-card {
+    --pyn-calc-bg:
+        var(--vscode-editor-background,
+        var(--jp-layout-color0,
+        #f7f8fa));
+
+    --pyn-calc-panel:
+        var(--vscode-editorWidget-background,
+        var(--jp-layout-color1,
+        rgba(255, 255, 255, 0.72)));
+
+    --pyn-calc-panel-strong:
+        var(--vscode-sideBar-background,
+        var(--jp-layout-color1,
+        rgba(255, 255, 255, 0.9)));
+
+    --pyn-calc-panel-muted:
+        color-mix(in srgb, var(--pyn-calc-text) 4%, transparent);
+
+    --pyn-calc-border:
+        var(--vscode-widget-border,
+        var(--vscode-panel-border,
+        var(--jp-border-color2,
+        rgba(15, 23, 42, 0.1))));
+
+    --pyn-calc-border-soft:
+        color-mix(in srgb, var(--pyn-calc-text) 8%, transparent);
+
+    --pyn-calc-text:
+        var(--vscode-foreground,
+        var(--jp-ui-font-color1,
+        #1f2937));
+
+    --pyn-calc-text-muted:
+        var(--vscode-descriptionForeground,
+        var(--jp-ui-font-color2,
+        rgba(31, 41, 55, 0.64)));
+
+    --pyn-calc-title:
+        var(--vscode-editor-foreground,
+        var(--jp-ui-font-color0,
+        #0f172a));
+
+    --pyn-calc-accent:
+        var(--vscode-textLink-foreground,
+        var(--jp-brand-color1,
+        #2563eb));
+
+    --pyn-calc-accent-soft:
+        color-mix(in srgb, var(--pyn-calc-accent) 14%, transparent);
+
+    --pyn-calc-ok:
+        var(--jp-success-color1,
+        #15803d);
+
+    --pyn-calc-warn:
+        var(--jp-warn-color1,
+        #b45309);
+
+    --pyn-calc-error:
+        var(--jp-error-color1,
+        #b91c1c);
+
+    --pyn-calc-ok-soft:
+        color-mix(in srgb, var(--pyn-calc-ok) 14%, transparent);
+
+    --pyn-calc-warn-soft:
+        color-mix(in srgb, var(--pyn-calc-warn) 14%, transparent);
+
+    --pyn-calc-error-soft:
+        color-mix(in srgb, var(--pyn-calc-error) 14%, transparent);
+
+    --pyn-calc-shadow:
+        0 1px 2px color-mix(in srgb, var(--pyn-calc-text) 6%, transparent),
+        0 8px 24px color-mix(in srgb, var(--pyn-calc-text) 5%, transparent);
+
+    display: block;
+    box-sizing: border-box;
+    max-width: min(640px, 100%);
+    margin: 0.18rem 0;
+    padding: 0.62rem 0.74rem;
+    border: 1px solid var(--pyn-calc-border);
+    border-radius: 10px;
+    background:
+        linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--pyn-calc-panel-strong) 92%, var(--pyn-calc-bg)) 0%,
+            color-mix(in srgb, var(--pyn-calc-panel) 96%, var(--pyn-calc-bg)) 100%
+        );
+    box-shadow: var(--pyn-calc-shadow);
+    color: var(--pyn-calc-text);
+    overflow: hidden;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 13px;
+    line-height: 1.32;
+}
+
+@supports not (color: color-mix(in srgb, white 50%, black)) {
+    .pynbodyext-calc-card {
+        --pyn-calc-panel-muted: rgba(127, 127, 127, 0.06);
+        --pyn-calc-border-soft: rgba(127, 127, 127, 0.08);
+        --pyn-calc-accent-soft: rgba(37, 99, 235, 0.12);
+        --pyn-calc-ok-soft: rgba(22, 163, 74, 0.12);
+        --pyn-calc-warn-soft: rgba(217, 119, 6, 0.12);
+        --pyn-calc-error-soft: rgba(220, 38, 38, 0.12);
+        --pyn-calc-shadow:
+            0 1px 2px rgba(15, 23, 42, 0.04),
+            0 8px 24px rgba(15, 23, 42, 0.04);
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .pynbodyext-calc-card {
+        --pyn-calc-ok: #4ade80;
+        --pyn-calc-warn: #fbbf24;
+        --pyn-calc-error: #f87171;
+    }
+}
+
+.pynbodyext-calc-title {
+    margin: 0 0 0.32rem;
+    color: var(--pyn-calc-title);
+    font-weight: 750;
+    letter-spacing: 0.01em;
+}
+
+.pynbodyext-calc-table,
+.pynbodyext-calc-data-table {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+}
+
+.pynbodyext-calc-kv-row {
+    display: grid;
+    grid-template-columns: minmax(4.1rem, max-content) minmax(0, 1fr);
+    column-gap: 0.62rem;
+    align-items: start;
+    padding: 2px 0;
+}
+.pynbodyext-calc-kv-row + .pynbodyext-calc-kv-row {
+    border-top: 1px solid var(--pyn-calc-border-soft);
+}
+.pynbodyext-calc-kv-key {
+    white-space: nowrap;
+    color: var(--pyn-calc-text-muted);
+    font-weight: 600;
+    line-height: 1.28;
+}
+.pynbodyext-calc-kv-value {
+    min-width: 0;
+    color: var(--pyn-calc-text);
+    overflow-wrap: anywhere;
+    text-align: left;
+    line-height: 1.28;
+}
+
+.pynbodyext-calc-data-head,
+.pynbodyext-calc-data-row {
+    display: grid;
+    grid-template-columns: var(--pynbodyext-calc-columns, max-content);
+    column-gap: 0.82rem;
+    align-items: start;
+    min-width: 100%;
+}
+.pynbodyext-calc-data-head {
+    padding-bottom: 0.18rem;
+    border-bottom: 1px solid var(--pyn-calc-border);
+}
+.pynbodyext-calc-data-row {
+    padding: 2px 0;
+}
+.pynbodyext-calc-data-row + .pynbodyext-calc-data-row {
+    border-top: 1px solid var(--pyn-calc-border-soft);
+}
+.pynbodyext-calc-data-head-cell {
+    white-space: nowrap;
+    color: var(--pyn-calc-text-muted);
+    font-weight: 650;
+}
+.pynbodyext-calc-data-cell {
+    color: var(--pyn-calc-text);
+    overflow-wrap: anywhere;
+    text-align: left;
+}
+
+.pynbodyext-calc-table-nowrap .pynbodyext-calc-kv-value,
+.pynbodyext-calc-data-table-nowrap .pynbodyext-calc-data-head-cell,
+.pynbodyext-calc-data-table-nowrap .pynbodyext-calc-data-cell {
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
+}
+
+.pynbodyext-calc-monospace .pynbodyext-calc-kv-value,
+.pynbodyext-calc-monospace .pynbodyext-calc-data-cell {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 12px;
+    line-height: 1.33;
+}
+
+.pynbodyext-calc-scroll-x {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-gutter: stable;
+    padding-bottom: 0.08rem;
+}
+.pynbodyext-calc-scroll-x-inner {
+    display: inline-block;
+    width: max-content;
+    min-width: 100%;
+    vertical-align: top;
+}
+.pynbodyext-calc-scroll-x-inner > .pynbodyext-calc-table,
+.pynbodyext-calc-scroll-x-inner > .pynbodyext-calc-data-table {
+    width: max-content;
+    min-width: 100%;
+    max-width: none;
+}
+.pynbodyext-calc-scroll-x-inner > .pynbodyext-calc-metric-strip {
+    display: inline-flex;
+    min-width: 100%;
+}
+
+.pynbodyext-calc-pre {
+    box-sizing: border-box;
+    max-width: 100%;
+    max-height: 18rem;
+    margin: 0.58rem 0 0;
+    padding: 0.52rem 0.62rem;
+    border: 1px solid var(--pyn-calc-border);
+    border-radius: 7px;
+    background: var(--pyn-calc-panel-muted);
+    color: var(--pyn-calc-text);
+    overflow: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 12px;
+    line-height: 1.33;
+    white-space: pre;
+}
+
+.pynbodyext-calc-section {
+    margin-top: 0.56rem;
+}
+.pynbodyext-calc-section-title {
+    margin: 0 0 0.16rem;
+    color: var(--pyn-calc-title);
+    font-weight: 720;
+}
+
+.pynbodyext-calc-details {
+    margin-top: 0.56rem;
+}
+.pynbodyext-calc-details summary {
+    cursor: pointer;
+    color: var(--pyn-calc-text);
+    font-weight: 650;
+    user-select: none;
+    line-height: 1.25;
+}
+.pynbodyext-calc-details summary:hover {
+    color: var(--pyn-calc-accent);
+}
+.pynbodyext-calc-details[open] summary {
+    color: var(--pyn-calc-title);
+}
+
+.pynbodyext-calc-metric-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
+    gap: 0.35rem;
+    margin-top: 0.68rem;
+}
+.pynbodyext-calc-metric-strip {
+    display: inline-flex;
+    gap: 0.35rem;
+    margin-top: 0.68rem;
+}
+.pynbodyext-calc-metric {
+    min-width: 82px;
+    padding: 0.38rem 0.5rem;
+    border: 1px solid var(--pyn-calc-border);
+    border-radius: 7px;
+    background: var(--pyn-calc-panel-muted);
+}
+.pynbodyext-calc-metric-label {
+    font-size: 10px;
+    color: var(--pyn-calc-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.pynbodyext-calc-metric-value {
+    margin-top: 0.08rem;
+    color: var(--pyn-calc-title);
+    font-size: 13px;
+    font-weight: 680;
+    overflow-wrap: anywhere;
+}
+
+.pynbodyext-calc-badge {
+    display: inline-block;
+    margin: 0 0.22rem 0.22rem 0;
+    padding: 0.1rem 0.42rem;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.2;
+    border: 1px solid transparent;
+    vertical-align: middle;
+}
+.pynbodyext-calc-badge-neutral {
+    background: color-mix(in srgb, var(--pyn-calc-text) 8%, transparent);
+    border-color: var(--pyn-calc-border);
+    color: var(--pyn-calc-text);
+}
+.pynbodyext-calc-badge-info {
+    background: var(--pyn-calc-accent-soft);
+    border-color: color-mix(in srgb, var(--pyn-calc-accent) 18%, transparent);
+    color: var(--pyn-calc-accent);
+}
+.pynbodyext-calc-badge-ok {
+    background: var(--pyn-calc-ok-soft);
+    border-color: color-mix(in srgb, var(--pyn-calc-ok) 18%, transparent);
+    color: var(--pyn-calc-ok);
+}
+.pynbodyext-calc-badge-warn {
+    background: var(--pyn-calc-warn-soft);
+    border-color: color-mix(in srgb, var(--pyn-calc-warn) 18%, transparent);
+    color: var(--pyn-calc-warn);
+}
+.pynbodyext-calc-badge-error {
+    background: var(--pyn-calc-error-soft);
+    border-color: color-mix(in srgb, var(--pyn-calc-error) 18%, transparent);
+    color: var(--pyn-calc-error);
+}

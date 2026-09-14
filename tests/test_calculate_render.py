@@ -503,6 +503,50 @@ def test_calculator_card_section_is_a_nameable_attribute() -> None:
     assert "()" not in hint_html.split("<pre>")[1]
 
 
+def _emitted_card_classes(html: str) -> set[str]:
+    """``pynbodyext-calc-*`` classes referenced by a rendered card."""
+    classes = set()
+    for attribute in re.findall(r"class='([^']*)'", html):
+        classes.update(name for name in attribute.split() if name.startswith("pynbodyext-calc-"))
+    return classes
+
+
+def test_card_css_is_a_packaged_file_defining_every_emitted_class() -> None:
+    """The stylesheet lives in ``display.css`` and covers the class contract.
+
+    The rich helpers emit ``pynbodyext-calc-*`` class names and the stylesheet is
+    the only place they are defined, so a renamed or missing class would silently
+    render an unstyled card.  The CSS is package data (``display.css`` next to
+    ``display.py``), hence the ``importlib.resources`` check: an unshipped file
+    must fail here rather than only in someone's installed wheel.
+    """
+    import importlib.resources
+
+    from pynbodyext.core.calculate import display
+
+    css_file = importlib.resources.files("pynbodyext.core.calculate").joinpath("display.css")
+    assert css_file.is_file(), "display.css is missing from the installed package"
+    css = css_file.read_text(encoding="utf-8")
+    assert ".pynbodyext-calc-card" in css
+    assert display.HTML_STYLE == display.card_style()
+    assert ".pynbodyext-calc-card" in display.HTML_STYLE
+
+    result = _result()
+    result.warnings.append("synthetic warning")
+    node = result.get_named("m")
+    rich_cards = [
+        make_pipeline()._repr_html_(),
+        result._repr_html_(),
+        node._repr_html_(),
+        result.provenance._repr_html_(),
+        result.reports._repr_html_(),
+    ]
+    emitted = set().union(*(_emitted_card_classes(html) for html in rich_cards))
+    assert emitted, "expected the rich cards to reference card classes"
+    missing = sorted(name for name in emitted if f".{name}" not in css)
+    assert not missing, f"class names emitted but not defined in display.css: {missing}"
+
+
 def _scoped_contain():
     """``ParamContain().filter(...)`` — a property carrying a filter scope.
 

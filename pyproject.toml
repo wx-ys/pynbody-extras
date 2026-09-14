@@ -53,6 +53,12 @@ where = ["."]
 include = ["pynbodyext*"]
 #exclude = []
 
+# Non-code assets shipped inside the package. `display.css` is the card theme
+# read by `pynbodyext/core/calculate/display.py`; without this entry wheels and
+# sdists drop it (non-`.py` files are not package data by default).
+[tool.setuptools.package-data]
+pynbodyext = ["**/*.css"]
+
 [tool.setuptools.dynamic]
 version = {attr = "pynbodyext.__version__"}
 
