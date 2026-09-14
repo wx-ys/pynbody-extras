@@ -58,24 +58,28 @@ def _import_object(path: str) -> Any:
     return obj
 
 
-def _default_init_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Encode the constructor defaults of a node that shows no explicit arguments.
+def default_init_payload(
+    calculator_or_path: Any, *, inline_array_bytes: int | None = None
+) -> dict[str, Any]:
+    """Encode the declared defaults of a calculator that shows no explicit argument.
 
-    Signature payloads omit parameters left at their default, so a calculator
+    Signature payloads omit parameters at their declared default, so a calculator
     whose parameters are *all* defaults carries an empty init payload and would
-    render as a bare class name.  ``ParamContain`` says nothing about what the
-    node does, so those defaults are spelled out instead —
-    ``ParamContain(0.5, "r", "mass")``.
+    render as a bare class name.  ``ParamContain`` says nothing about what the node
+    does, so those defaults are spelled out instead — ``ParamContain(0.5, "r",
+    "mass")``.
     """
-    class_path = payload.get("class")
-    if not isinstance(class_path, str):
-        return {}
     try:
         from dataclasses import fields as dataclass_fields
 
         from .signature import DEFAULT_INLINE_ARRAY_BYTES, _Encoder, _field_default
 
-        cls = _import_object(class_path)
+        inline_bytes = DEFAULT_INLINE_ARRAY_BYTES if inline_array_bytes is None else inline_array_bytes
+        cls = (
+            calculator_or_path
+            if isinstance(calculator_or_path, type)
+            else _import_object(str(calculator_or_path))
+        )
         field_map = {field.name: field for field in dataclass_fields(cls)}
         defaults: dict[str, Any] = {}
         for spec in collect_param_specs(cls):
@@ -85,19 +89,24 @@ def _default_init_payload(payload: dict[str, Any]) -> dict[str, Any]:
             has_default, default = _field_default(item)
             if not has_default:
                 continue
-            encoded = _Encoder.encode_value(default, f"init.{spec.name}", DEFAULT_INLINE_ARRAY_BYTES)
+            encoded = _Encoder.encode_value(default, f"init.{spec.name}", inline_bytes)
             defaults[spec.name] = encoded.value
         return defaults
     except Exception:
         return {}
 
 
-def _display_init_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Return the init payload to display, filling in defaults where needed."""
+def display_init_payload(payload: dict[str, Any], *, inline_array_bytes: int | None = None) -> dict[str, Any]:
+    """The init payload to display: explicit arguments, else every declared default.
+
+    The single implementation of the rule; ``signature.calculator_pretty_init_args``
+    routes a live calculator through it as well, so the label of a live object and
+    of a stored payload cannot drift apart.
+    """
     init = payload.get("init")
     if init:
         return init
-    return _default_init_payload(payload)
+    return default_init_payload(payload.get("class"), inline_array_bytes=inline_array_bytes)
 
 
 def _field_order(payload: dict[str, Any], init: dict[str, Any]) -> list[str]:
@@ -244,7 +253,7 @@ class SignaturePrinter:
     @staticmethod
     def dataclass_args(payload: dict[str, Any]) -> str:
         """Render a dataclass calculator's init arguments."""
-        init = _display_init_payload(payload)
+        init = display_init_payload(payload)
         if not init:
             return ""
         return ", ".join(
@@ -437,7 +446,7 @@ class TreePrinter:
 
     Labels are intentionally compact: a node keeps just the arguments it was
     given, plus the defaults of a node that was given none (see
-    :func:`_display_init_payload`), so a label stays self-describing without
+    :func:`display_init_payload`), so a label stays self-describing without
     repeating every default of every node.  Use as::
 
         TreePrinter.calculator_head(payload)  # -> "MyCalc"
@@ -618,7 +627,7 @@ class TreePrinter:
     @staticmethod
     def dataclass_args(payload: dict[str, Any]) -> str:
         """Render a dataclass calculator's init arguments for tree display."""
-        init = _display_init_payload(payload)
+        init = display_init_payload(payload)
         if not init:
             return ""
         return ", ".join(

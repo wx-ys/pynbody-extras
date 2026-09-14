@@ -84,7 +84,7 @@ print(re.dependency_tree)
 ParamContain("r", 0.5)<prop>
 ├─ TransformChain<trans>
 │  ├─ WrapBox(None, "minirange", move_all=True)<trans>
-│  └─ ShiftPosTo(CenPos("ssc"))<trans>
+│  └─ ShiftPosTo("ssc", move_all=True)<trans>
 │     └─ CenPos("ssc")<prop>
 └─ AndFilter<filt>
    ├─ Sphere("30 kpc")<filt>

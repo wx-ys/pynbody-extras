@@ -267,6 +267,45 @@ class Param(Generic[T]):
 
 _PARAM_METADATA_KEY = "pynbodyext_calculate_param"
 
+#: Instance attribute holding the field values the constructor was given, before
+#: ``__post_init__`` normalised them (see :func:`capture_init_values`).
+INIT_VALUES_ATTR = "_init_values"
+
+
+def capture_init_values(instance: Any) -> None:
+    """Record the constructor's field values on *instance*, before normalisation.
+
+    ``__post_init__`` may rewrite a field — ``ShiftPosTo`` turns the string
+    ``"ssc"`` into ``CenPos("ssc")`` — after which comparing the live value to the
+    declared default can no longer tell "the default was used" from "another
+    value was passed".  Decisions that ask "is this parameter at its default?"
+    read this snapshot, so ``ShiftPosTo()`` and ``ShiftPosTo("ssc")`` both count
+    as all-default.
+    """
+    try:
+        instance.__dict__[INIT_VALUES_ATTR] = dict(instance.__dict__)
+    except (AttributeError, TypeError):  # pragma: no cover - slots-based subclass
+        pass
+
+
+def captured_init_value(instance: Any, name: str) -> tuple[bool, Any]:
+    """Return ``(captured, value)``: the constructor value of *name*, if recorded."""
+    values = getattr(instance, INIT_VALUES_ATTR, None)
+    if isinstance(values, dict) and name in values:
+        return True, values[name]
+    return False, None
+
+
+def record_init_value(instance: Any, name: str, value: Any) -> None:
+    """Update a recorded constructor value after a clone changed *name*.
+
+    The snapshot is *replaced*, not mutated: ``_clone`` is a shallow copy, so the
+    original and the clone share the dict until one of them rebinds it.
+    """
+    values = instance.__dict__.get(INIT_VALUES_ATTR)
+    if isinstance(values, dict) and name in values:
+        instance.__dict__[INIT_VALUES_ATTR] = {**values, name: value}
+
 
 @dataclass(frozen=True, slots=True)
 class ParamSpec:

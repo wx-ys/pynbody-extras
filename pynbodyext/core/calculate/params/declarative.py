@@ -9,6 +9,7 @@ from pynbodyext.core.calculate.nodes.base import CalculatorBase
 
 from .fields import (
     Param,
+    capture_init_values,
     collect_base_init_fields,
     collect_param_specs,
     declarative_dependencies,
@@ -80,6 +81,8 @@ def dataclass_calc(
         original_post_init = raw_cls.__dict__.get("__post_init__")
 
         def __post_init__(self: Any) -> None:
+            # Before the hook below (and the subclass's own) can normalise fields.
+            capture_init_values(self)
             self._init_dataclass_base()
             if callable(original_post_init):
                 original_post_init(self)

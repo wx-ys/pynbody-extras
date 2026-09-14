@@ -42,6 +42,7 @@ from pynbodyext.core.calculate.params import (
     dynamic_value_dependencies,
     resolve_value_for,
 )
+from pynbodyext.core.calculate.params.fields import record_init_value
 from pynbodyext.core.calculate.result.enums import (
     BuiltinKinds,
     ErrorPolicy,
@@ -913,6 +914,9 @@ class _CalculatorComposeMixin(_CalculatorContract, Generic[TRaw, TPublic]):
         clone.__dict__.pop("_signature_cache", None)
         for key, value in changes.items():
             setattr(clone, key, value)
+            # The clone changed this field after construction, so the recorded
+            # constructor value (used to decide explicit-vs-default) follows.
+            record_init_value(clone, key, value)
         return clone
 
     @overload
