@@ -33,7 +33,7 @@ from pynbodyext.core.calculate.display import (
     html_pre,
     mimebundle,
 )
-from pynbodyext.core.calculate.nodes._tree import hidden_label, label_for, render_children
+from pynbodyext.core.calculate.nodes._tree import render_tree
 from pynbodyext.core.calculate.params import (
     DynamicParamSpec,
     RuntimeValueResolver,
@@ -331,7 +331,7 @@ class _CalculatorDisplayMixin(_CalculatorContract):
 
     @property
     def tree_label(self) -> str:
-        """Label used by format_tree()."""
+        """Label used by the dependency tree."""
         return self.log_label
 
     def _repr_init_text(self) -> str:
@@ -402,54 +402,26 @@ class _CalculatorDisplayMixin(_CalculatorContract):
 
         body_parts: list[str] = []
         if _style() == "rich":
-            body_parts.append(html_details("Dependency tree", html_pre(self.format_tree()), open=False))
+            body_parts.append(html_details("Dependency tree", html_pre(self.dependency_tree), open=False))
         else:
-            body_parts.append(html_pre("Use .format_tree() for the dependency tree"))
+            body_parts.append(html_pre("Use .dependency_tree for details"))
 
         return html_card(self.__class__.__name__, rows, body="".join(body_parts), escape_values=False)
 
     def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, str]:
         return mimebundle(repr(self), self._repr_html_())
 
-    def format_tree(
-        self,
-        max_depth: int | None = None,
-        show_inputs: bool = True,
-        *,
-        max_children: int | None = None,
-        compact_kinds: bool = True,
-    ) -> TextReport:
-        """Return a text tree of this calculator and its dependencies.
+    @property
+    def dependency_tree(self) -> TextReport:
+        """This calculator's dependency tree, as a renderable text report.
 
-        The result is a :class:`~pynbodyext.core.calculate.display.TextReport`: a
-        ``str`` like before (``print``, ``in`` and slicing are unchanged) that
-        also renders as an HTML card in notebooks, so the tree is reachable
-        without a separate ``.dependency_tree`` view attribute.
+        A :class:`~pynbodyext.core.calculate.display.TextReport`, so it reads like
+        the ``str`` it always was (``print``, ``in``, slicing, equality) while
+        also rendering as a card in notebooks — no call needed.  The name matches
+        the card's ``Dependency tree`` section.  For a truncated tree, use
+        :func:`pynbodyext.core.calculate.nodes._tree.render_tree`.
         """
-        if max_depth is not None and max_depth < 0:
-            raise ValueError("max_depth must be non-negative or None")
-        if max_children is not None and max_children < 0:
-            raise ValueError("max_children must be non-negative or None")
-
-        calculator = cast("CalculatorBase[Any, Any]", self)
-        lines = [label_for(calculator, show_inputs=show_inputs, compact_kinds=compact_kinds)]
-
-        if max_depth == 0 and calculator.children():
-            lines.append(f"└─ {hidden_label(calculator.children())}")
-        else:
-            lines.extend(
-                render_children(
-                    calculator,
-                    prefix="",
-                    depth=1,
-                    max_depth=max_depth,
-                    max_children=max_children,
-                    show_inputs=show_inputs,
-                    compact_kinds=compact_kinds,
-                )
-            )
-
-        return TextReport("Dependency tree", "\n" + "\n".join(lines))
+        return TextReport("Dependency tree", render_tree(cast("CalculatorBase[Any, Any]", self)))
 
 
 class _CalculatorRunMixin(_CalculatorContract, Generic[TRaw, TPublic]):

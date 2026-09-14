@@ -152,12 +152,12 @@ class ResultRepr:
 
     @staticmethod
     def _node_observer_section(node: ResultNode) -> str:
-        """Return Observer count table + fields fold-out HTML, or empty string."""
+        """Return Observation count table + fields fold-out HTML, or empty string."""
         if node.run.observation is None:
             return ""
         observation_rows = node.run.observation._display_rows()
         counts_html = html_details(
-            "Observer",
+            "Observation",
             html_scroll_x(
                 html_table(
                     observation_rows,
@@ -175,7 +175,9 @@ class ResultRepr:
         if node.run.observation.deletes:
             observer_lines.append(f"deletes: {ResultRepr._format_field_set(node.run.observation.deletes)}")
         fields_html = (
-            html_details("Observer fields", html_pre("\n".join(observer_lines)), open=False) if observer_lines else ""
+            html_details("Observation fields", html_pre("\n".join(observer_lines)), open=False)
+            if observer_lines
+            else ""
         )
         return counts_html + fields_html
 
@@ -288,15 +290,29 @@ class ResultRepr:
     @staticmethod
     def _result_named_section(result: Result[Any]) -> str:
         """Return the Named values section HTML, or empty string."""
-        named_values = result.named_values
-        if not named_values:
+        if not result.named_values:
             return ""
         return html_section(
             "Named values",
             html_scroll_x(
+                html_table(
+                    result.named_values._display_rows(),
+                    class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap",
+                )
+            ),
+        )
+
+    @staticmethod
+    def _result_warnings_section(result: Result[Any]) -> str:
+        """Return the Warnings section HTML, or empty string."""
+        if not result.warnings:
+            return ""
+        return html_section(
+            "Warnings",
+            html_scroll_x(
                 html_data_table(
-                    ["name", "value"],
-                    [[key, compact_repr(value, max_length=180)] for key, value in named_values.items()],
+                    ["#", "message"],
+                    [[index + 1, str(warning)] for index, warning in enumerate(result.warnings)],
                     class_name="pynbodyext-calc-data-table pynbodyext-calc-data-table-nowrap",
                 )
             ),
@@ -366,24 +382,28 @@ class ResultRepr:
             rows.append(("errors", len(result.errors)))
 
         if _style() != "rich":
-            hint = "Use .named, .errors, .warnings, .provenance, .perf_summary and .reports for details"
+            hint = (
+                "Use .named_values, .warnings, .errors, .provenance, "
+                ".execution_tree, .performance and .cache for details"
+            )
             return html_card("Result", rows, body=html_pre(hint), escape_values=False)
 
         execution_tree_html = html_details(
-            "Execution tree", html_pre(result.report_execution_tree()), open=not result.ok
+            "Execution tree", html_pre(result.execution_tree), open=not result.ok
         )
 
-        perf_text = str(result.report_perf()).strip()
+        perf_text = str(result.performance).strip()
         perf_html = html_details("Performance", html_pre(perf_text), open=False) if perf_text else ""
 
-        cache_text = str(result.report_cache()).strip()
+        cache_text = str(result.cache).strip()
         cache_html = html_details("Cache", html_pre(cache_text), open=False) if cache_text else ""
 
         body = (
             ResultRepr._result_metrics_section(result)
             + ResultRepr._result_named_section(result)
-            + ResultRepr._result_provenance_section(result)
+            + ResultRepr._result_warnings_section(result)
             + ResultRepr._result_errors_section(result)
+            + ResultRepr._result_provenance_section(result)
             + execution_tree_html
             + perf_html
             + cache_html

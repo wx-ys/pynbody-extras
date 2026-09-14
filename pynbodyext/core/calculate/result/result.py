@@ -87,6 +87,7 @@ from .enums import NodeKind, NodeStatus, RecordPolicy
 from .views import (
     DiagnosticsView,
     ErrorListView,
+    NamedValuesView,
     NamedView,
     ObservationsView,
     ReportsView,
@@ -376,9 +377,38 @@ class Result(Generic[T]):
         return len(self.nodes)
 
     @property
-    def named_values(self) -> dict[str, Any]:
-        """Return public values for named nodes that were materialized."""
-        return dict(self.diagnostics.get("named_values", {}))
+    def named_values(self) -> NamedValuesView:
+        """Public values for named nodes that were materialized.
+
+        Renders as the ``Named values`` section of the result card.
+        """
+        return NamedValuesView(self.diagnostics.get("named_values", {}))
+
+    @property
+    def execution_tree(self) -> TextReport:
+        """The execution tree, annotated with runtime diagnostics.
+
+        Renders as the ``Execution tree`` section of the result card.  For a
+        truncated or id-annotated tree, use
+        :meth:`pynbodyext.core.calculate.result.query.ResultQuery.execution_tree`.
+        """
+        from .query import ResultQuery
+
+        return TextReport("Execution tree", ResultQuery.execution_tree(self))
+
+    @property
+    def performance(self) -> TextReport:
+        """The formatted performance report (the card's ``Performance`` section)."""
+        from .repr import ResultRepr
+
+        return TextReport("Performance", ResultRepr.perf_table(self))
+
+    @property
+    def cache(self) -> TextReport:
+        """The runtime cache report (the card's ``Cache`` section)."""
+        from .repr import ResultRepr
+
+        return TextReport("Runtime Cache", ResultRepr.cache_section(self))
 
     def get_node(self, node_id: str) -> ResultNode:
         """Return a result node by internal node id."""
@@ -418,12 +448,6 @@ class Result(Generic[T]):
             return
         first = self.errors[0]
         raise RuntimeError(f"{first.error_type}: {first.message}")
-
-    def report_cache(self) -> TextReport:
-        """Return the runtime cache report (renderable in all display styles)."""
-        from .repr import ResultRepr
-
-        return TextReport("Runtime Cache", ResultRepr.cache_section(self))
 
     def report_trace_timeline(self, *, show_ids: bool = False, include_observer: bool = True) -> TextReport:
         """Return a trace timeline for the run."""
@@ -501,47 +525,6 @@ class Result(Generic[T]):
         return TextReport(
             "Node tree",
             ResultQuery.node_tree(self, node=node, show_ids=show_ids, max_depth=max_depth, max_children=max_children),
-        )
-
-    def report_execution_tree(
-        self,
-        node: str | ResultNode | None = None,
-        *,
-        show_ids: bool = False,
-        max_depth: int | None = None,
-        max_children: int | None = None,
-        include_perf: bool = True,
-        include_cache: bool = True,
-        include_observer: bool = True,
-        include_values: bool = False,
-    ) -> TextReport:
-        """Return a tree report annotated with runtime diagnostics."""
-        from .query import ResultQuery
-
-        return TextReport(
-            "Execution tree",
-            ResultQuery.execution_tree(
-                self,
-                node=node,
-                show_ids=show_ids,
-                max_depth=max_depth,
-                max_children=max_children,
-                include_perf=include_perf,
-                include_cache=include_cache,
-                include_observer=include_observer,
-                include_values=include_values,
-            ),
-        )
-
-    def report_perf(
-        self, *, show_ids: bool = False, max_depth: int | None = None, max_children: int | None = None
-    ) -> TextReport:
-        """Return a formatted performance report."""
-        from .repr import ResultRepr
-
-        return TextReport(
-            "Performance",
-            ResultRepr.perf_table(self, show_ids=show_ids, max_depth=max_depth, max_children=max_children),
         )
 
     def report_summary(self) -> TextReport:

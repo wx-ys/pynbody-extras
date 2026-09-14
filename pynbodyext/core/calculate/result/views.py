@@ -109,6 +109,27 @@ class WarningListView(ViewObject, list[Any]):
         return NotImplemented
 
 
+class NamedValuesView(InfoView, dict[str, Any]):
+    """``Result.named_values``: ``{name: public_value}`` that renders itself.
+
+    Mirrors the ``Named values`` section of the result card, so the section and
+    the attribute show the same table.
+    """
+
+    __hash__ = None
+
+    def __init__(self, data: dict[str, Any] | None = None) -> None:
+        dict.__init__(self, data or {})
+
+    def _display_title(self) -> str:
+        return "Named values"
+
+    def _display_rows(self) -> list[tuple[str, Any]]:
+        if not self:
+            return [("values", "-")]
+        return [(name, compact_repr(value, max_length=180)) for name, value in self.items()]
+
+
 class ReportsView(InfoView, dict[str, str]):
     """``Result.reports``: ``{name: report_text}`` with a :meth:`names` helper.
 
