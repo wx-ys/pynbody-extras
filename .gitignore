@@ -80,3 +80,4 @@ data/
 
 # Agent scratch docs (not version-controlled)
 docs/superpowers/
+docs/adr/

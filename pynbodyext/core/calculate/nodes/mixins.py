@@ -23,7 +23,7 @@ from pynbody import units
 from pynbody.array import SimArray
 
 from pynbodyext.core.calculate.display import (
-    ViewObject,
+    TextReport,
     _style,
     compact_repr,
     display_value,
@@ -31,8 +31,6 @@ from pynbodyext.core.calculate.display import (
     html_card,
     html_details,
     html_pre,
-    html_scroll_x,
-    html_table,
     mimebundle,
 )
 from pynbodyext.core.calculate.nodes._tree import hidden_label, label_for, render_children
@@ -368,6 +366,8 @@ class _CalculatorDisplayMixin(_CalculatorContract):
             ("signature", self.signature_hash()),
             ("cache", display_value(self.cache_policy)),
         ]
+        if self.record_policy is not None:
+            rows.append(("record", display_value(self.record_policy)))
         if not self.scope.is_empty:
             rows.append(("scope", self.scope.short_label()))
         deps = self.dependencies()
@@ -391,82 +391,20 @@ class _CalculatorDisplayMixin(_CalculatorContract):
     def _repr_pretty_(self, printer: Any, cycle: bool) -> None:
         printer.text(f"{self.__class__.__name__}(...)" if cycle else repr(self))
 
-    @property
-    def config(self) -> ViewObject:
-        """A view of this calculator's configuration (name/record/scope args)."""
-        rows = [(k, v) for k, v in self._repr_fields() if k != "scope"]
-
-        class _Config(ViewObject):
-            def _title(self) -> str:
-                return "Configuration"
-
-            def _summary(self) -> str:
-                if not rows:
-                    return "config()"
-                return f"config({compact_repr(rows)})"
-
-            def _sections(self) -> list[tuple[str | None, str]]:
-                return [(k or "arg", compact_repr(v, max_length=120)) for k, v in rows]
-
-        return _Config()
-
-    @property
-    def dependency_tree(self) -> ViewObject:
-        """A view of this calculator's dependency tree."""
-        tree = self.format_tree()
-
-        class _Tree(ViewObject):
-            def _title(self) -> str:
-                return "Dependency tree"
-
-            def _summary(self) -> str:
-                first = tree.strip().splitlines()
-                return first[0] if first else tree.strip()
-
-            def _sections(self) -> list[tuple[str | None, str]]:
-                return [(None, tree)]
-
-        return _Tree()
-
     def _repr_html_(self) -> str:
         rows: list[tuple[str, Any]] = []
         for key, value in self._repr_summary_rows():
-            if key == "kind":
-                rows.append((key, html_badge(display_value(value), tone="info")))
-            elif key == "cache":
-                rows.append((key, html_badge(display_value(value), tone="neutral")))
-            elif key == "scope":
-                rows.append((key, html_badge(value, tone="neutral")))
+            if key in {"kind", "cache", "record", "scope"}:
+                tone = "info" if key == "kind" else "neutral"
+                rows.append((key, html_badge(display_value(value), tone=tone)))
             else:
                 rows.append((key, value))
 
         body_parts: list[str] = []
         if _style() == "rich":
-            detail_rows: list[tuple[str, Any]] = []
-            positional_index = 0
-            for key, value in self._repr_fields():  # type: ignore
-                if key is None:
-                    positional_index += 1  # type: ignore
-                    label = f"arg{positional_index}"
-                else:
-                    label = key
-                detail_rows.append((label, compact_repr(value, max_length=220)))
-            if detail_rows:
-                body_parts.append(
-                    html_details(
-                        "Configuration",
-                        html_scroll_x(
-                            html_table(
-                                detail_rows,
-                                class_name="pynbodyext-calc-table pynbodyext-calc-table-nowrap pynbodyext-calc-monospace",
-                            ),
-                            min_width="56rem",
-                        ),
-                    )
-                )
             body_parts.append(html_details("Dependency tree", html_pre(self.format_tree()), open=False))
         else:
-            body_parts.append(html_pre("Use .config and .dependency_tree for details"))
+            body_parts.append(html_pre("Use .format_tree() for the dependency tree"))
 
         return html_card(self.__class__.__name__, rows, body="".join(body_parts), escape_values=False)
 
@@ -480,8 +418,14 @@ class _CalculatorDisplayMixin(_CalculatorContract):
         *,
         max_children: int | None = None,
         compact_kinds: bool = True,
-    ) -> str:
-        """Return a text tree of this calculator and its dependencies."""
+    ) -> TextReport:
+        """Return a text tree of this calculator and its dependencies.
+
+        The result is a :class:`~pynbodyext.core.calculate.display.TextReport`: a
+        ``str`` like before (``print``, ``in`` and slicing are unchanged) that
+        also renders as an HTML card in notebooks, so the tree is reachable
+        without a separate ``.dependency_tree`` view attribute.
+        """
         if max_depth is not None and max_depth < 0:
             raise ValueError("max_depth must be non-negative or None")
         if max_children is not None and max_children < 0:
@@ -505,7 +449,7 @@ class _CalculatorDisplayMixin(_CalculatorContract):
                 )
             )
 
-        return "\n" + "\n".join(lines)
+        return TextReport("Dependency tree", "\n" + "\n".join(lines))
 
 
 class _CalculatorRunMixin(_CalculatorContract, Generic[TRaw, TPublic]):

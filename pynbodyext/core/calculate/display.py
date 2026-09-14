@@ -597,14 +597,15 @@ def html_card(
     title: str, rows: list[tuple[str, Any]], *, body: str = "", html_style: str = HTML_STYLE, escape_values: bool = True
 ) -> str:
     """Return an HTML card with a title, table of rows, and optional body."""
+    table = html_table(rows, escape_values=escape_values) if rows else ""
     if _style() != "rich":
-        return f"<h4>{html_escape(title)}</h4>{html_table(rows, escape_values=escape_values)}{body}"
+        return f"<h4>{html_escape(title)}</h4>{table}{body}"
 
     return (
         f"{html_style}"
         "<div class='pynbodyext-calc-card'>"
         f"<div class='pynbodyext-calc-title'>{html_escape(title)}</div>"
-        f"{html_table(rows, escape_values=escape_values)}"
+        f"{table}"
         f"{body}"
         "</div>"
     )
@@ -673,6 +674,93 @@ class ViewObject:
         return mimebundle(text, self._repr_html_())
 
 
+class InfoView:
+    """Mixin that renders a value object from a single definition of its fields.
+
+    A subclass describes itself once, as ``_display_rows()`` — a list of
+    ``(label, value)`` pairs.  The mixin turns those rows into a compact text
+    summary (``__repr__`` / ``__str__``) and into HTML for every style, because
+    :func:`html_card` already picks the dialect (``rich`` cards with a CSS block
+    vs. plain ``<table>`` for GitHub).  Rich and GitHub therefore always show
+    the same fields; only the markup differs.
+
+    Subclasses must define ``_display_rows``; ``_display_title`` and
+    ``_display_body`` have defaults.  Dataclasses must pass ``repr=False`` so
+    the generated ``__repr__`` does not shadow this mixin's summary.
+
+    >>> class Point(InfoView):
+    ...     def __init__(self, x, y):
+    ...         self.x, self.y = x, y
+    ...     def _display_rows(self):
+    ...         return [("x", self.x), ("y", self.y)]
+    >>> repr(Point(1, 2))
+    'Point(x=1, y=2)'
+    """
+
+    __slots__ = ()
+
+    def _display_title(self) -> str:
+        """Title shown above the rows (defaults to the class name)."""
+        return type(self).__name__
+
+    def _display_rows(self) -> list[tuple[str, Any]]:
+        """Rows of ``(label, value)`` shown in every display style."""
+        raise NotImplementedError
+
+    def _display_body(self) -> str:
+        """Optional pre-rendered HTML appended under the rows."""
+        return ""
+
+    def _display_summary(self) -> str:
+        parts = ", ".join(f"{key}={compact_repr(value, max_length=48)}" for key, value in self._display_rows())
+        return f"{self._display_title()}({parts})"
+
+    def __repr__(self) -> str:
+        return self._display_summary()
+
+    def __str__(self) -> str:
+        # Mirror ``object.__str__``: a subclass with its own ``__repr__`` (a
+        # hand-written one-line summary) keeps that text here too.
+        return repr(self)
+
+    def _repr_html_(self) -> str:
+        return html_card(self._display_title(), self._display_rows(), body=self._display_body())
+
+    def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, str]:
+        return mimebundle(repr(self), self._repr_html_())
+
+
+class TextReport(str):
+    """A text report that also renders itself in notebooks.
+
+    Behaves exactly like :class:`str` — ``print``, slicing, ``in``, equality and
+    every existing ``report_*`` caller are unchanged — but remembers a title and
+    renders as an HTML card (``rich``) or ``<h4>`` + ``<pre>`` (``github``).
+    This lets a report method be the single entry point for both the text and
+    the notebook view, instead of adding a parallel ``.view`` attribute.
+    """
+
+    #: Title of the report (``str.title`` is a method, hence the distinct name).
+    report_title: str
+
+    def __new__(cls, title: str, text: str = "") -> TextReport:
+        obj = super().__new__(cls, text)
+        obj.report_title = title
+        return obj
+
+    def __repr__(self) -> str:
+        return str.__repr__(self)
+
+    def _repr_html_(self) -> str:
+        return html_card(self.report_title, [], body=html_pre(str(self)), escape_values=False)
+
+    def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, str]:
+        return mimebundle(str(self), self._repr_html_())
+
+    def _repr_pretty_(self, printer: Any, cycle: bool) -> None:
+        printer.text(str(self))
+
+
 def format_time(value: float | None) -> str:
     """Format a time value in a human-friendly unit."""
     if value is None:
@@ -721,6 +809,8 @@ __all__ = [
     "html_card",
     "mimebundle",
     "ViewObject",
+    "InfoView",
+    "TextReport",
     "format_time",
     "format_mem",
 ]

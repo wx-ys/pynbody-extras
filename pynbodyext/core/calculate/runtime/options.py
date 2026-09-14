@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from pynbodyext.core.calculate.display import display_value, html_card, mimebundle
+from pynbodyext.core.calculate.display import InfoView, display_value
 from pynbodyext.core.calculate.result.enums import ErrorPolicy, RecordPolicy, normalize_error_policy
 
 if TYPE_CHECKING:
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(slots=True)
-class RunOptions:
+class RunOptions(InfoView):
     """Execution options for a calculator run.
 
     Parameters
@@ -59,38 +59,32 @@ class RunOptions:
     def __post_init__(self) -> None:
         self.errors = normalize_error_policy(self.errors)
 
+    def _fields(self) -> list[tuple[str, str, Any]]:
+        """``(repr name, display label, value)`` for every option.
+
+        The one field list behind both the text repr and the HTML table, so the
+        two cannot list different options.
+        """
+        return [
+            ("cache", "cache", self.cache),
+            ("progress", "progress", self.progress),
+            ("perf_time", "perf time", self.perf_time),
+            ("perf_memory", "perf memory", self.perf_memory),
+            ("observe", "observe", self.observe),
+            ("backend", "backend", self.backend),
+            ("default_record_policy", "record policy", display_value(self.default_record_policy)),
+            ("errors", "errors", display_value(self.errors)),
+            ("cache_small_value_bytes", "small cache bytes", self.cache_small_value_bytes),
+            ("auto_record_cached_values", "auto record cached values", self.auto_record_cached_values),
+            ("auto_record_small_value_bytes", "auto record small bytes", self.auto_record_small_value_bytes),
+        ]
+
     def __repr__(self) -> str:
-        return (
-            "RunOptions("
-            f"cache={self.cache!r}, progress={self.progress!r}, "
-            f"perf_time={self.perf_time!r}, perf_memory={self.perf_memory!r}, "
-            f"observe={self.observe!r}, backend={self.backend!r}, "
-            f"errors={display_value(self.errors)!r}, "
-            f"auto_record_cached_values={self.auto_record_cached_values!r}, "
-            f"auto_record_small_value_bytes={self.auto_record_small_value_bytes!r}"
-            ")"
-        )
+        parts = ", ".join(f"{name}={value!r}" for name, _, value in self._fields())
+        return f"RunOptions({parts})"
 
     def _repr_pretty_(self, printer: Any, cycle: bool) -> None:
         printer.text("RunOptions(...)" if cycle else repr(self))
 
-    def _repr_html_(self) -> str:
-        return html_card(
-            "RunOptions",
-            [
-                ("cache", self.cache),
-                ("progress", self.progress),
-                ("perf time", self.perf_time),
-                ("perf memory", self.perf_memory),
-                ("observe", self.observe),
-                ("backend", self.backend),
-                ("record policy", display_value(self.default_record_policy)),
-                ("errors", display_value(self.errors)),
-                ("small cache bytes", self.cache_small_value_bytes),
-                ("auto record cached values", self.auto_record_cached_values),
-                ("auto record small bytes", self.auto_record_small_value_bytes),
-            ],
-        )
-
-    def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, str]:
-        return mimebundle(repr(self), self._repr_html_())
+    def _display_rows(self) -> list[tuple[str, Any]]:
+        return [(label, value) for _, label, value in self._fields()]

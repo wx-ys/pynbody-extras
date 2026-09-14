@@ -17,7 +17,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from pynbodyext.core.calculate.display import ViewObject, compact_repr
+from pynbodyext.core.calculate.display import InfoView, ViewObject, compact_repr
+
+
+def _line_count(text: str) -> str:
+    lines = len(text.splitlines())
+    return f"{lines} line" if lines == 1 else f"{lines} lines"
 
 
 def as_view(value: Any, view_cls: Any, **kwargs: Any) -> Any:
@@ -104,8 +109,13 @@ class WarningListView(ViewObject, list[Any]):
         return NotImplemented
 
 
-class ReportsView(dict[str, str]):
-    """``Result.reports``: ``{name: report_text}`` with a :meth:`names` helper."""
+class ReportsView(InfoView, dict[str, str]):
+    """``Result.reports``: ``{name: report_text}`` with a :meth:`names` helper.
+
+    Behaves like the previous plain ``dict`` — the report texts are still the
+    values, reachable as ``result.reports[name]`` — but renders as a compact
+    table of report names instead of dumping every report body into a repr.
+    """
 
     __hash__ = None
 
@@ -116,9 +126,21 @@ class ReportsView(dict[str, str]):
         """Names of the available reports."""
         return tuple(self.keys())
 
+    def _display_title(self) -> str:
+        return "Reports"
 
-class DiagnosticsView(dict[str, Any]):
-    """``Result.diagnostics``: raw diagnostic payloads plus typed accessors."""
+    def _display_rows(self) -> list[tuple[str, Any]]:
+        if not self:
+            return [("reports", "-")]
+        return [(name, _line_count(text)) for name, text in self.items()]
+
+
+class DiagnosticsView(InfoView, dict[str, Any]):
+    """``Result.diagnostics``: raw diagnostic payloads plus typed accessors.
+
+    Renders as a compact table of stream name -> payload size instead of dumping
+    every raw event; the payloads stay reachable through the typed accessors.
+    """
 
     __hash__ = None
 
@@ -128,6 +150,18 @@ class DiagnosticsView(dict[str, Any]):
     def names(self) -> tuple[str, ...]:
         """Names of the available diagnostic payloads."""
         return tuple(self.keys())
+
+    def _display_title(self) -> str:
+        return "Diagnostics"
+
+    def _display_rows(self) -> list[tuple[str, Any]]:
+        if not self:
+            return [("streams", "-")]
+        rows: list[tuple[str, Any]] = []
+        for name, payload in self.items():
+            size: Any = len(payload) if isinstance(payload, (list, dict, tuple, set)) else "-"
+            rows.append((name, size))
+        return rows
 
     def trace(self) -> list[Any]:
         """Raw trace events (``"trace_events"`` payload)."""
@@ -146,7 +180,7 @@ class DiagnosticsView(dict[str, Any]):
         return list(self.get("observer_events", []))
 
 
-class ObservationsView(dict[str, Any]):
+class ObservationsView(InfoView, dict[str, Any]):
     """``Result.observations``: per-node field-access observations, ``.of(node)``.
 
     Keeps a back-reference to the owning :class:`Result` so a node *name* can be
@@ -158,6 +192,17 @@ class ObservationsView(dict[str, Any]):
     def __init__(self, data: dict[str, Any] | None = None, owner: Any = None) -> None:
         dict.__init__(self, data or {})
         self._owner = owner
+
+    def _display_title(self) -> str:
+        return "Observations"
+
+    def _display_rows(self) -> list[tuple[str, Any]]:
+        rows: list[tuple[str, Any]] = []
+        for node_id, observation in self.items():
+            label = getattr(observation, "node_label", None) or node_id
+            events = len(getattr(observation, "events", ()) or ())
+            rows.append((label, f"{events} event" if events == 1 else f"{events} events"))
+        return rows or [("observations", "-")]
 
     def of(self, node: Any) -> Any:
         """Return the access observation for *node* (node id, name, or node object)."""
