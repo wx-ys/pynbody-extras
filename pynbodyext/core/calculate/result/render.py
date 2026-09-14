@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import importlib
 import json
+from dataclasses import fields as dataclass_fields
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from pynbodyext.core.calculate.params.fields import collect_param_specs
@@ -108,13 +109,41 @@ def _field_order(payload: dict[str, Any], init: dict[str, Any]) -> list[str]:
         return list(init)
 
 
+def _kw_only_names(payload: dict[str, Any]) -> set[str]:
+    """Return the calculator's keyword-only init parameter names.
+
+    A keyword-only parameter (``move_all`` on transforms) is accepted only as
+    ``name=value``, so rendering it positionally would print a call that no longer
+    runs.
+    """
+    try:
+        cls = _import_object(str(payload["class"]))
+        return {item.name for item in dataclass_fields(cls) if item.kw_only}
+    except Exception:
+        return set()
+
+
 def _dataclass_arg_parts(
-    init: dict[str, Any], field_order: list[str], render_value: Callable[[Any], str]
+    init: dict[str, Any],
+    field_order: list[str],
+    render_value: Callable[[Any], str],
+    *,
+    kw_only: set[str] | frozenset[str] = frozenset(),
 ) -> list[str]:
-    """Render init entries as positional parts when they form a leading run."""
+    """Render init entries, positional while the call form allows it.
+
+    Positional rendering only applies to the non-keyword-only fields, and only
+    while they form a leading run of the signature; everything else is rendered as
+    ``name=value``.
+    """
     names = list(init)
-    if field_order[: len(names)] == names:
-        return [render_value(init[name]) for name in names]
+    positional_names = [name for name in names if name not in kw_only]
+    positional_order = [name for name in field_order if name not in kw_only]
+    if positional_order[: len(positional_names)] == positional_names:
+        positional = set(positional_names)
+        return [
+            render_value(init[name]) if name in positional else f"{name}={render_value(init[name])}" for name in names
+        ]
     ordered = [name for name in field_order if name in init]
     ordered += sorted(name for name in init if name not in ordered)
     return [f"{name}={render_value(init[name])}" for name in ordered]
@@ -218,7 +247,11 @@ class SignaturePrinter:
         init = _display_init_payload(payload)
         if not init:
             return ""
-        return ", ".join(_dataclass_arg_parts(init, _field_order(payload, init), SignaturePrinter.value))
+        return ", ".join(
+            _dataclass_arg_parts(
+                init, _field_order(payload, init), SignaturePrinter.value, kw_only=_kw_only_names(payload)
+            )
+        )
 
     @staticmethod
     def scope_suffix(scope: dict[str, Any]) -> str:
@@ -588,7 +621,9 @@ class TreePrinter:
         init = _display_init_payload(payload)
         if not init:
             return ""
-        return ", ".join(_dataclass_arg_parts(init, _field_order(payload, init), TreePrinter.value))
+        return ", ".join(
+            _dataclass_arg_parts(init, _field_order(payload, init), TreePrinter.value, kw_only=_kw_only_names(payload))
+        )
 
 
 # Populate handler dicts.

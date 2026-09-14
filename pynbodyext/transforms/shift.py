@@ -31,7 +31,6 @@ class ShiftPosTo(TransformBase[GenericTranslation]):
     """
 
     mode: Param[SimNpArray | str] = Param(default="ssc", field_name="pos")
-    move_all: bool = True
 
     def __post_init__(self) -> None:
         self.description = "given"
@@ -68,7 +67,6 @@ class ShiftVelTo(TransformBase[GenericTranslation]):
     """
 
     mode: Param[SimNpArray | str] = Param(default="com", field_name="vel")
-    move_all: bool = True
 
     def __post_init__(self) -> None:
         self.description = "given"
