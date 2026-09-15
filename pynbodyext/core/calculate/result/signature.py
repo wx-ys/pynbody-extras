@@ -867,12 +867,11 @@ def _encode_init_entries(calculator: Any, path: str, inline_array_bytes: int) ->
 def calculator_pretty_init_args(calculator: Any, *, inline_array_bytes: int = DEFAULT_INLINE_ARRAY_BYTES) -> str:
     """Return a pretty-printed string of the calculator's init arguments.
 
-    Parameters left at their default are omitted, except on a node that would
-    otherwise render with no arguments at all: there the declared defaults are
-    spelled out, so ``ParamContain`` shows up as ``ParamContain(0.5, "r", "mass")``
-    rather than as a bare, uninformative class name.  Both halves come from
-    :func:`_encode_init_entries` and :func:`display_init_payload`, the same pair the
-    signature payload and a stored signature use.
+    Every positional parameter is rendered, including when it has its declared
+    default, while keyword-only parameters at their declared defaults are
+    omitted.  Both halves come from :func:`_encode_init_entries` and
+    :func:`display_init_payload`, the same pair the signature payload and a
+    stored signature use.
     """
     if not is_dataclass(calculator):
         return ""
