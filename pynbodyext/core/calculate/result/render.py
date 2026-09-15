@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import importlib
 import json
+from dataclasses import fields as dataclass_fields
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from pynbodyext.core.calculate.params.fields import collect_param_specs
@@ -57,24 +58,27 @@ def _import_object(path: str) -> Any:
     return obj
 
 
-def _default_init_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Encode the constructor defaults of a node that shows no explicit arguments.
+def default_init_payload(
+    calculator_or_path: Any, *, inline_array_bytes: int | None = None
+) -> dict[str, Any]:
+    """Encode the declared defaults of a calculator's signature parameters.
 
-    Signature payloads omit parameters left at their default, so a calculator
-    whose parameters are *all* defaults carries an empty init payload and would
-    render as a bare class name.  ``ParamContain`` says nothing about what the
-    node does, so those defaults are spelled out instead —
-    ``ParamContain(0.5, "r", "mass")``.
+    Signature payloads omit parameters at their declared default, so this is the
+    other half of :func:`display_init_payload`: a node that was given no argument
+    still renders as a full call — ``ParamContain`` reads as ``ParamContain(0.5,
+    "r", "mass")`` rather than as a bare, uninformative class name.
     """
-    class_path = payload.get("class")
-    if not isinstance(class_path, str):
-        return {}
     try:
         from dataclasses import fields as dataclass_fields
 
         from .signature import DEFAULT_INLINE_ARRAY_BYTES, _Encoder, _field_default
 
-        cls = _import_object(class_path)
+        inline_bytes = DEFAULT_INLINE_ARRAY_BYTES if inline_array_bytes is None else inline_array_bytes
+        cls = (
+            calculator_or_path
+            if isinstance(calculator_or_path, type)
+            else _import_object(str(calculator_or_path))
+        )
         field_map = {field.name: field for field in dataclass_fields(cls)}
         defaults: dict[str, Any] = {}
         for spec in collect_param_specs(cls):
@@ -84,19 +88,42 @@ def _default_init_payload(payload: dict[str, Any]) -> dict[str, Any]:
             has_default, default = _field_default(item)
             if not has_default:
                 continue
-            encoded = _Encoder.encode_value(default, f"init.{spec.name}", DEFAULT_INLINE_ARRAY_BYTES)
+            encoded = _Encoder.encode_value(default, f"init.{spec.name}", inline_bytes)
             defaults[spec.name] = encoded.value
         return defaults
     except Exception:
         return {}
 
 
-def _display_init_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Return the init payload to display, filling in defaults where needed."""
-    init = payload.get("init")
-    if init:
-        return init
-    return _default_init_payload(payload)
+def display_init_payload(payload: dict[str, Any], *, inline_array_bytes: int | None = None) -> dict[str, Any]:
+    """The init payload to display: positional defaults filled in, arguments on top.
+
+    A signature payload carries only the arguments that differ from the declared
+    default, so the label is completed from the class declaration:
+
+    - a **positional** parameter is always listed, as the argument it was given or
+      its declared default, so ``ShiftPosTo("com")`` and ``ShiftPosTo("ssc")`` differ
+      only in that value and a label always reads as a full constructor call;
+    - a **keyword-only** parameter is listed only when it differs from its declared
+      default, because it is an optional flag rather than part of what the node
+      computes: ``WrapBox(None, "minirange")`` instead of repeating ``move_all=True``
+      on every line of a tree.
+
+    The single implementation of the rule; ``signature.calculator_pretty_init_args``
+    routes a live calculator through it as well, so the label of a live object and of
+    a stored payload cannot drift apart.
+    """
+    explicit = payload.get("init") or {}
+    defaults = default_init_payload(payload.get("class"), inline_array_bytes=inline_array_bytes)
+    if not defaults:
+        return explicit
+    kw_only = _kw_only_names(payload)
+    merged = {name: value for name, value in defaults.items() if name not in kw_only}
+    merged.update(explicit)
+    order = _field_order(payload, merged)
+    ordered = {name: merged[name] for name in order if name in merged}
+    ordered.update({name: value for name, value in merged.items() if name not in ordered})
+    return ordered
 
 
 def _field_order(payload: dict[str, Any], init: dict[str, Any]) -> list[str]:
@@ -108,13 +135,41 @@ def _field_order(payload: dict[str, Any], init: dict[str, Any]) -> list[str]:
         return list(init)
 
 
+def _kw_only_names(payload: dict[str, Any]) -> set[str]:
+    """Return the calculator's keyword-only init parameter names.
+
+    A keyword-only parameter (``move_all`` on transforms) is accepted only as
+    ``name=value``, so rendering it positionally would print a call that no longer
+    runs.
+    """
+    try:
+        cls = _import_object(str(payload["class"]))
+        return {item.name for item in dataclass_fields(cls) if item.kw_only}
+    except Exception:
+        return set()
+
+
 def _dataclass_arg_parts(
-    init: dict[str, Any], field_order: list[str], render_value: Callable[[Any], str]
+    init: dict[str, Any],
+    field_order: list[str],
+    render_value: Callable[[Any], str],
+    *,
+    kw_only: set[str] | frozenset[str] = frozenset(),
 ) -> list[str]:
-    """Render init entries as positional parts when they form a leading run."""
+    """Render init entries, positional while the call form allows it.
+
+    Positional rendering only applies to the non-keyword-only fields, and only
+    while they form a leading run of the signature; everything else is rendered as
+    ``name=value``.
+    """
     names = list(init)
-    if field_order[: len(names)] == names:
-        return [render_value(init[name]) for name in names]
+    positional_names = [name for name in names if name not in kw_only]
+    positional_order = [name for name in field_order if name not in kw_only]
+    if positional_order[: len(positional_names)] == positional_names:
+        positional = set(positional_names)
+        return [
+            render_value(init[name]) if name in positional else f"{name}={render_value(init[name])}" for name in names
+        ]
     ordered = [name for name in field_order if name in init]
     ordered += sorted(name for name in init if name not in ordered)
     return [f"{name}={render_value(init[name])}" for name in ordered]
@@ -215,10 +270,14 @@ class SignaturePrinter:
     @staticmethod
     def dataclass_args(payload: dict[str, Any]) -> str:
         """Render a dataclass calculator's init arguments."""
-        init = _display_init_payload(payload)
+        init = display_init_payload(payload)
         if not init:
             return ""
-        return ", ".join(_dataclass_arg_parts(init, _field_order(payload, init), SignaturePrinter.value))
+        return ", ".join(
+            _dataclass_arg_parts(
+                init, _field_order(payload, init), SignaturePrinter.value, kw_only=_kw_only_names(payload)
+            )
+        )
 
     @staticmethod
     def scope_suffix(scope: dict[str, Any]) -> str:
@@ -402,13 +461,14 @@ SignaturePrinter._CALCULATOR_HANDLERS = {
 class TreePrinter:
     """Renders calculator signature payloads as short tree node labels.
 
-    Labels are intentionally compact: a node keeps just the arguments it was
-    given, plus the defaults of a node that was given none (see
-    :func:`_display_init_payload`), so a label stays self-describing without
-    repeating every default of every node.  Use as::
+    A node label is its full constructor call: every signature parameter, as the
+    argument it was given or its declared default (see
+    :func:`display_init_payload`).  Listing the same parameters for every node —
+    rather than hiding the ones that happen to match a default — is what makes a
+    label predictable to read and to diff.  Use as::
 
         TreePrinter.calculator_head(payload)  # -> "MyCalc"
-        TreePrinter.dataclass_args(payload)  # -> "42, mass=True"
+        TreePrinter.dataclass_args(payload)  # -> '42, "ssc", mass=True'
 
     Handler dispatch dicts are populated after the class definition.
     ``value()`` falls back to :attr:`SignaturePrinter._VALUE_HANDLERS` for
@@ -585,10 +645,12 @@ class TreePrinter:
     @staticmethod
     def dataclass_args(payload: dict[str, Any]) -> str:
         """Render a dataclass calculator's init arguments for tree display."""
-        init = _display_init_payload(payload)
+        init = display_init_payload(payload)
         if not init:
             return ""
-        return ", ".join(_dataclass_arg_parts(init, _field_order(payload, init), TreePrinter.value))
+        return ", ".join(
+            _dataclass_arg_parts(init, _field_order(payload, init), TreePrinter.value, kw_only=_kw_only_names(payload))
+        )
 
 
 # Populate handler dicts.

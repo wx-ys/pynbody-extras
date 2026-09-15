@@ -81,14 +81,14 @@ re = (ParamContain("r",0.5,"mass")
 print(re.dependency_tree)
 ```
 ```
-└─ ParamContain<property>
-   ├─ AndFilter<filter>
-   │  ├─ Sphere<filter>
-   │  └─ FamilyFilter<filter>
-   └─ TransformChain<transform>
-      ├─ WrapBox<transform>
-      └─ ShiftPosTo<transform>
-         └─ CenPos<property>
+ParamContain("r", 0.5, "mass")<prop>
+├─ TransformChain<trans>
+│  ├─ WrapBox(None, "minirange")<trans>
+│  └─ ShiftPosTo("ssc")<trans>
+│     └─ CenPos("ssc")<prop>
+└─ AndFilter<filt>
+   ├─ Sphere("30 kpc", (0, 0, 0))<filt>
+   └─ FamilyFilter("star")<filt>
 ```
 
 

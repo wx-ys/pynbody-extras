@@ -25,7 +25,6 @@ class AlignVec(TransformBase[Rotation]):
 
     vector: Param[np.ndarray]
     up: np.ndarray | None = None
-    move_all: bool = True
 
     def build_handle(self, sim, target, params=None):
         """Apply the transform and return a handle."""

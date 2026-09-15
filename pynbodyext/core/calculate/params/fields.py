@@ -148,7 +148,7 @@ class _ParamField(Field, InfoView):
         return f"Param({parts})"
 
 
-def _make_param_field(spec: ParamSpec, default: Any, *, init: bool, kw_only: bool) -> Field:
+def _make_param_field(spec: ParamSpec, default: Any, *, init: bool, kw_only: bool) -> _ParamField:
     """Build a :class:`_ParamField` with the given spec/default (mirrors ``field()``)."""
     kwargs: dict[str, Any] = {"metadata": _merge_metadata(spec), "init": init, "kw_only": kw_only}
     if default is not MISSING:
@@ -267,6 +267,45 @@ class Param(Generic[T]):
 
 _PARAM_METADATA_KEY = "pynbodyext_calculate_param"
 
+#: Instance attribute holding the field values the constructor was given, before
+#: ``__post_init__`` normalised them (see :func:`capture_init_values`).
+INIT_VALUES_ATTR = "_init_values"
+
+
+def capture_init_values(instance: Any) -> None:
+    """Record the constructor's field values on *instance*, before normalisation.
+
+    ``__post_init__`` may rewrite a field — ``ShiftPosTo`` turns the string
+    ``"ssc"`` into ``CenPos("ssc")`` — after which comparing the live value to the
+    declared default can no longer tell "the default was used" from "another
+    value was passed".  Decisions that ask "is this parameter at its default?"
+    read this snapshot, so ``ShiftPosTo()`` and ``ShiftPosTo("ssc")`` both count
+    as all-default.
+    """
+    try:
+        instance.__dict__[INIT_VALUES_ATTR] = dict(instance.__dict__)
+    except (AttributeError, TypeError):  # pragma: no cover - slots-based subclass
+        pass
+
+
+def captured_init_value(instance: Any, name: str) -> tuple[bool, Any]:
+    """Return ``(captured, value)``: the constructor value of *name*, if recorded."""
+    values = getattr(instance, INIT_VALUES_ATTR, None)
+    if isinstance(values, dict) and name in values:
+        return True, values[name]
+    return False, None
+
+
+def record_init_value(instance: Any, name: str, value: Any) -> None:
+    """Update a recorded constructor value after a clone changed *name*.
+
+    The snapshot is *replaced*, not mutated: ``_clone`` is a shallow copy, so the
+    original and the clone share the dict until one of them rebinds it.
+    """
+    values = instance.__dict__.get(INIT_VALUES_ATTR)
+    if isinstance(values, dict) and name in values:
+        instance.__dict__[INIT_VALUES_ATTR] = {**values, name: value}
+
 
 @dataclass(frozen=True, slots=True)
 class ParamSpec:
@@ -360,8 +399,13 @@ def _is_param_annotation(annotation: Any) -> bool:
 
 
 def collect_param_specs(cls: type[Any]) -> tuple[ParamSpec, ...]:
-    """Collect declarative calculator field metadata from a dataclass class."""
-    cached = getattr(cls, "__calculate_param_specs__", None)
+    """Collect declarative calculator field metadata from a dataclass class.
+
+    The cache is per class and read from ``vars(cls)``: reading it with
+    ``getattr`` finds a *base* class's cached specs, so a decorated subclass of a
+    decorated class silently lost its own parameters.
+    """
+    cached = vars(cls).get("__calculate_param_specs__")
     if cached is not None:
         return cached
 
@@ -403,6 +447,56 @@ def collect_param_specs(cls: type[Any]) -> tuple[ParamSpec, ...]:
 def declarative_dynamic_param_specs(cls: type[Any]) -> dict[str, DynamicParamSpec]:
     """Return dynamic resolver specs declared on a dataclass calculator."""
     return {spec.name: spec.as_dynamic_param_spec() for spec in collect_param_specs(cls) if spec.kind == "dynamic"}
+
+
+def declared_param_field(field: _ParamField) -> _ParamField:
+    """Return an independent copy of a declared ``Param`` field.
+
+    ``dataclass`` processing writes ``name``/``type`` onto the ``Field`` it is
+    given, so a declaration that is shared by several classes gets a copy per
+    class rather than one mutable object.
+    """
+    spec = field.metadata.get(_PARAM_METADATA_KEY)
+    return _make_param_field(
+        spec if isinstance(spec, ParamSpec) else ParamSpec(name="", kind="static"),
+        field.default,
+        init=field.init,
+        kw_only=field.kw_only is True,
+    )
+
+
+def collect_base_init_fields(cls: type[Any]) -> dict[str, _ParamField]:
+    """Return the constructor params an undecorated role base declares once.
+
+    A role base such as ``TransformBase`` is not itself a dataclass, so a
+    ``Param``-declared attribute it defines never reaches the ``__init__`` that
+    :func:`~pynbodyext.core.calculate.params.declarative.dataclass_calc` generates
+    for a subclass — without help, every subclass has to repeat the declaration
+    just to get the parameter (and its type hint).  ``dataclass_calc`` calls this
+    to append those declarations as real fields, so a role parameter is written
+    once, on the base.
+
+    The walk stops at the first dataclass base: a decorated base already carries
+    those declarations as fields, so the subclass inherits them the normal way.
+    Nearer bases win a name conflict.
+    """
+    declared: dict[str, _ParamField] = {}
+    for base in cls.__mro__[1:]:
+        if is_dataclass(base):
+            break
+        for name, value in vars(base).items():
+            if isinstance(value, _ParamField):
+                declared.setdefault(name, value)
+    return declared
+
+
+def declared_annotation(cls: type[Any], name: str) -> Any:
+    """Return the annotation *name* was declared with, searching the MRO."""
+    for base in cls.__mro__:
+        annotations = vars(base).get("__annotations__", {})
+        if name in annotations:
+            return annotations[name]
+    return Any
 
 
 def declarative_dependencies(instance: Any) -> list[CalculatorBase[Any, Any]]:

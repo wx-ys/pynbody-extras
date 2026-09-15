@@ -43,7 +43,7 @@ from pynbody import units
 from pynbody.array import SimArray
 from pynbody.family import Family, get_family
 
-from pynbodyext.core.calculate.params.fields import collect_param_specs
+from pynbodyext.core.calculate.params.fields import captured_init_value, collect_param_specs
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -431,19 +431,9 @@ class _Encoder:
     def encode_dataclass(calculator: Any, path: str, inline_bytes: int) -> _Encoded:
         """Encode a dataclass-based calculator."""
         ts, children = _Encoder.transform_state(calculator, inline_bytes, path)
-        init_payload: dict[str, Any] = {}
-        field_map = {f.name: f for f in dataclass_fields(type(calculator))}
-        for spec in collect_param_specs(type(calculator)):
-            item = field_map[spec.name]
-            if not item.init or not spec.signature:
-                continue
-            value = getattr(calculator, spec.name)
-            has_default, default = _field_default(item)
-            if has_default and _encoded_values_equal(value, default, inline_bytes):
-                continue
-            enc = _Encoder.encode_value(value, f"{path}.init.{spec.name}", inline_bytes)
-            init_payload[spec.name] = enc.value
-            children.append(enc)
+        init_entries = _encode_init_entries(calculator, path, inline_bytes)
+        init_payload: dict[str, Any] = {name: enc.value for name, enc in init_entries}
+        children.extend(enc for _, enc in init_entries)
         payload: dict[str, Any] = {"node": "dataclass", "class": _class_path(calculator)}
         if init_payload:
             payload["init"] = init_payload
@@ -839,40 +829,64 @@ def calculator_from_signature(signature: CalculatorSignature | dict[str, Any] | 
     return _Decoder.decode_special(payload)
 
 
-def calculator_pretty_init_args(calculator: Any, *, inline_array_bytes: int = DEFAULT_INLINE_ARRAY_BYTES) -> str:
-    """Return a pretty-printed string of the calculator's init arguments.
+def _argument_value(calculator: Any, name: str) -> Any:
+    """Return the value the constructor was given for *name*.
 
-    Parameters left at their default are omitted, except on a node that would
-    otherwise render with no arguments at all: there the defaults are spelled
-    out, so ``ParamContain`` shows up as ``ParamContain(0.5, "r", "mass")``
-    rather than as a bare, uninformative class name.
+    ``params.fields`` records it before ``__post_init__`` runs, because that hook may
+    replace a value with an equivalent object (``"ssc"`` -> ``CenPos("ssc")``); the
+    recorded argument is what a label should print and what a signature should
+    carry, so either way the same text describes the node.  Without a record (a
+    slots-based subclass) the live value is used.
     """
-    if not is_dataclass(calculator):
-        return ""
+    captured, value = captured_init_value(calculator, name)
+    return value if captured else getattr(calculator, name, None)
 
-    field_map = {f.name: f for f in dataclass_fields(type(calculator))}  # type: ignore[arg-type]
-    explicit: dict[str, Any] = {}
-    defaults: dict[str, Any] = {}
 
+def _encode_init_entries(calculator: Any, path: str, inline_array_bytes: int) -> list[tuple[str, _Encoded]]:
+    """Encoded init entries: the arguments that are not the declared default.
+
+    The one implementation of the rule.  It feeds the signature payload (identity)
+    and the display label, so the two cannot drift; parameters left at their declared
+    default are omitted, because the renderer spells them out from the class.
+    """
+    field_map = {f.name: f for f in dataclass_fields(type(calculator))}
+    entries: list[tuple[str, _Encoded]] = []
     for spec in collect_param_specs(type(calculator)):
         item = field_map.get(spec.name)
         if item is None or not item.init or not spec.signature:
             continue
-        value = getattr(calculator, spec.name)
+        value = _argument_value(calculator, spec.name)
         has_default, default = _field_default(item)
-        enc = _Encoder.encode_value(value, f"init.{spec.name}", inline_array_bytes)
         if has_default and _encoded_values_equal(value, default, inline_array_bytes):
-            defaults[spec.name] = enc.value
-        else:
-            explicit[spec.name] = enc.value
+            continue
+        encoded = _Encoder.encode_value(value, f"{path}.init.{spec.name}", inline_array_bytes)
+        entries.append((spec.name, encoded))
+    return entries
 
-    init_payload = explicit or defaults
-    if not init_payload:
+
+def calculator_pretty_init_args(calculator: Any, *, inline_array_bytes: int = DEFAULT_INLINE_ARRAY_BYTES) -> str:
+    """Return a pretty-printed string of the calculator's init arguments.
+
+    Every positional parameter is rendered, including when it has its declared
+    default, while keyword-only parameters at their declared defaults are
+    omitted.  Both halves come from :func:`_encode_init_entries` and
+    :func:`display_init_payload`, the same pair the signature payload and a
+    stored signature use.
+    """
+    if not is_dataclass(calculator):
         return ""
 
-    from .render import TreePrinter
+    from .render import TreePrinter, display_init_payload
 
-    return TreePrinter.dataclass_args({"class": _class_path(calculator), "init": init_payload})
+    class_path = _class_path(calculator)
+    payload = {
+        "class": class_path,
+        "init": {name: enc.value for name, enc in _encode_init_entries(calculator, "init", inline_array_bytes)},
+    }
+    init_payload = display_init_payload(payload, inline_array_bytes=inline_array_bytes)
+    if not init_payload:
+        return ""
+    return TreePrinter.dataclass_args({"class": class_path, "init": init_payload})
 
 
 # ---------------------------------------------------------------------------

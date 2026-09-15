@@ -280,7 +280,6 @@ class WrapBox(TransformBase[WrapTransformation]):
 
     boxsize: Param[float | units.UnitBase | None] = Param(default=None, field_name="pos")
     convention: Literal["center", "upper", "minirange"] = "minirange"
-    move_all: bool = True
 
     def build_handle(self, sim, target, params=None):
         boxsize = params.boxsize

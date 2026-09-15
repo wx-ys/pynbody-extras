@@ -35,7 +35,6 @@ A simplified example in the same style as
     @TransformBase.dataclass
     class ShiftPosTo(TransformBase[Any]):
         mode: Param[Any] = Param(default="ssc", field_name="pos")
-        move_all: bool = True
 
         def __post_init__(self):
             if isinstance(self.mode, str):
@@ -58,7 +57,6 @@ A vector-alignment transform in the style of
     class AlignVec(TransformBase[Any]):
         vector: Param[np.ndarray]
         up: np.ndarray | None = None
-        move_all: bool = True
 
         def build_handle(self, sim, target, params=None):
             vec = params.vector
@@ -109,6 +107,7 @@ from pynbody.snapshot import SimSnap
 from pynbody.transformation import Transformation
 
 from pynbodyext.core.calculate.display import display_value
+from pynbodyext.core.calculate.params.fields import Param
 from pynbodyext.core.calculate.result.enums import (
     BuiltinKinds,
     CachePolicy,
@@ -148,6 +147,11 @@ class TransformBase(RuntimeCalculatorBase[TransformResult[HandleT], HandleT], Ge
     Subclasses implement :meth:`build_handle`.  A handle may define ``revert()``
     to support automatic cleanup when the transform is used in a scoped
     calculator.
+
+    Every subclass also accepts ``move_all`` (keyword-only, default ``True``) for
+    free: it is declared once here and the dataclass decorator materialises it as
+    a field of each subclass, so subclasses neither redeclare it nor lose their own
+    positional parameters (``ShiftPosTo("ssc", move_all=False)``).
     """
 
     node_kind = BuiltinKinds.TRANSFORM
@@ -156,10 +160,20 @@ class TransformBase(RuntimeCalculatorBase[TransformResult[HandleT], HandleT], Ge
     parallel_safe = False
     cache_policy = CachePolicy.NONE
 
+    #: Whether the transform acts on the whole snapshot (the ancestor) instead of
+    #: the current view.  Declared once, here: ``dataclass_calc`` appends it as a
+    #: keyword-only dataclass field, so ``WrapBox(move_all=False)`` works, the type
+    #: checker sees the parameter through this annotation, and subclasses do not
+    #: repeat the declaration.  Keyword-only keeps the subclass's own positional
+    #: parameters unchanged (``ShiftPosTo("ssc")``, ``WrapBox(None, "minirange")``).
+    move_all: bool = Param.static(default=True, kw_only=True)
+
     def _init_dataclass_base(self) -> None:
         TransformBase.__init__(
             self,
-            move_all=getattr(self, "move_all", True),
+            # Read the instance dict, not ``getattr``: the class-level fallback is
+            # the ``Param`` declaration above, not a usable default value.
+            move_all=self.__dict__.get("move_all", True),
             name=getattr(self, "name", None),
             revert_policy=getattr(self, "revert_policy", RevertPolicy.ALWAYS),
             measure_filter=getattr(self, "measure_filter", None),
@@ -179,6 +193,10 @@ class TransformBase(RuntimeCalculatorBase[TransformResult[HandleT], HandleT], Ge
         self.measure_filter = measure_filter
 
     def signature_payload(self) -> Mapping[str, Any] | None:
+        """Identity payload for hand-written (non-dataclass) transform subclasses.
+
+        Decorated subclasses reach the same ``move_all`` through their fields.
+        """
         payload: dict[str, Any] = {}
         if not self.move_all:
             payload["move_all"] = self.move_all
@@ -189,8 +207,6 @@ class TransformBase(RuntimeCalculatorBase[TransformResult[HandleT], HandleT], Ge
 
     def _repr_fields(self) -> list[tuple[str | None, Any]]:
         fields = super()._repr_fields()
-        if not self.move_all:
-            fields.append(("move_all", self.move_all))
         if self.revert_policy != RevertPolicy.ALWAYS:
             fields.append(("revert", display_value(self.revert_policy)))
         if self.measure_filter is not None:
