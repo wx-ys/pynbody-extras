@@ -81,10 +81,10 @@ re = (ParamContain("r",0.5,"mass")
 print(re.dependency_tree)
 ```
 ```
-ParamContain("r", 0.5)<prop>
+ParamContain("r", 0.5, "mass")<prop>
 ├─ TransformChain<trans>
-│  ├─ WrapBox(None, "minirange", move_all=True)<trans>
-│  └─ ShiftPosTo("ssc", move_all=True)<trans>
+│  ├─ WrapBox(None, "minirange")<trans>
+│  └─ ShiftPosTo("ssc")<trans>
 │     └─ CenPos("ssc")<prop>
 └─ AndFilter<filt>
    ├─ Sphere("30 kpc", (0, 0, 0))<filt>

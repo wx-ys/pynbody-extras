@@ -96,13 +96,18 @@ def default_init_payload(
 
 
 def display_init_payload(payload: dict[str, Any], *, inline_array_bytes: int | None = None) -> dict[str, Any]:
-    """Every signature parameter, to be displayed: declared defaults, overlaid by arguments.
+    """The init payload to display: positional defaults filled in, arguments on top.
 
     A signature payload carries only the arguments that differ from the declared
-    default, so the label is completed from the class declaration.  The rule has no
-    conditional branches — the same parameters are listed for every node, each as
-    ``argument or declared default`` — which is what keeps a label predictable:
-    ``ShiftPosTo("com")`` and ``ShiftPosTo("ssc")`` differ only in that one value.
+    default, so the label is completed from the class declaration:
+
+    - a **positional** parameter is always listed, as the argument it was given or
+      its declared default, so ``ShiftPosTo("com")`` and ``ShiftPosTo("ssc")`` differ
+      only in that value and a label always reads as a full constructor call;
+    - a **keyword-only** parameter is listed only when it differs from its declared
+      default, because it is an optional flag rather than part of what the node
+      computes: ``WrapBox(None, "minirange")`` instead of repeating ``move_all=True``
+      on every line of a tree.
 
     The single implementation of the rule; ``signature.calculator_pretty_init_args``
     routes a live calculator through it as well, so the label of a live object and of
@@ -112,7 +117,9 @@ def display_init_payload(payload: dict[str, Any], *, inline_array_bytes: int | N
     defaults = default_init_payload(payload.get("class"), inline_array_bytes=inline_array_bytes)
     if not defaults:
         return explicit
-    merged = {**defaults, **explicit}
+    kw_only = _kw_only_names(payload)
+    merged = {name: value for name, value in defaults.items() if name not in kw_only}
+    merged.update(explicit)
     order = _field_order(payload, merged)
     ordered = {name: merged[name] for name in order if name in merged}
     ordered.update({name: value for name, value in merged.items() if name not in ordered})
