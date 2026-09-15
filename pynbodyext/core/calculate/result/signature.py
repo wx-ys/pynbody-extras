@@ -829,30 +829,25 @@ def calculator_from_signature(signature: CalculatorSignature | dict[str, Any] | 
     return _Decoder.decode_special(payload)
 
 
-def _init_value_is_declared_default(calculator: Any, name: str, item: Any, inline_array_bytes: int) -> bool:
-    """Whether *name* was left at its declared default.
+def _argument_value(calculator: Any, name: str) -> Any:
+    """Return the value the constructor was given for *name*.
 
-    Judged from the values the constructor was given — ``params.fields`` records
-    them before ``__post_init__`` runs — because that hook may replace a default
-    with an equivalent object (``"ssc"`` -> ``CenPos("ssc")``), which would
-    otherwise look like an explicit argument.  Without a record (a slots-based
-    subclass), the live value is compared instead.
+    ``params.fields`` records it before ``__post_init__`` runs, because that hook may
+    replace a value with an equivalent object (``"ssc"`` -> ``CenPos("ssc")``); the
+    recorded argument is what a label should print and what a signature should
+    carry, so either way the same text describes the node.  Without a record (a
+    slots-based subclass) the live value is used.
     """
-    has_default, default = _field_default(item)
-    if not has_default:
-        return False
     captured, value = captured_init_value(calculator, name)
-    if not captured:
-        value = getattr(calculator, name, default)
-    return _encoded_values_equal(value, default, inline_array_bytes)
+    return value if captured else getattr(calculator, name, None)
 
 
 def _encode_init_entries(calculator: Any, path: str, inline_array_bytes: int) -> list[tuple[str, _Encoded]]:
-    """Encoded init entries: the parameters that are not at their declared default.
+    """Encoded init entries: the arguments that are not the declared default.
 
     The one implementation of the rule.  It feeds the signature payload (identity)
-    and the display label, so the two cannot drift; a node whose parameters are all
-    defaults encodes an empty entry list.
+    and the display label, so the two cannot drift; parameters left at their declared
+    default are omitted, because the renderer spells them out from the class.
     """
     field_map = {f.name: f for f in dataclass_fields(type(calculator))}
     entries: list[tuple[str, _Encoded]] = []
@@ -860,11 +855,11 @@ def _encode_init_entries(calculator: Any, path: str, inline_array_bytes: int) ->
         item = field_map.get(spec.name)
         if item is None or not item.init or not spec.signature:
             continue
-        if _init_value_is_declared_default(calculator, spec.name, item, inline_array_bytes):
+        value = _argument_value(calculator, spec.name)
+        has_default, default = _field_default(item)
+        if has_default and _encoded_values_equal(value, default, inline_array_bytes):
             continue
-        encoded = _Encoder.encode_value(
-            getattr(calculator, spec.name), f"{path}.init.{spec.name}", inline_array_bytes
-        )
+        encoded = _Encoder.encode_value(value, f"{path}.init.{spec.name}", inline_array_bytes)
         entries.append((spec.name, encoded))
     return entries
 

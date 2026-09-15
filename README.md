@@ -87,7 +87,7 @@ ParamContain("r", 0.5)<prop>
 │  └─ ShiftPosTo("ssc", move_all=True)<trans>
 │     └─ CenPos("ssc")<prop>
 └─ AndFilter<filt>
-   ├─ Sphere("30 kpc")<filt>
+   ├─ Sphere("30 kpc", (0, 0, 0))<filt>
    └─ FamilyFilter("star")<filt>
 ```
 

@@ -61,13 +61,12 @@ def _import_object(path: str) -> Any:
 def default_init_payload(
     calculator_or_path: Any, *, inline_array_bytes: int | None = None
 ) -> dict[str, Any]:
-    """Encode the declared defaults of a calculator that shows no explicit argument.
+    """Encode the declared defaults of a calculator's signature parameters.
 
-    Signature payloads omit parameters at their declared default, so a calculator
-    whose parameters are *all* defaults carries an empty init payload and would
-    render as a bare class name.  ``ParamContain`` says nothing about what the node
-    does, so those defaults are spelled out instead — ``ParamContain(0.5, "r",
-    "mass")``.
+    Signature payloads omit parameters at their declared default, so this is the
+    other half of :func:`display_init_payload`: a node that was given no argument
+    still renders as a full call — ``ParamContain`` reads as ``ParamContain(0.5,
+    "r", "mass")`` rather than as a bare, uninformative class name.
     """
     try:
         from dataclasses import fields as dataclass_fields
@@ -97,16 +96,27 @@ def default_init_payload(
 
 
 def display_init_payload(payload: dict[str, Any], *, inline_array_bytes: int | None = None) -> dict[str, Any]:
-    """The init payload to display: explicit arguments, else every declared default.
+    """Every signature parameter, to be displayed: declared defaults, overlaid by arguments.
+
+    A signature payload carries only the arguments that differ from the declared
+    default, so the label is completed from the class declaration.  The rule has no
+    conditional branches — the same parameters are listed for every node, each as
+    ``argument or declared default`` — which is what keeps a label predictable:
+    ``ShiftPosTo("com")`` and ``ShiftPosTo("ssc")`` differ only in that one value.
 
     The single implementation of the rule; ``signature.calculator_pretty_init_args``
-    routes a live calculator through it as well, so the label of a live object and
-    of a stored payload cannot drift apart.
+    routes a live calculator through it as well, so the label of a live object and of
+    a stored payload cannot drift apart.
     """
-    init = payload.get("init")
-    if init:
-        return init
-    return default_init_payload(payload.get("class"), inline_array_bytes=inline_array_bytes)
+    explicit = payload.get("init") or {}
+    defaults = default_init_payload(payload.get("class"), inline_array_bytes=inline_array_bytes)
+    if not defaults:
+        return explicit
+    merged = {**defaults, **explicit}
+    order = _field_order(payload, merged)
+    ordered = {name: merged[name] for name in order if name in merged}
+    ordered.update({name: value for name, value in merged.items() if name not in ordered})
+    return ordered
 
 
 def _field_order(payload: dict[str, Any], init: dict[str, Any]) -> list[str]:
@@ -444,13 +454,14 @@ SignaturePrinter._CALCULATOR_HANDLERS = {
 class TreePrinter:
     """Renders calculator signature payloads as short tree node labels.
 
-    Labels are intentionally compact: a node keeps just the arguments it was
-    given, plus the defaults of a node that was given none (see
-    :func:`display_init_payload`), so a label stays self-describing without
-    repeating every default of every node.  Use as::
+    A node label is its full constructor call: every signature parameter, as the
+    argument it was given or its declared default (see
+    :func:`display_init_payload`).  Listing the same parameters for every node —
+    rather than hiding the ones that happen to match a default — is what makes a
+    label predictable to read and to diff.  Use as::
 
         TreePrinter.calculator_head(payload)  # -> "MyCalc"
-        TreePrinter.dataclass_args(payload)  # -> "42, mass=True"
+        TreePrinter.dataclass_args(payload)  # -> '42, "ssc", mass=True'
 
     Handler dispatch dicts are populated after the class definition.
     ``value()`` falls back to :attr:`SignaturePrinter._VALUE_HANDLERS` for

@@ -17,10 +17,18 @@ import textwrap
 import pytest
 
 from pynbodyext.core.calculate.nodes.transforms import TransformBase
+from pynbodyext.properties import CenPos
 from pynbodyext.core.calculate.params.fields import collect_param_specs
 from pynbodyext.transforms import AlignVec, ShiftPosTo, ShiftVelTo, WrapBox
 
 TRANSFORMS = (WrapBox, ShiftPosTo, ShiftVelTo, AlignVec)
+
+
+def _call_shape(label: str) -> tuple[int, tuple[str | None, ...]]:
+    """``(positional count, keyword names)`` of a rendered label."""
+    call = ast.parse(label, mode="eval").body
+    assert isinstance(call, ast.Call)
+    return len(call.args), tuple(keyword.arg for keyword in call.keywords)
 
 
 def _declared_field_names(cls: type) -> set[str]:
@@ -57,27 +65,40 @@ def test_transform_constructor_keeps_positional_parameters() -> None:
 def test_keyword_only_parameter_is_never_rendered_positionally() -> None:
     """Rendered labels stay callable: a keyword-only parameter stays ``name=``."""
     assert repr(WrapBox()) == 'WrapBox(None, "minirange", move_all=True)'
-    assert repr(WrapBox(move_all=False)) == "WrapBox(move_all=False)"
-    assert repr(ShiftPosTo("com", move_all=False)) == 'ShiftPosTo(CenPos("com"), move_all=False)'
-    assert ShiftPosTo("com", move_all=False).to_signature().pretty() == 'ShiftPosTo(CenPos("com"), move_all=False)'
+    assert repr(WrapBox(move_all=False)) == 'WrapBox(None, "minirange", move_all=False)'
+    assert repr(ShiftPosTo("com", move_all=False)) == 'ShiftPosTo("com", move_all=False)'
+    assert ShiftPosTo("com", move_all=False).to_signature().pretty() == 'ShiftPosTo("com", move_all=False)'
 
 
-def test_default_valued_argument_counts_as_a_default() -> None:
-    """Explicit-vs-default is decided from the constructor call, not the live value.
+def test_label_lists_every_parameter_as_argument_or_declared_default() -> None:
+    """One rule, no branches: every signature parameter appears, always in the same form.
 
-    ``ShiftPosTo.__post_init__`` rewrites the mode string into a ``CenPos`` node, so
-    the live value no longer equals the declared default — a value comparison would
-    call ``ShiftPosTo("ssc")`` explicit and hide the node's other defaults, which is
-    the inconsistency this rule exists to prevent.
+    A parameter shows the value the constructor was given (``"com"``), or the declared
+    default when it was not passed (``move_all=True``).  ``ShiftPosTo.__post_init__``
+    rewrites a mode string into a ``CenPos`` node, so the two labels differ only in
+    that value — never in which parameters are listed, and never in showing a
+    normalised object in place of the argument.
     """
     assert repr(ShiftPosTo()) == 'ShiftPosTo("ssc", move_all=True)'
     assert repr(ShiftPosTo("ssc")) == 'ShiftPosTo("ssc", move_all=True)'
+    assert repr(ShiftPosTo("com")) == 'ShiftPosTo("com", move_all=True)'
     assert repr(WrapBox(convention="minirange")) == 'WrapBox(None, "minirange", move_all=True)'
-    # a genuinely different argument stays explicit (shown post-normalisation)
-    assert repr(ShiftPosTo("com")) == 'ShiftPosTo(CenPos("com"))'
-    # ... and the same effective state has one identity, however it was written
+    assert repr(WrapBox(convention="center")) == 'WrapBox(None, "center", move_all=True)'
+    # a node passed explicitly is shown as the node (that is what the caller wrote)
+    assert repr(ShiftPosTo(CenPos("com"))) == 'ShiftPosTo(CenPos("com"), move_all=True)'
+    # the same effective state written as "the default" keeps a single identity
     assert ShiftPosTo().signature_hash() == ShiftPosTo("ssc").signature_hash()
     assert WrapBox().signature_hash() == WrapBox(convention="minirange").signature_hash()
+
+
+def test_labels_of_one_class_list_the_same_parameters() -> None:
+    """Same class, same parameter list: only the values differ between labels."""
+    assert {_call_shape(repr(node)) for node in (ShiftPosTo("ssc"), ShiftPosTo("com"), ShiftPosTo())} == {
+        (1, ("move_all",))
+    }
+    assert {_call_shape(repr(node)) for node in (WrapBox(), WrapBox(convention="center"), WrapBox(move_all=False))} == {
+        (2, ("move_all",))
+    }
 
 
 def test_live_label_and_stored_payload_use_the_same_rule() -> None:
@@ -94,7 +115,7 @@ def test_field_changed_after_construction_is_no_longer_a_default() -> None:
     """A clone records the field it changed, without disturbing the original."""
     original = ShiftPosTo("ssc")
     clone = original._clone(move_all=False)
-    assert repr(clone) == "ShiftPosTo(move_all=False)"
+    assert repr(clone) == 'ShiftPosTo("ssc", move_all=False)'
     assert clone.signature_hash() != original.signature_hash()
     # ``_clone`` shares state by copy, so the record must not be shared with it
     assert repr(original) == 'ShiftPosTo("ssc", move_all=True)'

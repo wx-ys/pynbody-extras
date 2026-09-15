@@ -582,7 +582,7 @@ def test_nested_scoped_argument_renders_compactly() -> None:
     node = ShiftVelTo().filter(Sphere(0.5 * _scoped_contain()) & FamilyFilter("stars"))
     tree = node.dependency_tree
     assert "'node'" not in tree
-    assert 'Sphere(0.5 * ParamContain(0.5, "r", "mass"))<filt>' in tree
+    assert 'Sphere(0.5 * ParamContain(0.5, "r", "mass"), (0, 0, 0))<filt>' in tree
 
 
 def test_all_default_node_spells_out_its_defaults() -> None:
@@ -597,12 +597,18 @@ def test_all_default_node_spells_out_its_defaults() -> None:
     assert ParamContain().to_signature().pretty() == 'ParamContain(0.5, "r", "mass")'
 
 
-def test_node_with_explicit_argument_keeps_compact_label() -> None:
-    """Defaults stay hidden when the node already shows a meaningful argument."""
+def test_label_lists_every_parameter_in_declaration_order() -> None:
+    """A label is the full constructor call, defaults included.
+
+    Hiding defaults made the label depend on which parameters happened to differ,
+    so ``ShiftPosTo("ssc")`` listed everything while ``ShiftPosTo("com")`` listed
+    only the mode.  One rule replaces it: every signature parameter, as the argument
+    or the declared default.
+    """
     from pynbodyext.filters import Sphere
 
-    assert repr(Sphere("30 kpc")) == 'Sphere("30 kpc")'
-    assert Sphere("30 kpc").dependency_tree.strip() == 'Sphere("30 kpc")<filt>'
+    assert repr(Sphere("30 kpc")) == 'Sphere("30 kpc", (0, 0, 0))'
+    assert Sphere("30 kpc").dependency_tree.strip() == 'Sphere("30 kpc", (0, 0, 0))<filt>'
 
 
 def _scoped_chain():
