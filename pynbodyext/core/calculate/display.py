@@ -455,7 +455,9 @@ def format_time(value: float | None) -> str:
         return f"{value * 1e3:.2f} ms"
     if value < 60:
         return f"{value:.3f} s"
-    return f"{value / 60:.2f} min"
+    if value < 3600:
+        return f"{value // 60:.0f}m {value % 60:.0f}s"
+    return f"{value // 3600:.0f}h {(value % 3600) // 60:.0f}m {value % 60:.0f}s"
 
 
 def format_mem(value: int | None) -> str:
