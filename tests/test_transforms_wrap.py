@@ -109,6 +109,35 @@ def test_revert_survives_a_removed_boxsize_property() -> None:
     assert np.allclose(positions(sim), original)
 
 
+def test_revert_survives_a_position_unit_change() -> None:
+    """The recorded box size carries units, so a re-expressed snapshot still undoes.
+
+    ``_boxsize_used`` was a bare float in the units of the moment: converting the
+    positions (kpc -> Mpc) between wrap and revert then added offsets a thousand
+    times too large.
+    """
+    sim = make_sim(box=10.0, span=30.0, units="kpc")
+    original_kpc = positions(sim).copy()
+    handle = wrap(sim, convention="center")
+
+    assert isinstance(handle._boxsize_used, SimArray)
+    assert str(handle._boxsize_used.units) == "kpc"
+
+    sim["pos"].convert_units("Mpc")
+    handle.revert()
+
+    assert np.allclose(positions(sim), original_kpc / 1000.0, rtol=1e-12, atol=0)
+
+
+def test_unit_boxsize_revert_survives_a_unit_change() -> None:
+    sim = make_sim(box=None, span=2000.0, units="kpc")
+    original_kpc = positions(sim).copy()
+    handle = wrap(sim, boxsize=pynbody.units.Unit("1 Mpc"), convention="center")
+    sim["pos"].convert_units("Mpc")
+    handle.revert()
+    assert np.allclose(positions(sim), original_kpc / 1000.0, rtol=1e-12, atol=0)
+
+
 def test_array_path_promotes_the_offset_dtype_like_the_snapshot_path() -> None:
     """Regression: the family-array hook cast to int8 and overflowed silently."""
     sim = make_sim(box=10.0, span=1.0)

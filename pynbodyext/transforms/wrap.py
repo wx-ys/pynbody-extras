@@ -15,6 +15,7 @@ apply hooks, and both go through the same wrapping core: ``_apply_to_snapshot``
 """
 
 import warnings
+from collections.abc import Mapping
 from typing import Any, Literal, TypeGuard, cast
 
 import numpy as np
@@ -47,6 +48,20 @@ def normalize_convention(convention: str) -> Convention:
     if normalized not in CONVENTIONS:
         raise ValueError(f"Unknown wrapping convention {convention!r}, must be one of {CONVENTIONS}")
     return cast("Convention", normalized)
+
+
+def _boxsize_in_units(boxsize: Any, units_now: units.UnitBase, conversion: Mapping[str, Any] | None = None) -> float:
+    """Express *boxsize* as a number in *units_now*.
+
+    A plain number is taken to be already in *units_now*; a unit-aware value is
+    converted.  That conversion is what lets an undo survive the positions being
+    re-expressed in different units between the wrap and the revert.
+    """
+    if isinstance(boxsize, units.UnitBase):
+        return float(boxsize.ratio(units_now, **(conversion or {})))
+    if isinstance(boxsize, SimArray):
+        return float(boxsize.in_units(units_now, **(conversion or {})))
+    return float(boxsize)
 
 
 class WrapTransformation(transformation.Transformation):
@@ -101,16 +116,14 @@ class WrapTransformation(transformation.Transformation):
         except (AttributeError, KeyError):
             return None
 
-    def _resolve_boxsize(self, f: SimSnap | None) -> float | None:
-        """Return the box size in position units: the explicit one, else the snapshot's."""
+    def _boxsize_for(self, f: SimSnap | None, units_now: units.UnitBase) -> float | None:
+        """Return the configured box size as a number in *units_now*, or ``None``."""
         if f is None:
             return None
         boxsize = self.boxsize if self.boxsize is not None else self._snapshot_boxsize(f)
         if boxsize is None:
             return None
-        if isinstance(boxsize, units.UnitBase):
-            boxsize = boxsize.ratio(f["pos"].units, **f.conversion_context())
-        return float(boxsize)
+        return _boxsize_in_units(boxsize, units_now, f.conversion_context())
 
     @staticmethod
     def _check_boxsize(boxsize: float | None) -> TypeGuard[float]:
@@ -204,21 +217,28 @@ class WrapTransformation(transformation.Transformation):
 
     def _apply_to_snapshot(self, f: SimSnap) -> None:
         """Wrap positions in place and record the integer offsets for a later undo."""
-        L = self._resolve_boxsize(f)
+        L = self._boxsize_for(f, f["pos"].units)
         logger.debug("wrap: resolved boxsize L=%s", L)
         if not self._check_boxsize(L):
             return
         self._k_offsets = np.column_stack(self._wrap_axes((f["x"], f["y"], f["z"]), L))
-        self._boxsize_used = L
+        # Keep the size *with its units*: positions may be re-expressed in other units
+        # before the undo, and then the offsets have to be scaled along with them.
+        self._boxsize_used = SimArray(L, f["pos"].units)
 
     def _unapply_to_snapshot(self, f: SimSnap) -> None:
         """Undo the wrap with the recorded offsets (``pos += k * L``)."""
         if self._k_offsets is None:
             return  # nothing recorded: never wrapped, or already undone
 
-        # Prefer the box size the offsets were taken with: it is the exact inverse
-        # even if the snapshot's property has changed or disappeared since.
-        L = self._boxsize_used if self._boxsize_used is not None else self._resolve_boxsize(f)
+        # Prefer the box size the offsets were taken with: it is the exact inverse even
+        # if the snapshot's property has changed or disappeared since.  It is converted
+        # into the units the positions are in *now*, so a unit change is undone too.
+        L = (
+            None
+            if self._boxsize_used is None
+            else _boxsize_in_units(self._boxsize_used, f["pos"].units, f.conversion_context())
+        )
         if L is None:
             warnings.warn(_CANNOT_UNDO, stacklevel=2)
             logger.warning(_CANNOT_UNDO)
@@ -241,7 +261,7 @@ class WrapTransformation(transformation.Transformation):
         if array.name != "pos":
             return
 
-        L = self._resolve_boxsize(array.sim)
+        L = self._boxsize_for(array.sim, array.units)
         if not self._check_boxsize(L):
             return
 
