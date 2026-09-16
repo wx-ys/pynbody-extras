@@ -1,5 +1,21 @@
+"""Periodic-box wrapping transform.
+
+:class:`WrapBox` wraps particle positions back into the simulation box before a
+calculator reads them, and undoes the wrap when the scoped transform ends.
+
+Positions are wrapped one axis at a time and only the per-axis integer offsets are
+kept, so undoing costs a few bytes per particle instead of three floats; the offset
+dtype is promoted, with a warning, when it does not fit the range.
+
+The box size comes from the ``boxsize`` argument when it is given, otherwise from
+the snapshot's ``boxsize`` property.  When neither is available the wrap is skipped
+with a warning rather than guessed at.  ``pynbody`` gives a transformation two
+apply hooks, and both go through the same wrapping core: ``_apply_to_snapshot``
+(records offsets, undoable) and ``_apply_to_array`` (family views, apply-only).
+"""
+
 import warnings
-from typing import Any, Literal
+from typing import Any, Literal, TypeGuard, cast
 
 import numpy as np
 from numpy.typing import DTypeLike
@@ -12,63 +28,107 @@ from pynbodyext.log import logger
 
 __all__ = ["WrapBox"]
 
+#: The wrapping convention: ``"center"`` -> ``[-L/2, L/2)``, ``"upper"`` -> ``[0, L)``,
+#: ``"minirange"`` -> per axis whichever of the two gives the smaller range.
+Convention = Literal["center", "upper", "minirange"]
+
+#: Conventions accepted by :class:`WrapBox` and the transformation.
+CONVENTIONS: tuple[Convention, ...] = ("center", "upper", "minirange")
+DEFAULT_CONVENTION: Convention = "minirange"
+
+_NO_BOXSIZE = "wrap: no boxsize specified and snapshot has no 'boxsize' property; skipping wrap"
+_NON_POSITIVE_BOXSIZE = "wrap: boxsize must be positive, got {}; skipping wrap"
+_CANNOT_UNDO = "wrap: cannot undo, the boxsize is unknown; leaving the positions wrapped"
+
+
+def normalize_convention(convention: str) -> Convention:
+    """Return the canonical lower-case convention, or raise ``ValueError``."""
+    normalized = str(convention).lower()
+    if normalized not in CONVENTIONS:
+        raise ValueError(f"Unknown wrapping convention {convention!r}, must be one of {CONVENTIONS}")
+    return cast("Convention", normalized)
+
 
 class WrapTransformation(transformation.Transformation):
-    """A pynbody Transformation to wrap particle positions into a periodic box.
+    """Wrap particle positions into a periodic box.
 
-    Memory behavior:
-    - Instead of storing a full copy of `pos` to undo, we store per-axis integer
-      offsets `k` such that: wrapped_pos = original_pos - k * L. Typically, using
-      int16 reduces memory dramatically vs. a float64 copy of pos.
+    Undoing stores per-axis integer offsets ``k`` (``wrapped = original - k * L``)
+    rather than a copy of ``pos``: an ``int8`` offset covers the usual case at a
+    fraction of the memory of a float64 copy, and the dtype is promoted
+    automatically, with a warning, when the offsets need more range.
     """
 
     def __init__(
         self,
         f: SimSnap | transformation.Transformation,
         boxsize: float | units.UnitBase | None = None,
-        convention: Literal["center", "upper", "minirange"] = "minirange",
+        convention: Convention = DEFAULT_CONVENTION,
         k_dtype: DTypeLike = np.int8,
-    ):
-        """
+    ) -> None:
+        """Wrap the snapshot (or chain onto a transformation) straight away.
+
         Parameters
         ----------
-        f : pynbody.snapshot.SimSnap
-            The simulation snapshot to which this transformation will be applied.
+        f : pynbody.snapshot.SimSnap or pynbody.transformation.Transformation
+            The snapshot to wrap, or the transformation to chain this one onto.
         boxsize : float or pynbody.units.UnitBase, optional
-            The size of the periodic box. If not specified, the box size is taken
-            from the snapshot's properties.
-        convention : str, optional
-            The wrapping convention.
-            - 'center': wraps particles to the range [-boxsize/2, boxsize/2). (Default)
-            - 'upper': wraps particles to the range [0, boxsize).
-            - 'minirange': per axis, chooses between 'center' and 'upper'
-              to minimise the coordinate range after wrapping.
-        k_dtype : numpy dtype, optional
-            Integer dtype for the offset counters (default: int8).
-            Use a larger type (e.g. int16/int32) if needed.
+            Size of the periodic box, in position units. When omitted, the box size
+            is taken from ``f.ancestor.properties["boxsize"]``; when neither is
+            available the wrap is skipped with a warning.
+        convention : {"minirange", "center", "upper"}, default "minirange"
+            ``"center"`` wraps into ``[-boxsize/2, boxsize/2)``, ``"upper"`` into
+            ``[0, boxsize)``, and ``"minirange"`` picks per axis whichever of those
+            two gives the smaller coordinate range.
+        k_dtype : numpy dtype, default numpy.int8
+            Integer dtype for the offset counters; a larger type is selected
+            automatically when the offsets do not fit.
         """
-        convention_l = convention.lower()
-        if convention_l not in ("center", "upper", "minirange"):
-            raise ValueError("Unknown wrapping convention, must be 'center', 'upper' or 'minirange'")
+        convention_l = normalize_convention(convention)
         self.boxsize = boxsize
         self.convention = convention_l
         self._k_dtype = k_dtype
         self._k_offsets: np.ndarray | None = None  # shape (N, 3), ints
+        self._boxsize_used: float | None = None  # the L the offsets were taken with
         description = f"Wrap{convention_l.capitalize()}"
         super().__init__(f, description=description)
 
-    def _resolve_boxsize_float(self, f: SimSnap | None) -> float | None:
-        if f is None:
-            return None
+    # ── box size ─────────────────────────────────────────────────────────────
+
+    def _snapshot_boxsize(self, f: SimSnap) -> Any | None:
+        """Return ``f.ancestor.properties["boxsize"]`` when the snapshot has one."""
         try:
-            L = f.ancestor.properties["boxsize"]
+            return f.ancestor.properties["boxsize"]
         except (AttributeError, KeyError):
             return None
-        if isinstance(L, units.UnitBase):
-            L = L.ratio(f["pos"].units, **f.conversion_context())
-        return float(L)
 
-    def _select_k_dtype(self, max_abs: float) -> np.dtype[Any]:
+    def _resolve_boxsize(self, f: SimSnap | None) -> float | None:
+        """Return the box size in position units: the explicit one, else the snapshot's."""
+        if f is None:
+            return None
+        boxsize = self.boxsize if self.boxsize is not None else self._snapshot_boxsize(f)
+        if boxsize is None:
+            return None
+        if isinstance(boxsize, units.UnitBase):
+            boxsize = boxsize.ratio(f["pos"].units, **f.conversion_context())
+        return float(boxsize)
+
+    @staticmethod
+    def _check_boxsize(boxsize: float | None) -> TypeGuard[float]:
+        """Warn (and report) whether *boxsize* can be wrapped with."""
+        if boxsize is None:
+            warnings.warn(_NO_BOXSIZE, stacklevel=3)
+            logger.warning(_NO_BOXSIZE)
+            return False
+        if boxsize <= 0:
+            warnings.warn(_NON_POSITIVE_BOXSIZE.format(boxsize), stacklevel=3)
+            logger.warning(_NON_POSITIVE_BOXSIZE.format(boxsize))
+            return False
+        return True
+
+    # ── offset dtype ─────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _select_k_dtype(max_abs: float) -> np.dtype[Any]:
         """Pick the smallest signed integer dtype that can hold max_abs."""
         if max_abs <= np.iinfo(np.int8).max:
             return np.dtype(np.int8)
@@ -77,13 +137,6 @@ class WrapTransformation(transformation.Transformation):
         if max_abs <= np.iinfo(np.int32).max:
             return np.dtype(np.int32)
         return np.dtype(np.int64)
-
-    def _compute_k_and_wrapped(self, v: np.ndarray, L: float, lower: float) -> tuple[np.ndarray, np.ndarray]:
-        """Given positions v, box size L and lower bound, return (k, wrapped_v)."""
-        k_f = np.floor((v - lower) / L)
-        k = k_f.astype(self._k_dtype, copy=False)
-        wrapped = v - k * L
-        return k, wrapped
 
     def _promote_and_cast_k(self, *k_f_list: np.ndarray) -> list[np.ndarray]:
         max_abs = 0.0
@@ -102,185 +155,124 @@ class WrapTransformation(transformation.Transformation):
 
         return [k_f.astype(self._k_dtype, copy=False) for k_f in k_f_list]
 
-    def _compute_kf_for_axes(
-        self, x: np.ndarray, y: np.ndarray, z: np.ndarray, L: float, lower: float
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        kx_f = np.floor((x - lower) / L)
-        ky_f = np.floor((y - lower) / L)
-        kz_f = np.floor((z - lower) / L)
-        return kx_f, ky_f, kz_f
+    # ── wrapping ─────────────────────────────────────────────────────────────
+
+    def _wrap_axes(self, axes: tuple[np.ndarray, np.ndarray, np.ndarray], L: float) -> list[np.ndarray]:
+        """Wrap the coordinate arrays in place; return the integer offset per axis.
+
+        Both hooks below go through here, so the snapshot path and the array path
+        cannot disagree about the convention or about the offset dtype.
+        """
+        if self.convention == "minirange":
+            # Compute both candidates, promote once over all of them (so every axis
+            # is cast to the same dtype), then take the narrower wrapping per axis.
+            center_f = [np.floor((v + 0.5 * L) / L) for v in axes]
+            upper_f = [np.floor(v / L) for v in axes]
+            cast = self._promote_and_cast_k(*center_f, *upper_f)
+            center_k, upper_k = cast[: len(axes)], cast[len(axes) :]
+            offsets: list[np.ndarray] = []
+            for axis, (v, k_center, k_upper) in enumerate(zip(axes, center_k, upper_k, strict=True)):
+                if v.size == 0:
+                    offsets.append(np.zeros_like(v, dtype=self._k_dtype))
+                    continue
+                wrapped_center = v - k_center * L
+                wrapped_upper = v - k_upper * L
+                span_center = float(wrapped_center.max() - wrapped_center.min())
+                span_upper = float(wrapped_upper.max() - wrapped_upper.min())
+                logger.debug(
+                    "wrap[minirange]: axis %d chose %s (span center=%.6g, upper=%.6g)",
+                    axis,
+                    "center" if span_center <= span_upper else "upper",
+                    span_center,
+                    span_upper,
+                )
+                if span_center <= span_upper:
+                    v[:] = wrapped_center
+                    offsets.append(k_center)
+                else:
+                    v[:] = wrapped_upper
+                    offsets.append(k_upper)
+            return offsets
+
+        lower = -0.5 * L if self.convention == "center" else 0.0
+        offsets = self._promote_and_cast_k(*(np.floor((v - lower) / L) for v in axes))
+        for axis, offset in zip(axes, offsets, strict=True):
+            np.subtract(axis, offset * L, out=axis)  # in place, without rebinding the name
+        return offsets
+
+    # ── pynbody hooks ────────────────────────────────────────────────────────
 
     def _apply_to_snapshot(self, f: SimSnap) -> None:
-        """Wraps positions in-place and records integer offsets per axis."""
-        # Use raw numpy views for ufuncs like floor that expect unitless arrays.
-        x = f["x"]
-        y = f["y"]
-        z = f["z"]
-
-        L = self._resolve_boxsize_float(f)
+        """Wrap positions in place and record the integer offsets for a later undo."""
+        L = self._resolve_boxsize(f)
         logger.debug("wrap: resolved boxsize L=%s", L)
-
-        if L is None:
-            warnings.warn(
-                "wrap: no boxsize specified and snapshot has no 'boxsize' property; skipping wrap", stacklevel=2
-            )
-            logger.warning("wrap: no boxsize specified and snapshot has no 'boxsize' property; skipping wrap")
+        if not self._check_boxsize(L):
             return
-
-        if L <= 0:
-            warnings.warn(f"wrap: boxsize must be positive, got {L}; skipping wrap", stacklevel=2)
-            logger.warning("wrap: boxsize must be positive, got %s; skipping wrap", L)
-            return
-
-        if self.convention in ("center", "upper"):
-            lower = -0.5 * L if self.convention == "center" else 0.0
-
-            # Compute integer offsets k so that: wrapped = pos - k*L in each axis.
-            # k = floor((pos - lower)/L)
-            kx_f, ky_f, kz_f = self._compute_kf_for_axes(x, y, z, L, lower)
-            kx, ky, kz = self._promote_and_cast_k(kx_f, ky_f, kz_f)
-
-            # Apply wrapping: pos := pos - k*L, all in-place
-            x -= kx * L
-            y -= ky * L
-            z -= kz * L
-        elif self.convention == "minirange":
-            lower_center = -0.5 * L
-            lower_upper = 0.0
-
-            # compute candidate k_f for both center & upper so dtype promotion can consider all axes
-            kx_c_f, ky_c_f, kz_c_f = self._compute_kf_for_axes(x, y, z, L, lower_center)
-            kx_u_f, ky_u_f, kz_u_f = self._compute_kf_for_axes(x, y, z, L, lower_upper)
-
-            (kx_c, ky_c, kz_c, kx_u, ky_u, kz_u) = self._promote_and_cast_k(
-                kx_c_f, ky_c_f, kz_c_f, kx_u_f, ky_u_f, kz_u_f
-            )
-
-            axes_v = (x, y, z)
-            axes_k_c = (kx_c, ky_c, kz_c)
-            axes_k_u = (kx_u, ky_u, kz_u)
-            chosen_k = []
-
-            for i, (v, kc, ku, _lower_c, _lower_u) in enumerate(
-                zip(axes_v, axes_k_c, axes_k_u, (lower_center,) * 3, (lower_upper,) * 3, strict=False)
-            ):
-                if v.size == 0:
-                    chosen_k.append(np.zeros_like(v, dtype=self._k_dtype))
-                    continue
-
-                wrapped_c = v - kc * L
-                wrapped_u = v - ku * L
-
-                range_c = float(wrapped_c.max() - wrapped_c.min()) if wrapped_c.size else 0.0
-                range_u = float(wrapped_u.max() - wrapped_u.min()) if wrapped_u.size else 0.0
-
-                logger.debug("wrap[minirange]: axis %d range center=%.6g upper=%.6g", i, range_c, range_u)
-
-                if range_c <= range_u:
-                    v[:] = wrapped_c
-                    chosen_k.append(kc)
-                    logger.debug("wrap[minirange]: axis %d chose center wrapping", i)
-                else:
-                    v[:] = wrapped_u
-                    chosen_k.append(ku)
-                    logger.debug("wrap[minirange]: axis %d chose upper wrapping", i)
-
-            kx, ky, kz = chosen_k
-
-        else:
-            raise ValueError("Unknown wrapping convention")
-        # Save offsets for unapply
-        self._k_offsets = np.column_stack((kx, ky, kz))
+        self._k_offsets = np.column_stack(self._wrap_axes((f["x"], f["y"], f["z"]), L))
+        self._boxsize_used = L
 
     def _unapply_to_snapshot(self, f: SimSnap) -> None:
-        """Reverts positions using stored integer offsets k (pos += k*L)."""
+        """Undo the wrap with the recorded offsets (``pos += k * L``)."""
         if self._k_offsets is None:
-            # Fall back: nothing recorded. No-op to avoid surprising errors.
+            return  # nothing recorded: never wrapped, or already undone
+
+        # Prefer the box size the offsets were taken with: it is the exact inverse
+        # even if the snapshot's property has changed or disappeared since.
+        L = self._boxsize_used if self._boxsize_used is not None else self._resolve_boxsize(f)
+        if L is None:
+            warnings.warn(_CANNOT_UNDO, stacklevel=2)
+            logger.warning(_CANNOT_UNDO)
             return
 
-        L = self._resolve_boxsize_float(f)
+        f["x"] += self._k_offsets[:, 0] * L
+        f["y"] += self._k_offsets[:, 1] * L
+        f["z"] += self._k_offsets[:, 2] * L
 
-        kx = self._k_offsets[:, 0]
-        ky = self._k_offsets[:, 1]
-        kz = self._k_offsets[:, 2]
-
-        f["x"] += kx * L
-        f["y"] += ky * L
-        f["z"] += kz * L
-
-        # Free memory
         self._k_offsets = None
+        self._boxsize_used = None
 
     def _apply_to_array(self, array: SimArray) -> None:
-        """Applies wrapping to a standalone 'pos' array view.
+        """Wrap a standalone ``pos`` array view in place.
 
-        Note: This path does not record offsets (array-level unapply is not used
-        by pynbody for snapshot transformations). We operate in-place on the array.
+        pynbody calls this for family views, whose rows are a subset of the snapshot,
+        so no offsets are recorded here: this path is apply-only (pynbody never asks
+        a transformation to undo an array).
         """
         if array.name != "pos":
             return
 
-        f = array.sim
-        L = self._resolve_boxsize_float(f)
-        if L is None:
-            warnings.warn(
-                "wrap: no boxsize specified and snapshot has no 'boxsize' property; skipping wrap", stacklevel=2
-            )
+        L = self._resolve_boxsize(array.sim)
+        if not self._check_boxsize(L):
             return
 
-        # array is an (N,3) SimArray; switch to raw ndarray view for ufuncs
-        A = array.view(np.ndarray)
-
-        if self.convention in ("center", "upper"):
-            lower = -0.5 * L if self.convention == "center" else 0.0
-            for coord in (0, 1, 2):
-                v = A[:, coord]
-                k = np.floor((v - lower) / L).astype(self._k_dtype, copy=False)
-                v -= k * L
-
-        elif self.convention == "minirange":
-            lower_center = -0.5 * L
-            lower_upper = 0.0
-
-            for coord in (0, 1, 2):
-                v = A[:, coord]
-                if v.size == 0:
-                    continue
-
-                k_c, wrapped_c = self._compute_k_and_wrapped(v, L, lower_center)
-                k_u, wrapped_u = self._compute_k_and_wrapped(v, L, lower_upper)
-
-                range_c = float(wrapped_c.max() - wrapped_c.min()) if wrapped_c.size else 0.0
-                range_u = float(wrapped_u.max() - wrapped_u.min()) if wrapped_u.size else 0.0
-
-                v[:] = wrapped_c if range_c <= range_u else wrapped_u
-        else:
-            raise ValueError("Unknown wrapping convention")
+        pos = array.view(np.ndarray)  # raw view: floor() wants unitless arrays
+        self._wrap_axes((pos[:, 0], pos[:, 1], pos[:, 2]), L)
 
 
 @TransformBase.dataclass
 class WrapBox(TransformBase[WrapTransformation]):
-    """Wraps particle positions to lie within a periodic box.
+    """Wrap particle positions into a periodic box.
 
-    This transform can be applied temporarily using a `with` statement.
     Parameters
     ----------
     boxsize : float or pynbody.units.UnitBase, optional
-        The size of the periodic box. If not specified, the box size is taken
-        from the snapshot's properties.
-    convention : str, optional
-        The wrapping convention.
-        - 'center': wraps particles to the range [-boxsize/2, boxsize/2). (Default)
-        - 'upper': wraps particles to the range [0, boxsize).
-        - 'minirange': per axis, chooses between 'center' and 'upper'
-            to minimise the coordinate range after wrapping.
-    move_all: bool, default True
-        Whether to perform the wrapping on ancestors (all particles).
+        Size of the periodic box, in position units. When omitted, the box size is
+        taken from the snapshot's ``boxsize`` property; if that is missing too, the
+        wrap is skipped with a warning.
+    convention : {"minirange", "center", "upper"}, default "minirange"
+        ``"center"`` wraps into ``[-boxsize/2, boxsize/2)``, ``"upper"`` into
+        ``[0, boxsize)``, and ``"minirange"`` picks per axis whichever of those two
+        gives the smaller coordinate range.
+    move_all : bool, default True
+        Whether to wrap the whole snapshot (the ancestor) rather than the current view.
     """
 
     boxsize: Param[float | units.UnitBase | None] = Param(default=None, field_name="pos")
-    convention: Literal["center", "upper", "minirange"] = "minirange"
+    convention: Convention = DEFAULT_CONVENTION
 
-    def build_handle(self, sim, target, params=None):
-        boxsize = params.boxsize
-        return WrapTransformation(target, boxsize=boxsize, convention=self.convention)
+    def __post_init__(self) -> None:
+        # Reject a typo when the node is built, not after a run has started.
+        normalize_convention(self.convention)
+
+    def build_handle(self, sim: Any, target: Any, params: Any = None) -> WrapTransformation:
+        return WrapTransformation(target, boxsize=params.boxsize, convention=self.convention)
