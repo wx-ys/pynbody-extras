@@ -1,0 +1,96 @@
+"""
+2-Dimensional Galaxy/Halo Image Post-Processing and Visualization
+=================================================================
+
+This package turns the 2-D arrays produced by the calculator layer
+(:class:`~pynbodyext.core.calculate.BinND`, and later SPH rendering or
+tessellation) into publication-ready figures:
+
+- :mod:`.data` holds :class:`ImageData` — the array, its geometry and metadata,
+  and the provenance of the operations applied to it.  It also bridges
+  :class:`BinNDResult` queries, which is what ``BinNDResult.imshow`` uses.
+- :mod:`.process` smooths, resamples and stretches images, keeping empty
+  bins (``NaN``) out of the averages.
+- :mod:`.psf` applies an observational point-spread function, and inverts one.
+- :mod:`.adaptive` adaptively bins a noisy map by signal (PowerBin) so that each
+  region of the figure carries a comparable amount of signal.
+- :mod:`.cmaps` provides the ``sauron_cmap`` SAURON colour map.
+- :mod:`.compose` joins two maps drawn with different colour maps through a soft
+  transition mask (:class:`MapStyle` says how each one becomes colours).
+- :mod:`.display` is the matplotlib side: artist choice, axis labels, colour bars.
+
+Each free function stays available for plain 2-D ``numpy`` arrays — nothing in
+this package requires a live simulation object — and :class:`ImageData` offers the
+same operations as methods, grouped by family::
+
+    image.ImageData.from_bins(bins2d, "vz.mean").smooth.gaussian(fwhm=2).display.imshow(colorbar=True)
+"""
+
+from .adaptive import AdaptiveMap, adaptive_bin_map, adaptive_map_from_bins
+from .cmaps import (
+    SAURON_POSITIONS,
+    SAURON_RGB,
+    cmap_from_colors,
+    get_cmap,
+    register_cmap,
+    sauron_cmap,
+    sauron_cmap_r,
+    to_rgba,
+    vel_cmap,
+    vel_cmap_r,
+)
+from .compose import MapStyle, blend_images, blend_stack, compose_maps, create_map_mask, imshow_compose
+from .data import OPERATIONS, ImageData, ImageOp, as_image, register_ops
+from .display import COLORBAR_LOCATIONS, DisplayOps, add_colorbar
+from .noise import NoiseOps, add_noise, add_poisson_noise
+from .ops import ImageDataView, ImageOps, ProcessOps
+from .psf import convolve_psf, deconvolve_psf, gaussian_psf, normalize_psf, richardson_lucy, wiener_deconvolve
+from .smooth import STRETCHES, box_smooth, downsample, gaussian_smooth, median_filter, normalize
+
+__all__ = [
+    "COLORBAR_LOCATIONS",
+    "DisplayOps",
+    "AdaptiveMap",
+    "ImageData",
+    "ImageDataView",
+    "ImageOp",
+    "ImageOps",
+    "sauron_cmap",
+    "sauron_cmap_r",
+    "SAURON_RGB",
+    "SAURON_POSITIONS",
+    "MapStyle",
+    "NoiseOps",
+    "OPERATIONS",
+    "ProcessOps",
+    "STRETCHES",
+    "add_colorbar",
+    "add_noise",
+    "add_poisson_noise",
+    "as_image",
+    "adaptive_bin_map",
+    "adaptive_map_from_bins",
+    "blend_images",
+    "blend_stack",
+    "box_smooth",
+    "cmap_from_colors",
+    "compose_maps",
+    "convolve_psf",
+    "create_map_mask",
+    "deconvolve_psf",
+    "downsample",
+    "gaussian_psf",
+    "gaussian_smooth",
+    "get_cmap",
+    "imshow_compose",
+    "median_filter",
+    "normalize",
+    "normalize_psf",
+    "register_cmap",
+    "register_ops",
+    "richardson_lucy",
+    "to_rgba",
+    "vel_cmap",
+    "vel_cmap_r",
+    "wiener_deconvolve",
+]

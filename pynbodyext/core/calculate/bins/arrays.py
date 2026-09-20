@@ -134,6 +134,34 @@ class BinsArray(SimArray):
         """Return the values reshaped to the N-D bin grid."""
         return np.asarray(self).reshape(self.shape_bins)
 
+    @property
+    def image(self) -> Any:
+        """This query as an image, ready for :mod:`pynbodyext.plot.image`.
+
+        The values are laid out ``(x, y)`` here and transposed into the image
+        convention of rows ``= y``, columns ``= x``, carrying the bin edges, units
+        and axis names along::
+
+            bins2d["mass.sum"].image.draw(colorbar=True)
+            bins2d["vz.mean"].image.contour(ax=ax, levels=[-100, 0, 100])
+
+        The drawing itself lives in :mod:`pynbodyext.plot.image`, which is imported
+        lazily so that the calculator layer needs no matplotlib to run.
+
+        Returns
+        -------
+        ImageData
+            The image, with the geometry of this bin grid.
+
+        Raises
+        ------
+        ValueError
+            If the result does not have exactly two bin axes.
+        """
+        from pynbodyext.plot.image import ImageData
+
+        return ImageData.from_bins_array(self)
+
     def reshape_bins(self, copy: bool = False) -> np.ndarray:
         """Return a view (or a copy when ``copy=True``) reshaped to the bin grid.
 

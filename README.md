@@ -197,3 +197,87 @@ subpr[Sphere("30 kpc")]  # Returns a new sub-profile
 ```
 
 ---
+
+### Image post-processing and visualization
+
+`pynbodyext.plot.image` turns the 2-D arrays produced by the calculator layer
+(`BinND`, and later SPH renders or tessellations) into publication-ready figures.
+Every operation is a free function over a plain 2-D array, and the same operations
+are methods of `ImageData`, which carries the geometry, the units and the record
+of what was done to it.
+
+```python
+from pynbodyext.plot import image
+
+# 2-D binning: 200x200 pixels of projected z-velocity and mass
+bins2d = (Bin1D("x", vmin=-50, vmax=50, nbins=200, alias="x")
+        @ Bin1D("y", vmin=-50, vmax=50, nbins=200, alias="y"))(sim)
+
+# `BinNDResult.imshow` itself goes through ImageData: extent, axis units and
+# labels, and the choice between imshow and pcolormesh for uneven bins
+bins2d.imshow("mass.sum", cmap="inferno", colorbar=True)
+
+# Or hold the map and chain: geometry and metadata survive every step, and the
+# calls are recorded in `.ops` (repr shows them)
+density = image.ImageData.from_bins(bins2d, "mass.sum")
+smoothed = density.process.smooth.gaussian(fwhm=1.0)        # fwhm in the units of the axes
+observed = smoothed.process.psf.convolve(fwhm=3.0)          # what a telescope would see
+observed.display.imshow(cmap="inferno", colorbar=True)
+
+# ...and what the detector would do to it: seeded, maskable, recorded in .ops
+detected = observed.process.noise.poisson(exposure=0.05, background=2.0, rng=1)
+detected.display.imshow(cmap="inferno", colorbar=True)
+
+# Deconvolution goes the other way (and amplifies noise: it is a visualisation tool)
+restored = observed.process.psf.wiener(image.gaussian_psf(fwhm=3.0), balance=1e-6)
+
+# A velocity map: adaptive bins of equal mass, green on zero velocity
+velocity = image.ImageData.from_bins(bins2d, "vz.mean")
+binned = velocity.process.adaptive.bin(bins2d["mass.sum"], target_nbins=200, min_signal=1e6)
+binned.display.imshow(cmap="sauron", symmetric=True, colorbar="bottom")
+binned.image.process.smooth.box(size=3)       # the painted map is an ImageData too
+# a colour bar can also be added afterwards, on the artist or on the map
+binned.display.add_colorbar(loc="left", size="4%", tick_label_size=8)
+
+# Contours are a display verb too: they follow the bins of the map they describe
+velocity.display.draw(ax=ax, cmap="inferno")
+velocity.display.contour(ax=ax, levels=[-200, -100, 0, 100, 200], colors="w", linewidths=0.6)
+
+# Anything that takes a second map accepts a binned array directly: it carries its
+# own orientation, so no `.T` (a raw ndarray is taken as image-oriented)
+mass = image.as_image(bins2d["mass.sum"])   # (x, y) -> (row=y, column=x)
+
+# Gas density and dark-matter density in one figure, crossfaded along a line
+gas = image.ImageData.from_bins(bins2d, "mass.sum", units="1e10 Msol")
+dm = image.ImageData.from_bins(bins2d, "dm_mass.sum", units="1e10 Msol")
+gas.imshow_compose(
+    dm,
+    style1=image.MapStyle(cmap="inferno", stretch="log"),
+    style2=image.MapStyle(cmap="cividis"),
+    label1="gas", label2="dark matter",
+)
+```
+
+An image has two entry points: `image.display.*` for showing it and
+`image.process.*` for working on it (`smooth.gaussian`, `psf.convolve`,
+`noise.poisson`, `compose(other)`, `adaptive.bin`) — and `ImageData` itself carries
+only what it *is* (values, geometry, units, labels, `ops`, `with_data`,
+`from_bins`). The underlying free functions (`gaussian_smooth(data, ...)`,
+`compose_maps(...)`, …) remain available for plain arrays. A new family is a new module plus
+`@ImageData.register_ops("tessellation")`, so extension never means editing base
+classes. The SAURON colour map (`image.sauron_cmap`, black → blue → cyan →
+**green on zero** → yellow → red → light grey — Cappellari & Emsellem's map for
+SAURON/ATLAS³D velocity fields, reproduced from its published table) is registered
+under its own name, so `cmap="sauron"` (and `"sauron_r"`) work; the masks
+behind the stitching are exposed on their own:
+
+```python
+mask1, mask2 = gas.process.compose.masks(line_angle=45, width=0.15)
+blended = image.blend_images(rgb_gas, rgb_dm, mask1)
+```
+
+Adaptive binning needs the optional dependency `powerbin`
+(`pip install pynbodyext[image]`); everything else only needs `numpy`, `scipy`
+and `matplotlib`, which pynbody already brings.
+
+---
