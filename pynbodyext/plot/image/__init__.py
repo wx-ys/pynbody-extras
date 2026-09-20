@@ -14,7 +14,7 @@ tessellation) into publication-ready figures:
 - :mod:`.psf` applies an observational point-spread function, and inverts one.
 - :mod:`.adaptive` adaptively bins a noisy map by signal (PowerBin) so that each
   region of the figure carries a comparable amount of signal.
-- :mod:`.cmaps` provides the ``velocity_cmap`` velocity colour map.
+- :mod:`.cmaps` provides the ``sauron_cmap`` SAURON colour map.
 - :mod:`.compose` joins two maps drawn with different colour maps through a soft
   transition mask (:class:`MapStyle` says how each one becomes colours).
 - :mod:`.display` is the matplotlib side: artist choice, axis labels, colour bars.
@@ -28,16 +28,16 @@ same operations as methods, grouped by family::
 
 from .adaptive import AdaptiveMap, adaptive_bin_map, adaptive_map_from_bins
 from .cmaps import (
-    VELOCITY_COLORS,
-    VELOCITY_POSITIONS,
+    SAURON_POSITIONS,
+    SAURON_RGB,
     cmap_from_colors,
     get_cmap,
     register_cmap,
+    sauron_cmap,
+    sauron_cmap_r,
     to_rgba,
     vel_cmap,
     vel_cmap_r,
-    velocity_cmap,
-    velocity_cmap_r,
 )
 from .compose import MapStyle, blend_images, blend_stack, compose_maps, create_map_mask, imshow_compose
 from .data import OPERATIONS, ImageData, ImageOp, as_image, register_ops
@@ -55,10 +55,10 @@ __all__ = [
     "ImageDataView",
     "ImageOp",
     "ImageOps",
-    "velocity_cmap",
-    "velocity_cmap_r",
-    "VELOCITY_COLORS",
-    "VELOCITY_POSITIONS",
+    "sauron_cmap",
+    "sauron_cmap_r",
+    "SAURON_RGB",
+    "SAURON_POSITIONS",
     "MapStyle",
     "NoiseOps",
     "OPERATIONS",

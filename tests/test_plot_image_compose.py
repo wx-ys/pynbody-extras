@@ -6,7 +6,7 @@ import matplotlib
 import numpy as np
 import pytest
 
-from pynbodyext.plot.image.cmaps import velocity_cmap, to_rgba
+from pynbodyext.plot.image.cmaps import sauron_cmap, to_rgba
 from pynbodyext.plot.image.compose import (
     MapStyle,
     blend_images,
@@ -226,12 +226,12 @@ def test_compose_maps_validates_the_mask_shape() -> None:
         compose_maps(np.zeros((4, 4)), np.zeros((4, 4)), mask=np.zeros((2, 2)))
 
 
-def test_compose_maps_defaults_to_the_velocity_cmap() -> None:
+def test_compose_maps_defaults_to_the_sauron_cmap() -> None:
     data = gradient()
 
     composed = compose_maps(data, data)
 
-    np.testing.assert_allclose(composed[..., :3], np.asarray(velocity_cmap(data))[..., :3])
+    np.testing.assert_allclose(composed[..., :3], np.asarray(sauron_cmap(data))[..., :3])
 
 
 def test_compose_maps_accepts_a_bare_cmap_name_as_a_style() -> None:

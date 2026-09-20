@@ -11,7 +11,7 @@ the value of its region::
     from pynbodyext.plot import image
 
     binned = image.adaptive_map_from_bins(bins2d, "vz.mean", "mass.sum", target_nbins=200)
-    binned.display.draw(cmap="velocity", symmetric=True)
+    binned.display.draw(cmap="sauron", symmetric=True)
 
 The capacity is the signal itself (``mass.sum``), or ``(signal / noise)**2`` when
 a noise map is supplied.  Pixels that carry no signal — empty bins (``NaN``),
@@ -468,7 +468,7 @@ class AdaptiveOps(ImageOps):
         >>> velocity = ImageData.from_bins(bins2d, "vz.mean")  # doctest: +SKIP
         >>> mass = ImageData.from_bins(bins2d, "mass.sum")  # doctest: +SKIP
         >>> binned = velocity.adaptive.bin(mass, target_nbins=200)  # doctest: +SKIP
-        >>> binned.display.draw(cmap="velocity", symmetric=True)  # doctest: +SKIP
+        >>> binned.display.draw(cmap="sauron", symmetric=True)  # doctest: +SKIP
         """
         return adaptive_bin_map(
             self.data,

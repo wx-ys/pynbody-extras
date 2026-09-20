@@ -120,9 +120,10 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   has two entry points — `image.display.*` for showing it and
   `image.process.*` for working on it — with the families nested inside the
   second.
-- [ADR-0011](docs/adr/0011-colormap-naming.md): the velocity colour map is
-  registered as `"velocity"` (`velocity_r`), named for what it is for rather than
-  for the letters of its stops.
+- [ADR-0011](docs/adr/0011-the-colormap-is-saurons.md): the colour map is Cappellari &
+  Emsellem's SAURON map, reproduced from its published table bit-for-bit and
+  registered under its own name, `"sauron"` (`"sauron_r"`), with the source
+  credited in the code.
 
 ## Image layer (`pynbodyext/plot/image/`)
 
@@ -224,14 +225,18 @@ object a caller normally holds.
   independent; `width <= 0` gives a hard split). Drives `blend_images`,
   `blend_stack` and `compose_maps`, which stitch two maps drawn with different
   colour maps into one RGBA image whose alpha is the coverage.
-- **`velocity_cmap`** (registered as `"velocity"`, `plot/image/cmaps.py`) — the
-  velocity colour map, black →
-  blue → cyan → **green at zero velocity (position 0.50)** → yellow → red →
-  white, with stops at `[0.00, 0.18, 0.44, 0.50, 0.56, 0.84, 1.00]`. Registered
-  with matplotlib under a matplotlib-style name (lower-case, one word), so
-  `cmap="velocity"` and `cmap="velocity_r"` work; `vel_cmap`/`vel_cmap_r` are the
-  same objects under their short names, and `VELOCITY_COLORS`/`VELOCITY_POSITIONS`
-  are the stops. `to_rgba` maps a 2-D array plus a stretch to RGBA.
+- **`sauron_cmap`** (registered as `"sauron"`/`"sauron_r"`, `plot/image/cmaps.py`)
+  — **Michele Cappellari & Eric Emsellem's SAURON colormap** (Leiden, 2001): black
+  → blue → cyan → **green on zero (0.50)** → yellow → red → light grey (0.9, not
+  white). `SAURON_POSITIONS` (11 control points, symmetric about 0.5) and
+  `SAURON_RGB` are the published table, and the map is built from it exactly as the
+  reference implementation (`plotbin/sauron_colormap.py`, Cappellari 2014-2024,
+  https://purl.org/cappellari) does — a test asserts the two look-up tables are
+  identical whenever `plotbin` is installed, so `cmap="sauron"` means the same
+  colours whoever registered it first. This is the map used for the stellar
+  velocity fields of the SAURON and ATLAS³D surveys; cite that lineage, not this
+  package, for the colours. `vel_cmap`/`vel_cmap_r` are aliases. `to_rgba` maps a
+  2-D array plus a stretch to RGBA.
 - **PSF** (`plot/image/psf.py`) — the observational point-spread function:
   `gaussian_psf(fwhm=..., e=..., theta=...)` builds a kernel, `convolve_psf`
   applies it (forward direction, for comparing a model to data), and

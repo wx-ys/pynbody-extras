@@ -1,26 +1,31 @@
 """Colour maps and colour helpers for image display.
 
-The headline entry is :data:`velocity_cmap` — black → blue → cyan → green →
-yellow → red → white — the map used for velocity fields of observed galaxies,
-built with green on zero (``0.50``), cyan/yellow on the shoulders and black/white
-at the extremes so that the sign of the velocity is readable at a glance.  It is
-registered with matplotlib, so ``cmap="velocity"`` also works::
+The headline entry is :data:`sauron_cmap` — the **SAURON colormap**: black → blue
+→ cyan → green → yellow → red → light grey, with green on zero.  It is the map
+used for the stellar velocity fields of the SAURON and ATLAS³D integral-field
+surveys, which is why it is the default for velocity maps here::
 
-    ax.imshow(velocity_map, cmap="velocity", vmin=-200, vmax=200)
+    ax.imshow(velocity_map, cmap="sauron", vmin=-200, vmax=200)
 
-**Where the colours come from.**  This is a hand-built, fully saturated rendering
-of the **SAURON colormap** (Michele Cappellari & Eric Emsellem, Leiden, 2001), the
-colour scheme of the SAURON and ATLAS³D integral-field kinematics; its reference
-implementation ships with Cappellari's ``plotbin``, which registers it as
-``sauron``/``sauron_r``.  Ours follows the same sequence and the same green zero
-point but uses pure stops and white (rather than light grey) at the positive end:
-the two agree within ~0.1 per channel over most of the range, differing most in the
-cyan shoulder (near 0.4) and at the two ends.  Use ``plotbin``'s ``sauron`` if you
-need the exact published colours.
+Source and citation
+-------------------
+The colours are Michele Cappellari & Eric Emsellem's SAURON colormap (Leiden,
+2001).  :data:`SAURON_POSITIONS` and :data:`SAURON_RGB` below are that published
+table verbatim — eleven control points — and the map is built from them exactly as
+the reference implementation does, so the two look-up tables are identical (a test
+asserts it whenever ``plotbin`` is installed).
 
-Note that a 256-entry look-up table samples the declared colour stops
-approximately: :data:`VELOCITY_POSITIONS` are exact in the continuous
-definition, and matplotlib interpolates them onto ``N`` levels.
+The reference implementation is ``plotbin/sauron_colormap.py`` (Copyright (C)
+2014-2024 Michele Cappellari, https://purl.org/cappellari, PyPI ``plotbin``), which
+registers the map with matplotlib as ``sauron``/``sauron_r``.  If that package has
+registered them first, :func:`register_cmap` keeps its entry rather than ours — the
+colours are the same either way, so ``cmap="sauron"`` is unambiguous.  To cite the
+map in a publication, credit Cappellari & Emsellem's SAURON colormap and the
+SAURON/ATLAS³D kinematic figures it comes from.
+
+Note that a 256-entry look-up table samples the control points approximately: the
+table is exact in the continuous definition, and matplotlib interpolates it onto
+``N`` levels.
 """
 
 from __future__ import annotations
@@ -35,23 +40,41 @@ from matplotlib.colors import Colormap, LinearSegmentedColormap
 from .smooth import normalize
 
 __all__ = [
-    "VELOCITY_COLORS",
-    "VELOCITY_POSITIONS",
+    "SAURON_POSITIONS",
+    "SAURON_RGB",
     "cmap_from_colors",
     "get_cmap",
     "register_cmap",
+    "sauron_cmap",
+    "sauron_cmap_r",
     "to_rgba",
     "vel_cmap",
     "vel_cmap_r",
-    "velocity_cmap",
-    "velocity_cmap_r",
 ]
 
-#: Colour stops of the velocity map, black → blue → cyan → green → yellow → red → white.
-VELOCITY_COLORS = ["#000000", "#0000FF", "#00FFFF", "#00FF00", "#FFFF00", "#FF0000", "#FFFFFF"]
+#: Positions of the SAURON control points, from the published table (``x/255``).
+#: The table is symmetric about ``0.5`` (green, the zero of the velocity field):
+#: ``(1 - x)[::-1] - x == 0``.
+SAURON_POSITIONS = np.array([0, 42.5, 85, 105, 117.5, 127.5, 137.5, 150, 170, 212.5, 255]) / 255.0
 
-#: Positions of :data:`VELOCITY_COLORS`, symmetric about green at ``0.50``.
-VELOCITY_POSITIONS = [0.00, 0.18, 0.44, 0.50, 0.56, 0.84, 1.00]
+#: Red, green and blue values at :data:`SAURON_POSITIONS` — Cappellari & Emsellem's
+#: SAURON colormap table, as distributed in ``plotbin`` (see the module docstring).
+#: Black at the negative end, light grey (0.9) at the positive end, green on zero.
+SAURON_RGB = np.array(
+    [
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.4, 0.85, 1.0],
+        [0.5, 1.0, 1.0],
+        [0.3, 1.0, 0.7],
+        [0.0, 0.9, 0.0],
+        [0.7, 1.0, 0.0],
+        [1.0, 1.0, 0.0],
+        [1.0, 0.85, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.9, 0.9, 0.9],
+    ]
+)
 
 
 def cmap_from_colors(name: str, colors: Any, positions: Any = None, *, N: int = 256) -> LinearSegmentedColormap:
@@ -108,7 +131,7 @@ def register_cmap(cmap: Colormap, name: str | None = None, *, overwrite: bool = 
 def get_cmap(cmap: Colormap | str | None = None) -> Colormap:
     """Resolve *cmap* to a colour map object.
 
-    ``None`` yields the default :data:`velocity_cmap`; a string is looked up in
+    ``None`` yields the default :data:`sauron_cmap`; a string is looked up in
     the matplotlib registry; a colour map is returned unchanged.
 
     Raises
@@ -117,7 +140,7 @@ def get_cmap(cmap: Colormap | str | None = None) -> Colormap:
         If a name is not registered with matplotlib.
     """
     if cmap is None:
-        return velocity_cmap
+        return sauron_cmap
     if isinstance(cmap, Colormap):
         return cmap
     try:
@@ -145,7 +168,7 @@ def to_rgba(
     data : array_like
         2-D image.  Non-finite pixels come out transparent (or *bad*).
     cmap : str or Colormap, optional
-        Colour map; defaults to :data:`velocity_cmap`.
+        Colour map; defaults to :data:`sauron_cmap`.
     vmin, vmax, stretch, percentiles :
         Passed to :func:`~pynbodyext.plot.image.smooth.normalize` to map the
         values onto ``[0, 1]``.
@@ -190,17 +213,32 @@ def to_rgba(
     return rgba
 
 
-#: The velocity colour map, registered so that ``cmap="velocity"`` works.
-velocity_cmap: LinearSegmentedColormap = cmap_from_colors("velocity", VELOCITY_COLORS, VELOCITY_POSITIONS, N=256)
+def _sauron_cdict(reverse: bool = False) -> dict[str, np.ndarray]:
+    """Segment data of the SAURON map, built the way ``plotbin`` builds it.
 
-#: Alias of :data:`velocity_cmap` under the name it usually goes by in plotting code.
-vel_cmap: LinearSegmentedColormap = velocity_cmap
+    Mirroring that construction (rather than re-deriving the colours) is what keeps
+    the two look-up tables identical; ``reverse`` flips the colour columns, which is
+    exactly how ``plotbin`` defines ``sauron_r``.
+    """
+    red, green, blue = (SAURON_RGB[:, channel][::-1] if reverse else SAURON_RGB[:, channel] for channel in range(3))
+    return {
+        "red": np.column_stack([SAURON_POSITIONS, red, red]),
+        "green": np.column_stack([SAURON_POSITIONS, green, green]),
+        "blue": np.column_stack([SAURON_POSITIONS, blue, blue]),
+    }
 
-#: Reversed velocity colour map (white → red → … → black), registered as ``"velocity_r"``.
-velocity_cmap_r: LinearSegmentedColormap = velocity_cmap.reversed(name="velocity_r")
 
-#: Alias of :data:`velocity_cmap_r`.
-vel_cmap_r: LinearSegmentedColormap = velocity_cmap_r
+#: The SAURON colormap, registered so that ``cmap="sauron"`` works.
+sauron_cmap: LinearSegmentedColormap = LinearSegmentedColormap("sauron", _sauron_cdict())
 
-register_cmap(velocity_cmap)
-register_cmap(velocity_cmap_r)
+#: Reversed SAURON colormap (light grey → red → … → black), registered as ``"sauron_r"``.
+sauron_cmap_r: LinearSegmentedColormap = LinearSegmentedColormap("sauron_r", _sauron_cdict(reverse=True))
+
+#: Alias of :data:`sauron_cmap` under the name it usually goes by in plotting code.
+vel_cmap: LinearSegmentedColormap = sauron_cmap
+
+#: Alias of :data:`sauron_cmap_r`.
+vel_cmap_r: LinearSegmentedColormap = sauron_cmap_r
+
+register_cmap(sauron_cmap)
+register_cmap(sauron_cmap_r)

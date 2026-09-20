@@ -51,7 +51,7 @@ class MapStyle:
     Parameters
     ----------
     cmap : str or Colormap, optional
-        Colour map; defaults to the velocity map ``velocity_cmap``.
+        Colour map; defaults to the SAURON map ``sauron_cmap``.
     vmin, vmax : float, optional
         Value limits; default to the data range, or to *percentiles*.
     stretch : {"linear", "sqrt", "log", "asinh", "hist"}, default: "linear"
@@ -284,7 +284,7 @@ def compose_maps(
     style1, style2 : MapStyle, str or dict, optional
         How each map becomes colours.  A bare string or colour map is read as
         ``cmap``, a mapping is expanded into the fields, and the default is a
-        plain ``velocity_cmap`` rendering of that map's own range.
+        plain ``sauron_cmap`` rendering of that map's own range.
     mask : array_like, optional
         Weight of the first map in ``[0, 1]``.  Defaults to the soft split from
         :func:`create_map_mask` with *line_angle* and *width*.

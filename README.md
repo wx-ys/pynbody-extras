@@ -234,7 +234,7 @@ restored = observed.process.psf.wiener(image.gaussian_psf(fwhm=3.0), balance=1e-
 # A velocity map: adaptive bins of equal mass, green on zero velocity
 velocity = image.ImageData.from_bins(bins2d, "vz.mean")
 binned = velocity.process.adaptive.bin(bins2d["mass.sum"], target_nbins=200, min_signal=1e6)
-binned.display.imshow(cmap="velocity", symmetric=True, colorbar="bottom")
+binned.display.imshow(cmap="sauron", symmetric=True, colorbar="bottom")
 binned.image.process.smooth.box(size=3)       # the painted map is an ImageData too
 # a colour bar can also be added afterwards, on the artist or on the map
 binned.display.add_colorbar(loc="left", size="4%", tick_label_size=8)
@@ -265,9 +265,10 @@ only what it *is* (values, geometry, units, labels, `ops`, `with_data`,
 `from_bins`). The underlying free functions (`gaussian_smooth(data, ...)`,
 `compose_maps(...)`, …) remain available for plain arrays. A new family is a new module plus
 `@ImageData.register_ops("tessellation")`, so extension never means editing base
-classes. The velocity colour map (`image.velocity_cmap`, black → blue → cyan →
-**green on zero** → yellow → red → white) is registered with matplotlib under a
-matplotlib-style name, so `cmap="velocity"` (and `"velocity_r"`) work; the masks
+classes. The SAURON colour map (`image.sauron_cmap`, black → blue → cyan →
+**green on zero** → yellow → red → light grey — Cappellari & Emsellem's map for
+SAURON/ATLAS³D velocity fields, reproduced from its published table) is registered
+under its own name, so `cmap="sauron"` (and `"sauron_r"`) work; the masks
 behind the stitching are exposed on their own:
 
 ```python
