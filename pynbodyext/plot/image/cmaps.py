@@ -1,15 +1,15 @@
 """Colour maps and colour helpers for image display.
 
-The headline entry is :data:`K_B_C_G_Y_R_W` — black → blue → cyan → green →
+The headline entry is :data:`velocity_cmap` — black → blue → cyan → green →
 yellow → red → white — the classic kinematic colour map, built with green on
 zero velocity (``0.50``), cyan/yellow on the shoulders and black/white at the
 extremes so that the sign of a velocity is readable at a glance.  It is
-registered with matplotlib, so ``cmap="K_B_C_G_Y_R_W"`` also works::
+registered with matplotlib, so ``cmap="velocity"`` also works::
 
-    ax.imshow(velocity_map, cmap="K_B_C_G_Y_R_W", vmin=-200, vmax=200)
+    ax.imshow(velocity_map, cmap="velocity", vmin=-200, vmax=200)
 
 Note that a 256-entry look-up table samples the declared colour stops
-approximately: :data:`K_B_C_G_Y_R_W_POSITIONS` are exact in the continuous
+approximately: :data:`VELOCITY_POSITIONS` are exact in the continuous
 definition, and matplotlib interpolates them onto ``N`` levels.
 """
 
@@ -25,22 +25,23 @@ from matplotlib.colors import Colormap, LinearSegmentedColormap
 from .smooth import normalize
 
 __all__ = [
-    "K_B_C_G_Y_R_W",
-    "K_B_C_G_Y_R_W_COLORS",
-    "K_B_C_G_Y_R_W_POSITIONS",
+    "VELOCITY_COLORS",
+    "VELOCITY_POSITIONS",
     "cmap_from_colors",
     "get_cmap",
     "register_cmap",
     "to_rgba",
     "vel_cmap",
     "vel_cmap_r",
+    "velocity_cmap",
+    "velocity_cmap_r",
 ]
 
 #: Colour stops of the velocity map, black → blue → cyan → green → yellow → red → white.
-K_B_C_G_Y_R_W_COLORS = ["#000000", "#0000FF", "#00FFFF", "#00FF00", "#FFFF00", "#FF0000", "#FFFFFF"]
+VELOCITY_COLORS = ["#000000", "#0000FF", "#00FFFF", "#00FF00", "#FFFF00", "#FF0000", "#FFFFFF"]
 
-#: Positions of :data:`K_B_C_G_Y_R_W_COLORS`, symmetric about green at ``0.50``.
-K_B_C_G_Y_R_W_POSITIONS = [0.00, 0.18, 0.44, 0.50, 0.56, 0.84, 1.00]
+#: Positions of :data:`VELOCITY_COLORS`, symmetric about green at ``0.50``.
+VELOCITY_POSITIONS = [0.00, 0.18, 0.44, 0.50, 0.56, 0.84, 1.00]
 
 
 def cmap_from_colors(name: str, colors: Any, positions: Any = None, *, N: int = 256) -> LinearSegmentedColormap:
@@ -97,7 +98,7 @@ def register_cmap(cmap: Colormap, name: str | None = None, *, overwrite: bool = 
 def get_cmap(cmap: Colormap | str | None = None) -> Colormap:
     """Resolve *cmap* to a colour map object.
 
-    ``None`` yields the default :data:`K_B_C_G_Y_R_W`; a string is looked up in
+    ``None`` yields the default :data:`velocity_cmap`; a string is looked up in
     the matplotlib registry; a colour map is returned unchanged.
 
     Raises
@@ -106,7 +107,7 @@ def get_cmap(cmap: Colormap | str | None = None) -> Colormap:
         If a name is not registered with matplotlib.
     """
     if cmap is None:
-        return K_B_C_G_Y_R_W
+        return velocity_cmap
     if isinstance(cmap, Colormap):
         return cmap
     try:
@@ -134,7 +135,7 @@ def to_rgba(
     data : array_like
         2-D image.  Non-finite pixels come out transparent (or *bad*).
     cmap : str or Colormap, optional
-        Colour map; defaults to :data:`K_B_C_G_Y_R_W`.
+        Colour map; defaults to :data:`velocity_cmap`.
     vmin, vmax, stretch, percentiles :
         Passed to :func:`~pynbodyext.plot.image.smooth.normalize` to map the
         values onto ``[0, 1]``.
@@ -179,16 +180,17 @@ def to_rgba(
     return rgba
 
 
-#: The velocity colour map, registered so that ``cmap="K_B_C_G_Y_R_W"`` works.
-K_B_C_G_Y_R_W: LinearSegmentedColormap = cmap_from_colors(
-    "K_B_C_G_Y_R_W", K_B_C_G_Y_R_W_COLORS, K_B_C_G_Y_R_W_POSITIONS, N=256
-)
+#: The velocity colour map, registered so that ``cmap="velocity"`` works.
+velocity_cmap: LinearSegmentedColormap = cmap_from_colors("velocity", VELOCITY_COLORS, VELOCITY_POSITIONS, N=256)
 
-#: Alias of :data:`K_B_C_G_Y_R_W` under the name it usually goes by in plotting code.
-vel_cmap: LinearSegmentedColormap = K_B_C_G_Y_R_W
+#: Alias of :data:`velocity_cmap` under the name it usually goes by in plotting code.
+vel_cmap: LinearSegmentedColormap = velocity_cmap
 
-#: Reversed velocity colour map (white → red → … → black).
-vel_cmap_r: LinearSegmentedColormap = vel_cmap.reversed(name="K_B_C_G_Y_R_W_r")
+#: Reversed velocity colour map (white → red → … → black), registered as ``"velocity_r"``.
+velocity_cmap_r: LinearSegmentedColormap = velocity_cmap.reversed(name="velocity_r")
 
-register_cmap(vel_cmap)
-register_cmap(vel_cmap_r)
+#: Alias of :data:`velocity_cmap_r`.
+vel_cmap_r: LinearSegmentedColormap = velocity_cmap_r
+
+register_cmap(velocity_cmap)
+register_cmap(velocity_cmap_r)

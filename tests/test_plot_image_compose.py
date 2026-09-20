@@ -6,7 +6,7 @@ import matplotlib
 import numpy as np
 import pytest
 
-from pynbodyext.plot.image.cmaps import K_B_C_G_Y_R_W, to_rgba
+from pynbodyext.plot.image.cmaps import velocity_cmap, to_rgba
 from pynbodyext.plot.image.compose import (
     MapStyle,
     blend_images,
@@ -231,7 +231,7 @@ def test_compose_maps_defaults_to_the_velocity_cmap() -> None:
 
     composed = compose_maps(data, data)
 
-    np.testing.assert_allclose(composed[..., :3], np.asarray(K_B_C_G_Y_R_W(data))[..., :3])
+    np.testing.assert_allclose(composed[..., :3], np.asarray(velocity_cmap(data))[..., :3])
 
 
 def test_compose_maps_accepts_a_bare_cmap_name_as_a_style() -> None:

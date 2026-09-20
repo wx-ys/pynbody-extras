@@ -480,13 +480,13 @@ class DisplayOps(ImageOps):
         """Map the values to an ``(ny, nx, 4)`` RGBA array.
 
         See :func:`~pynbodyext.plot.image.cmaps.to_rgba`; the default colour map is
-        the velocity map ``K_B_C_G_Y_R_W``.
+        the velocity map ``velocity_cmap``.
         """
-        from .cmaps import K_B_C_G_Y_R_W, to_rgba
+        from .cmaps import to_rgba, velocity_cmap
 
         return to_rgba(
             self.data,
-            K_B_C_G_Y_R_W if cmap is None else cmap,
+            velocity_cmap if cmap is None else cmap,
             vmin=vmin,
             vmax=vmax,
             stretch=stretch,

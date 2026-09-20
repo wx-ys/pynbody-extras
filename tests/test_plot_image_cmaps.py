@@ -8,9 +8,9 @@ import pytest
 from matplotlib.colors import Colormap, LinearSegmentedColormap
 
 from pynbodyext.plot.image.cmaps import (
-    K_B_C_G_Y_R_W,
-    K_B_C_G_Y_R_W_COLORS,
-    K_B_C_G_Y_R_W_POSITIONS,
+    velocity_cmap,
+    VELOCITY_COLORS,
+    VELOCITY_POSITIONS,
     cmap_from_colors,
     get_cmap,
     register_cmap,
@@ -20,17 +20,17 @@ from pynbodyext.plot.image.cmaps import (
 
 
 def test_velocity_cmap_is_a_256_entry_linear_segmented_map() -> None:
-    assert isinstance(K_B_C_G_Y_R_W, LinearSegmentedColormap)
-    assert K_B_C_G_Y_R_W.name == "K_B_C_G_Y_R_W"
-    assert K_B_C_G_Y_R_W.N == 256
-    assert vel_cmap is K_B_C_G_Y_R_W
+    assert isinstance(velocity_cmap, LinearSegmentedColormap)
+    assert velocity_cmap.name == "velocity"
+    assert velocity_cmap.N == 256
+    assert vel_cmap is velocity_cmap
 
 
 def test_velocity_cmap_is_registered_with_matplotlib() -> None:
-    registered = matplotlib.colormaps["K_B_C_G_Y_R_W"]
+    registered = matplotlib.colormaps["velocity"]
 
-    assert registered.name == K_B_C_G_Y_R_W.name
-    np.testing.assert_allclose(registered(np.linspace(0, 1, 9)), K_B_C_G_Y_R_W(np.linspace(0, 1, 9)))
+    assert registered.name == velocity_cmap.name
+    np.testing.assert_allclose(registered(np.linspace(0, 1, 9)), velocity_cmap(np.linspace(0, 1, 9)))
 
 
 @pytest.mark.parametrize(
@@ -51,13 +51,13 @@ def test_velocity_cmap_hits_every_colour_stop(position: float, color: str) -> No
     # table samples them, so interior stops carry half a step of quantisation
     # error on the steepest segment (black/white ends are sampled exactly).
     tolerance = 1e-9 if position in (0.0, 1.0) else 0.04
-    np.testing.assert_allclose(K_B_C_G_Y_R_W(position), expected, atol=tolerance)
+    np.testing.assert_allclose(velocity_cmap(position), expected, atol=tolerance)
 
 
 def test_velocity_cmap_stops_are_the_declared_ones() -> None:
-    assert len(K_B_C_G_Y_R_W_COLORS) == len(K_B_C_G_Y_R_W_POSITIONS) == 7
-    np.testing.assert_allclose(K_B_C_G_Y_R_W_POSITIONS, [0.00, 0.18, 0.44, 0.50, 0.56, 0.84, 1.00])
-    assert K_B_C_G_Y_R_W_POSITIONS[3] == 0.5  # green sits on zero velocity
+    assert len(VELOCITY_COLORS) == len(VELOCITY_POSITIONS) == 7
+    np.testing.assert_allclose(VELOCITY_POSITIONS, [0.00, 0.18, 0.44, 0.50, 0.56, 0.84, 1.00])
+    assert VELOCITY_POSITIONS[3] == 0.5  # green sits on zero velocity
 
 
 def test_cmap_from_colors_builds_named_map() -> None:
@@ -85,8 +85,8 @@ def test_register_cmap_is_idempotent() -> None:
 
 
 def test_get_cmap_accepts_name_or_object() -> None:
-    assert get_cmap("K_B_C_G_Y_R_W").name == K_B_C_G_Y_R_W.name
-    assert get_cmap(K_B_C_G_Y_R_W) is K_B_C_G_Y_R_W
+    assert get_cmap("velocity").name == velocity_cmap.name
+    assert get_cmap(velocity_cmap) is velocity_cmap
 
 
 def test_to_rgba_returns_unit_float_rgba() -> None:

@@ -120,6 +120,9 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   has two entry points — `image.display.*` for showing it and
   `image.process.*` for working on it — with the families nested inside the
   second.
+- [ADR-0011](docs/adr/0011-colormap-naming.md): the velocity colour map is
+  registered as `"velocity"` (`velocity_r`), named for what it is for rather than
+  for the letters of its stops.
 
 ## Image layer (`pynbodyext/plot/image/`)
 
@@ -221,11 +224,14 @@ object a caller normally holds.
   independent; `width <= 0` gives a hard split). Drives `blend_images`,
   `blend_stack` and `compose_maps`, which stitch two maps drawn with different
   colour maps into one RGBA image whose alpha is the coverage.
-- **`K_B_C_G_Y_R_W`** (`plot/image/cmaps.py`) — the velocity colour map, black →
+- **`velocity_cmap`** (registered as `"velocity"`, `plot/image/cmaps.py`) — the
+  velocity colour map, black →
   blue → cyan → **green at zero velocity (position 0.50)** → yellow → red →
   white, with stops at `[0.00, 0.18, 0.44, 0.50, 0.56, 0.84, 1.00]`. Registered
-  with matplotlib, so `cmap="K_B_C_G_Y_R_W"` works; `vel_cmap` is the same
-  object. `to_rgba` maps a 2-D array plus a stretch to RGBA.
+  with matplotlib under a matplotlib-style name (lower-case, one word), so
+  `cmap="velocity"` and `cmap="velocity_r"` work; `vel_cmap`/`vel_cmap_r` are the
+  same objects under their short names, and `VELOCITY_COLORS`/`VELOCITY_POSITIONS`
+  are the stops. `to_rgba` maps a 2-D array plus a stretch to RGBA.
 - **PSF** (`plot/image/psf.py`) — the observational point-spread function:
   `gaussian_psf(fwhm=..., e=..., theta=...)` builds a kernel, `convolve_psf`
   applies it (forward direction, for comparing a model to data), and
