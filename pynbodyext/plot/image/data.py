@@ -58,16 +58,16 @@ from typing import Any
 
 import numpy as np
 
-from ._arrays import bin_centers, edges_are_uniform, pixel_width, resolve_edges
+from ._arrays import bin_centers, edges_are_uniform, pixel_width, resolve_edges, shape_hint
 from .adaptive import AdaptiveOps
 from .cmaps import K_B_C_G_Y_R_W, to_rgba
 from .compose import ComposeOps
-from .display import _unit_text, add_colorbar, draw_image, draw_imshow, draw_pcolormesh
+from .display import _unit_text, add_colorbar, draw_contour, draw_image, draw_imshow, draw_pcolormesh
 from .ops import OPERATIONS, ImageOps, register_ops
 from .postprocess import SmoothOps, normalize
 from .psf import PsfOps
 
-__all__ = ["ImageData", "ImageOp", "OPERATIONS", "register_ops"]
+__all__ = ["ImageData", "ImageOp", "OPERATIONS", "as_image", "register_ops"]
 
 
 def _describe(value: Any) -> str:
@@ -408,6 +408,36 @@ class ImageData:
         """
         return add_colorbar(self if mappable is None else mappable, ax=ax, **kwargs)
 
+    def contour(
+        self,
+        ax: Any = None,
+        *,
+        levels: Any = 8,
+        filled: bool = False,
+        colorbar: bool | str = False,
+        colorbar_kwargs: dict[str, Any] | None = None,
+        aspect: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Draw contour lines (or ``filled=True`` bands) of the values.
+
+        Contours follow the image's own grid — the bin centres — so they land on
+        the right pixels for unevenly spaced bins too, and they overlay an existing
+        image when the same *ax* is passed.
+
+        See :func:`~pynbodyext.plot.image.display.draw_contour`.
+        """
+        return draw_contour(
+            self,
+            ax=ax,
+            levels=levels,
+            filled=filled,
+            colorbar=colorbar,
+            colorbar_kwargs=colorbar_kwargs,
+            aspect=aspect,
+            **kwargs,
+        )
+
     def _derived(self, data: Any, op_name: str, params: dict[str, Any] | None = None, **overrides: Any) -> ImageData:
         """Return a copy carrying *data*, with *op_name* appended to :attr:`ops`.
 
@@ -435,7 +465,7 @@ class ImageData:
         """
         replacement = np.asarray(data)
         if replacement.shape != self.shape:
-            raise ValueError(f"New data has shape {replacement.shape}, expected {self.shape}.")
+            raise ValueError(shape_hint(self.shape, replacement.shape, name="data"))
         return replace(self, data=replacement, **overrides)
 
     # ------------------------------------------------------------------
@@ -495,9 +525,57 @@ class ImageData:
         ndim = getattr(bins, "ndim", None)
         if ndim != 2:
             raise ValueError(f"from_bins needs a 2-D binned result, got ndim={ndim}.")
+        return cls.from_bins_array(
+            bins[query],
+            label=query if label is None else label,
+            units=units,
+            x_label=x_label,
+            y_label=y_label,
+            x_units=x_units,
+            y_units=y_units,
+        )
+
+    @classmethod
+    def from_bins_array(
+        cls,
+        array: Any,
+        *,
+        label: str | None = None,
+        units: Any = None,
+        x_label: str | None = None,
+        y_label: str | None = None,
+        x_units: Any = None,
+        y_units: Any = None,
+    ) -> ImageData:
+        """Build an image from a single binned array (a :class:`BinsArray`).
+
+        The array is laid out ``(x, y)``, like every binned result, and is
+        transposed into the image convention of rows ``= y``, columns ``= x``; its
+        bin edges, per-axis units and axis names come along.  This is what makes
+        ``velocity.adaptive.bin(bins.s["count"])`` mean what it looks like, with no
+        ``.T`` for the caller to remember.
+
+        Parameters
+        ----------
+        array : BinsArray
+            One query of a 2-D :class:`BinNDResult`, e.g. ``bins2d["mass.sum"]``.
+        label : str, optional
+            Name of the values; defaults to the array's own name.
+        units : object, optional
+            Units of the values; default to the array's.
+        x_label, y_label, x_units, y_units : optional
+            Overrides for the metadata read from the axes.
+
+        Returns
+        -------
+        ImageData
+            The values as an image, with the geometry of their grid.
+        """
+        bins = getattr(array, "bins", None)
+        if bins is None:
+            raise TypeError(f"from_bins_array needs a binned array, got {type(array).__name__}.")
         axes = bins.axes
         edges = [_axis_edges(axis, index) for index, axis in enumerate(axes)]
-        array = bins[query]
         return cls(
             data=np.asarray(array.grid).T,  # (x, y) grid -> (row=y, column=x)
             x_edges=edges[0],
@@ -506,7 +584,7 @@ class ImageData:
             y_units=axes[1].units if y_units is None else y_units,
             x_label=_axis_name(axes[0]) if x_label is None else x_label,
             y_label=_axis_name(axes[1]) if y_label is None else y_label,
-            label=query if label is None else label,
+            label=getattr(array, "name", None) if label is None else label,
             units=getattr(array, "units", None) if units is None else units,
         )
 
@@ -543,3 +621,50 @@ def _axis_name(axis: Any) -> str:
     """Display name of an axis: its property when that is a plain name, else its alias."""
     prop = getattr(axis, "prop", None)
     return prop if isinstance(prop, str) else str(getattr(axis, "alias", ""))
+
+
+def as_image(value: Any) -> ImageData:
+    """Interpret *value* as an image: an :class:`ImageData`, a binned array, or an array.
+
+    A binned array — what ``bins2d["mass.sum"]`` returns — is laid out ``(x, y)``,
+    so it is transposed into the image convention ``(row=y, column=x)`` and brings
+    its bin edges, units and labels with it.  That is why passing one can never be
+    silently the wrong way round, and why ``velocity.adaptive.bin(bins.s["count"])``
+    reads the way it looks.
+
+    A plain 2-D array is taken to be in image orientation already, since nothing
+    about it says otherwise; pass an :class:`ImageData` when orientation matters and
+    you want to be explicit.
+
+    Parameters
+    ----------
+    value : ImageData, BinsArray or array_like
+        The thing to interpret.
+
+    Returns
+    -------
+    ImageData
+        The image (the same object when *value* already is one).
+
+    Raises
+    ------
+    TypeError
+        If *value* is neither image-like nor a 2-D array.
+
+    Examples
+    --------
+    >>> density = as_image(bins2d["mass.sum"])  # doctest: +SKIP
+    >>> density.shape == bins2d.shape_bins[::-1]  # doctest: +SKIP
+    True
+    """
+    if isinstance(value, ImageData):
+        return value
+    if getattr(value, "bins", None) is not None and hasattr(value, "grid"):
+        return ImageData.from_bins_array(value)
+    array = np.asarray(value)
+    if array.ndim != 2:
+        raise TypeError(
+            f"as_image expects an ImageData, a binned array or a 2-D array, got {type(value).__name__} "
+            f"with shape {array.shape}."
+        )
+    return ImageData(array)

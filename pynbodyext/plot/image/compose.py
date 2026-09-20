@@ -31,7 +31,7 @@ from typing import Any
 
 import numpy as np
 
-from ._arrays import value_limits
+from ._arrays import shape_hint, value_limits
 from .cmaps import get_cmap, to_rgba
 from .display import add_colorbar
 from .ops import ImageOps, register_ops
@@ -294,10 +294,10 @@ def compose_maps(
     --------
     >>> composite = compose_maps(gas_density, dm_density, style1="inferno", style2="cividis")  # doctest: +SKIP
     """
-    first = np.asarray(data1, dtype=float)
-    second = np.asarray(data2, dtype=float)
+    first = _values(data1)
+    second = _values(data2)
     if first.shape != second.shape:
-        raise ValueError(f"data1 shape {first.shape} does not match data2 shape {second.shape}.")
+        raise ValueError(shape_hint(first.shape, second.shape, name="data2"))
     if mask is None:
         weights = create_map_mask(first, line_angle=line_angle, width=width)[0]
     else:
@@ -362,8 +362,8 @@ def imshow_compose(
     from matplotlib.cm import ScalarMappable
     from matplotlib.colors import Normalize
 
-    first = np.asarray(data1, dtype=float)
-    second = np.asarray(data2, dtype=float)
+    first = _values(data1)
+    second = _values(data2)
     styles = (as_map_style(style1), as_map_style(style2))
     figsize = kwargs.pop("figsize", (6.0, 5.0))
     if ax is None:
@@ -418,7 +418,7 @@ class ComposeOps(ImageOps):
             Float RGBA image.
         """
         return compose_maps(
-            self.data, _as_data(other), style1=style, style2=other_style, mask=mask, line_angle=line_angle, width=width
+            self.data, _values(other), style1=style, style2=other_style, mask=mask, line_angle=line_angle, width=width
         )
 
     #: ``image.compose(other, …)`` is the shorthand for :meth:`stitch`.
@@ -452,14 +452,19 @@ class ComposeOps(ImageOps):
         # function's ``style1``/``style2`` are accepted as well.
         style1 = kwargs.pop("style1", kwargs.pop("style", None))
         style2 = kwargs.pop("style2", kwargs.pop("other_style", None))
-        return imshow_compose(self.data, _as_data(other), style1=style1, style2=style2, **kwargs)
+        return imshow_compose(self.data, _values(other), style1=style1, style2=style2, **kwargs)
 
 
-def _as_data(value: Any) -> np.ndarray:
-    """Raw values of an image or of an array, so both can be composited."""
-    from .data import ImageData  # local import: data.py composes this module
+def _values(value: Any) -> np.ndarray:
+    """Values of anything image-like — an ImageData, a binned array, or an array.
 
-    return np.asarray(value.data if isinstance(value, ImageData) else value, dtype=float)
+    Binned arrays are transposed into image orientation on the way (see
+    :func:`~pynbodyext.plot.image.data.as_image`), so ``image.compose(bins.s[q])``
+    lines up instead of silently turning the map on its side.
+    """
+    from .data import as_image  # local import: data.py composes this module
+
+    return np.asarray(as_image(value).data, dtype=float)
 
 
 register_ops("compose", ComposeOps)

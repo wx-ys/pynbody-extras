@@ -229,12 +229,19 @@ restored = observed.psf.wiener(image.gaussian_psf(fwhm=3.0), balance=1e-6)
 
 # A velocity map: adaptive bins of equal mass, green on zero velocity
 velocity = image.ImageData.from_bins(bins2d, "vz.mean")
-mass = image.ImageData.from_bins(bins2d, "mass.sum")
-binned = velocity.adaptive.bin(mass, target_nbins=200, min_signal=1e6)
+binned = velocity.adaptive.bin(bins2d["mass.sum"], target_nbins=200, min_signal=1e6)
 binned.imshow(cmap="K_B_C_G_Y_R_W", symmetric=True, colorbar="bottom")
 binned.image.smooth.box(size=3)       # the painted map is an ImageData too
 # a colour bar can also be added afterwards, on the artist or on the map
 binned.add_colorbar(loc="left", size="4%", tick_label_size=8)
+
+# Contours are a display verb too: they follow the bins of the map they describe
+velocity.draw(ax=ax, cmap="inferno")
+velocity.contour(ax=ax, levels=[-200, -100, 0, 100, 200], colors="w", linewidths=0.6)
+
+# Anything that takes a second map accepts a binned array directly: it carries its
+# own orientation, so no `.T` (a raw ndarray is taken as image-oriented)
+mass = image.as_image(bins2d["mass.sum"])   # (x, y) -> (row=y, column=x)
 
 # Gas density and dark-matter density in one figure, crossfaded along a line
 gas = image.ImageData.from_bins(bins2d, "mass.sum", units="1e10 Msol")
@@ -249,7 +256,7 @@ gas.imshow_compose(
 
 Families with several variants sit behind an accessor (`image.smooth.gaussian`,
 `image.psf.convolve`, `image.compose(other)`, `image.adaptive.bin`), single
-operations are plain methods (`normalize`, `to_rgba`, `draw`, `add_colorbar`), and
+operations are plain methods (`normalize`, `to_rgba`, `draw`, `contour`, `add_colorbar`), and
 the underlying free functions (`gaussian_smooth(data, ...)`, `compose_maps(...)`,
 …) remain available for plain arrays. A new family is a new module plus
 `@ImageData.register_ops("tessellation")`, so extension never means editing base

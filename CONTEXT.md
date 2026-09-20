@@ -106,6 +106,10 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   capabilities are *views* reached as properties (`image.smooth.gaussian`), found
   through a registry so a new family is a new module rather than a new base class,
   and colour bars are docked to their panel by one helper.
+- [ADR-0007](docs/adr/0007-image-orientation-is-type-driven.md): orientation is
+  decided by the type (`as_image` transposes a `BinsArray`), so
+  `adaptive.bin(bins.s["count"])` means what it looks like, and a raw transposed
+  grid is named in the error.
 
 ## Image layer (`pynbodyext/plot/image/`)
 
@@ -155,6 +159,17 @@ object a caller normally holds.
   `make_axes_locatable` with a shared divider per panel, so `size="5%"`,
   `pad=0.05`, `label_pad` and `tick_label_size` are under the caller's control and
   several bars (e.g. the two sides of `compose.imshow`) coexist.
+- **Contours** are a display verb alongside `imshow`: `image.contour(ax=ax,
+  levels=…, filled=…)` (and `AdaptiveMap.contour`) draws on the bin centres, so it
+  is correct for uneven bins and overlays an existing image when passed the same
+  axes. The artist is a `ContourSet`, which `add_colorbar` accepts directly.
+- **Orientation is type-driven.** A binned array is `(x, y)`; an image is
+  `(row=y, column=x)`. `as_image(bins2d["mass.sum"])` — and every function that
+  takes a second map (`adaptive.bin(signal)`, `compose(other)`, `adaptive_bin_map`)
+  — recognises a binned array by its `bins`/`grid` attributes and transposes it, so
+  `bins.s["count"]` means what it looks like. A *raw* array cannot be told apart
+  from an image, so when its shape is the transpose of the image's, the error says
+  exactly that instead of failing obscurely (silent when the grid is square).
 - **`BinNDResult.imshow`** (`core/calculate/bins/plot.py`) — a one-line bridge:
   it builds `ImageData.from_bins(self, query)` and calls `.draw()`. A bin grid is
   `(x, y)` and an image is `(row=y, column=x)`, so `from_bins` transposes; uneven

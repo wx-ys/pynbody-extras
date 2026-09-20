@@ -12,7 +12,7 @@ import numpy as np
 
 __all__ = [
     "FWHM_PER_SIGMA",
-    "as_image",
+    "as_2d",
     "as_pair",
     "bin_centers",
     "checked_edges",
@@ -31,12 +31,29 @@ __all__ = [
 FWHM_PER_SIGMA = 2.0 * np.sqrt(2.0 * np.log(2.0))
 
 
-def as_image(data: Any, *, name: str = "data") -> np.ndarray:
+def as_2d(data: Any, *, name: str = "data") -> np.ndarray:
     """Return *data* as a float 2-D array, rejecting anything else."""
     array = np.asarray(data, dtype=float)
     if array.ndim != 2:
         raise ValueError(f"{name} must be a 2-D image, got shape {array.shape}.")
     return array
+
+
+def shape_hint(expected: tuple[int, int], got: tuple[int, int], *, name: str = "data") -> str:
+    """Message for a shape mismatch, naming the likely transposition mistake.
+
+    A binned array is laid out ``(x, y)`` while an image is ``(row=y, column=x)``,
+    so a raw grid of the right *size* is wrong *way round* — and when it happens to
+    be square the mistake is silent, which is worse.  Anything that compares two
+    images says so explicitly.
+    """
+    if got == (expected[1], expected[0]) and expected != got:
+        return (
+            f"{name} has shape {got}, which is this image's shape {expected} transposed: a binned array is "
+            "(x, y) while an image is (row=y, column=x). Pass the binned array itself (a BinsArray knows its "
+            "orientation), an ImageData, or transpose the array you have."
+        )
+    return f"{name} has shape {got}, expected {expected}."
 
 
 def as_pair(value: Any, *, name: str) -> int | tuple[int, int]:

@@ -38,7 +38,7 @@ import numpy as np
 
 from pynbodyext.util.deps import POWERBIN_AVAILABLE
 
-from ._arrays import as_image, bin_centers, resolve_edges, typical_width
+from ._arrays import bin_centers, resolve_edges, shape_hint, typical_width
 from .ops import ImageDataView, ImageOps, register_ops
 
 if TYPE_CHECKING:
@@ -152,6 +152,31 @@ class AdaptiveMap(ImageDataView):
             limit = float(np.nanmax(np.abs(self.value)))
             kwargs["vmin"], kwargs["vmax"] = -limit, limit
         return self.image.draw(ax=ax, **kwargs)
+
+    def contour(self, ax: Any = None, *, symmetric: bool = False, **kwargs: Any) -> Any:
+        """Draw contours of the painted map; see :meth:`ImageData.contour`.
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes, optional
+            Axes to draw on; pass the same one as :meth:`imshow` to overlay.
+        symmetric : bool, default: False
+            Suggest levels symmetric about zero — the right choice for a velocity
+            map.  Ignored if ``levels`` is given explicitly.
+        **kwargs
+            Forwarded to :meth:`ImageData.contour`, e.g. ``levels``, ``filled``,
+            ``colors``, ``colorbar``.
+
+        Returns
+        -------
+        matplotlib.contour.ContourSet
+            The artist.
+        """
+        if symmetric and "levels" not in kwargs:
+            limit = float(np.nanmax(np.abs(self.value)))
+            levels = int(kwargs.pop("count", 6))
+            kwargs["levels"] = np.linspace(-limit, limit, 2 * levels + 1)
+        return self.image.contour(ax=ax, **kwargs)
 
 
 def _aggregate(values: np.ndarray, bin_num: np.ndarray, weights: np.ndarray, n_bins: int, method: str) -> np.ndarray:
@@ -316,18 +341,18 @@ def adaptive_bin_map(
         )
     from powerbin import PowerBin
 
-    from .data import ImageData  # local import: data.py composes this module
+    from .data import ImageData, as_image  # local import: data.py composes this module
 
-    values = as_image(value, name="value")
-    signals = as_image(signal, name="signal")
+    values = np.asarray(as_image(value).data, dtype=float)
+    signals = np.asarray(as_image(signal).data, dtype=float)
     if signals.shape != values.shape:
-        raise ValueError(f"signal shape {signals.shape} does not match value shape {values.shape}.")
+        raise ValueError(shape_hint(values.shape, signals.shape, name="signal"))
     if noise is None:
         capacity = signals.copy()
     else:
-        noise_array = as_image(noise, name="noise")
+        noise_array = np.asarray(as_image(noise).data, dtype=float)
         if noise_array.shape != values.shape:
-            raise ValueError(f"noise shape {noise_array.shape} does not match value shape {values.shape}.")
+            raise ValueError(shape_hint(values.shape, noise_array.shape, name="noise"))
         if np.any(noise_array <= 0.0):
             raise ValueError("noise must be positive everywhere.")
         capacity = (signals / noise_array) ** 2
@@ -517,12 +542,10 @@ class AdaptiveOps(ImageOps):
 
 
 def _as_map_data(value: Any) -> np.ndarray:
-    """Raw values of an image or of an array, so both can drive the binning."""
-    from .data import ImageData  # local import: data.py composes this module
+    """Values of anything image-like, transposing a binned array on the way."""
+    from .data import as_image  # local import: data.py composes this module
 
-    if isinstance(value, ImageData):
-        return np.asarray(value.data, dtype=float)
-    return np.asarray(value, dtype=float)
+    return np.asarray(as_image(value).data, dtype=float)
 
 
 register_ops("adaptive", AdaptiveOps)

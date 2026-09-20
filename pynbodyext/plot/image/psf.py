@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from scipy import signal
 
-from ._arrays import as_image, as_pair, masked_filter, resolve_sigma, validity_mask
+from ._arrays import as_2d, as_pair, masked_filter, resolve_sigma, validity_mask
 from .ops import ImageOps, register_ops
 
 if TYPE_CHECKING:
@@ -202,7 +202,7 @@ def convolve_psf(
     """
     if (psf is None) == (fwhm is None and sigma is None):
         raise ValueError("Pass either 'psf' or one of 'fwhm'/'sigma' (not both).")
-    array = as_image(image)
+    array = as_2d(image)
     if psf is None:
         kernel = gaussian_psf(fwhm=fwhm, sigma=sigma, shape=array.shape, pixel_scale=pixel_scale, **psf_kwargs)
         if not normalize:
@@ -254,7 +254,7 @@ def wiener_deconvolve(image: Any, psf: Any, *, balance: float = 1e-2, mask: Any 
     numpy.ndarray
         Deconvolved image, non-finite where the input was non-finite.
     """
-    array = as_image(image)
+    array = as_2d(image)
     kernel = normalize_psf(psf)
     valid = validity_mask(array, mask)
     observed = np.where(valid, array, 0.0)
@@ -294,7 +294,7 @@ def richardson_lucy(
     """
     if iterations < 0:
         raise ValueError(f"iterations must be non-negative, got {iterations!r}.")
-    array = as_image(image)
+    array = as_2d(image)
     kernel = normalize_psf(psf)
     valid = validity_mask(array, mask)
     observed = np.where(valid, array, 0.0)

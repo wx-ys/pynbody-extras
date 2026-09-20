@@ -21,6 +21,7 @@ EXPECTED_NAMES = {
     "OPERATIONS",
     "STRETCHES",
     "add_colorbar",
+    "as_image",
     "adaptive_bin_map",
     "adaptive_map_from_bins",
     "blend_images",

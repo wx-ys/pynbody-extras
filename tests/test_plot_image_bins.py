@@ -86,6 +86,107 @@ def test_from_bins_needs_two_axes() -> None:
 
 
 # ---------------------------------------------------------------------------
+# binned arrays are (x, y); images are (row=y, column=x)
+# ---------------------------------------------------------------------------
+
+
+def test_as_image_transposes_a_binned_array() -> None:
+    from pynbodyext.plot.image import as_image
+
+    bins = make_bins(make_sim())
+    query_result = bins["mass.sum"]
+
+    image = as_image(query_result)
+
+    assert image.shape == bins.shape_bins[::-1]
+    np.testing.assert_allclose(image.data, np.asarray(query_result.grid).T)
+    np.testing.assert_allclose(image.x_edges, np.asarray(bins.axes[0].edges))
+    np.testing.assert_allclose(image.y_edges, np.asarray(bins.axes[1].edges))
+    assert image.x_units == "kpc"
+    assert image.units == query_result.units
+
+
+def test_as_image_passes_an_image_through_unchanged() -> None:
+    from pynbodyext.plot.image import as_image
+
+    source = ImageData(np.zeros((4, 4)))
+
+    assert as_image(source) is source
+
+
+def test_as_image_wraps_a_plain_array_without_geometry() -> None:
+    from pynbodyext.plot.image import as_image
+
+    image = as_image(np.zeros((4, 4)))
+
+    assert image.extent is None
+    assert image.x_edges is None
+
+
+def test_as_image_rejects_nonsense() -> None:
+    from pynbodyext.plot.image import as_image
+
+    with pytest.raises(TypeError, match="as_image"):
+        as_image("not an image")
+
+
+def test_adaptive_bin_accepts_a_binned_array_without_transposing() -> None:
+    """The reported footgun: ``bins.s["count"]`` must work as it reads."""
+    pytest.importorskip("powerbin")
+    bins = make_bins(make_sim())
+    velocity = ImageData.from_bins(bins, "vz.mean")
+
+    from_query = velocity.adaptive.bin(bins["mass.sum"], target_nbins=6)
+    from_image = velocity.adaptive.bin(ImageData.from_bins(bins, "mass.sum"), target_nbins=6)
+
+    np.testing.assert_allclose(from_query.value, from_image.value, equal_nan=True)
+    np.testing.assert_allclose(from_query.bin_capacity, from_image.bin_capacity)
+    assert from_query.n_bins == from_image.n_bins
+
+
+def test_a_raw_binned_grid_is_rejected_with_an_orientation_hint() -> None:
+    """A raw (x, y) array cannot be told apart from an image: say so clearly."""
+    pytest.importorskip("powerbin")
+    bins = make_bins(make_sim())
+    velocity = ImageData.from_bins(bins, "vz.mean")
+
+    with pytest.raises(ValueError, match="transpos"):
+        velocity.adaptive.bin(np.asarray(bins["mass.sum"]), target_nbins=6)
+
+
+def test_free_adaptive_binning_also_accepts_binned_arrays() -> None:
+    pytest.importorskip("powerbin")
+    from pynbodyext.plot.image import adaptive_bin_map
+
+    bins = make_bins(make_sim())
+
+    via_arrays = adaptive_bin_map(bins["vz.mean"], bins["mass.sum"], target_nbins=6, verbose=0)
+    via_images = adaptive_bin_map(
+        ImageData.from_bins(bins, "vz.mean"), ImageData.from_bins(bins, "mass.sum"), target_nbins=6, verbose=0
+    )
+
+    np.testing.assert_allclose(via_arrays.value, via_images.value, equal_nan=True)
+
+
+def test_compose_accepts_a_binned_array_for_the_other_map() -> None:
+    bins = make_bins(make_sim())
+    velocity = ImageData.from_bins(bins, "vz.mean")
+
+    composed = velocity.compose(bins["mass.sum"])
+    expected = velocity.compose(ImageData.from_bins(bins, "mass.sum"))
+
+    np.testing.assert_allclose(composed, expected)
+
+
+def test_with_data_hints_at_a_transposed_grid() -> None:
+    bins = make_bins(make_sim())
+    velocity = ImageData.from_bins(bins, "vz.mean")
+
+    with pytest.raises(ValueError, match="transpos"):
+        velocity.with_data(np.asarray(bins["mass.sum"]))
+
+
+# ---------------------------------------------------------------------------
 # BinNDResult.imshow delegates to the image layer
 # ---------------------------------------------------------------------------
 

@@ -39,7 +39,7 @@ from .cmaps import (
     vel_cmap_r,
 )
 from .compose import MapStyle, blend_images, blend_stack, compose_maps, create_map_mask, imshow_compose
-from .data import OPERATIONS, ImageData, ImageOp, register_ops
+from .data import OPERATIONS, ImageData, ImageOp, as_image, register_ops
 from .display import COLORBAR_LOCATIONS, add_colorbar
 from .ops import ImageDataView, ImageOps
 from .postprocess import STRETCHES, box_smooth, downsample, gaussian_smooth, median_filter, normalize
@@ -59,6 +59,7 @@ __all__ = [
     "OPERATIONS",
     "STRETCHES",
     "add_colorbar",
+    "as_image",
     "adaptive_bin_map",
     "adaptive_map_from_bins",
     "blend_images",

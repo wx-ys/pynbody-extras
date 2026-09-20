@@ -18,7 +18,7 @@ from .cmaps import get_cmap
 if TYPE_CHECKING:
     from .data import ImageData
 
-__all__ = ["COLORBAR_LOCATIONS", "add_colorbar", "draw_image", "draw_imshow", "draw_pcolormesh"]
+__all__ = ["COLORBAR_LOCATIONS", "add_colorbar", "draw_contour", "draw_image", "draw_imshow", "draw_pcolormesh"]
 
 #: Unit spellings that mean "no units at all", so they never reach a figure label.
 _EMPTY_UNITS = {"", "1", "NoUnit()", "dimensionless", "unitless"}
@@ -28,6 +28,9 @@ COLORBAR_LOCATIONS = ("right", "left", "top", "bottom")
 
 #: One divider per panel, so that several colour bars can be docked to it.
 _DIVIDERS: weakref.WeakKeyDictionary[Any, Any] = weakref.WeakKeyDictionary()
+
+#: Label of each artist we drew, so ``add_colorbar(artist)`` can name it too.
+_ARTIST_LABELS: weakref.WeakKeyDictionary[Any, str] = weakref.WeakKeyDictionary()
 
 
 def _unit_text(units: Any) -> str | None:
@@ -134,6 +137,8 @@ def add_colorbar(
     if loc not in COLORBAR_LOCATIONS:
         raise ValueError(f"loc must be one of {', '.join(COLORBAR_LOCATIONS)}, got {loc!r}.")
     artist, source = _as_mappable(mappable)
+    if label is None and artist is not None:
+        label = _ARTIST_LABELS.get(artist)
     axes = ax if ax is not None else getattr(artist, "axes", None)
     if axes is None:
         figure = plt.gcf()
@@ -206,11 +211,15 @@ def _finish(
     _apply_axis_labels(ax, image)
     if aspect is not None:
         ax.set_aspect(aspect)
-    if colorbar:
-        options = dict(colorbar_kwargs or {})
-        if isinstance(colorbar, str):
-            options.setdefault("loc", colorbar)
-        add_colorbar(artist, ax=ax, label=_annotation(image.label, image.units), **options)
+    annotation = _annotation(image.label, image.units)
+    if annotation is not None:
+        _ARTIST_LABELS[artist] = annotation  # so a bar added later can name it too
+    if not colorbar:
+        return
+    options = dict(colorbar_kwargs or {})
+    if isinstance(colorbar, str):
+        options.setdefault("loc", colorbar)
+    add_colorbar(artist, ax=ax, label=annotation, **options)
 
 
 def draw_image(
@@ -346,5 +355,60 @@ def draw_pcolormesh(
     x_edges = image.x_edges if image.x_edges is not None else np.arange(image.shape[1] + 1, dtype=float)
     y_edges = image.y_edges if image.y_edges is not None else np.arange(image.shape[0] + 1, dtype=float)
     artist = ax.pcolormesh(x_edges, y_edges, image.data, shading=shading, **kwargs)
+    _finish(ax, image, artist, colorbar, aspect, colorbar_kwargs)
+    return artist
+
+
+def draw_contour(
+    image: Any,
+    ax: Any = None,
+    *,
+    levels: Any = 8,
+    filled: bool = False,
+    colorbar: bool | str = False,
+    colorbar_kwargs: dict[str, Any] | None = None,
+    aspect: Any = None,
+    **kwargs: Any,
+) -> Any:
+    """Draw contour lines of *image*, on the grid the image actually samples.
+
+    The contours are placed on the bin centres, so they are correct for unevenly
+    spaced bins (logarithmic, quantile, explicit edges) rather than assuming a
+    regular pixel grid.  Pass the same *ax* as an :func:`draw_image` call to overlay
+    contours on the map.
+
+    Parameters
+    ----------
+    image : ImageData
+        The image to contour.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on; a new figure is created when omitted.
+    levels : int or array_like, default: 8
+        Number of levels, or the levels themselves — e.g. ``[-2, 0, 2]`` to mark
+        zero crossings.
+    filled : bool, default: False
+        Fill the bands (``contourf``) instead of drawing lines (``contour``).
+    colorbar : bool or str, default: False
+        Add a docked colour bar; see :func:`draw_image`.
+    colorbar_kwargs : dict, optional
+        Forwarded to :func:`add_colorbar`.
+    aspect : optional
+        Axes aspect, e.g. ``"auto"``.
+    **kwargs
+        Forwarded to ``matplotlib.axes.Axes.contour`` / ``contourf``, e.g.
+        ``colors``, ``linewidths``, ``cmap``.
+
+    Returns
+    -------
+    matplotlib.contour.ContourSet
+        The artist, which :func:`add_colorbar` accepts directly.
+    """
+    import matplotlib.pyplot as plt
+
+    figsize = kwargs.pop("figsize", (5.0, 5.0))
+    if ax is None:
+        _, ax = plt.subplots(figsize=figsize)
+    method = ax.contourf if filled else ax.contour
+    artist = method(image.x_centers, image.y_centers, image.data, levels, **kwargs)
     _finish(ax, image, artist, colorbar, aspect, colorbar_kwargs)
     return artist

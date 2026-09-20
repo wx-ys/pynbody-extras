@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from scipy import ndimage
 
-from ._arrays import as_image, as_pair, masked_filter, resolve_sigma, validity_mask, value_limits
+from ._arrays import as_2d, as_pair, masked_filter, resolve_sigma, validity_mask, value_limits
 from .ops import ImageOps, register_ops
 
 if TYPE_CHECKING:
@@ -90,7 +90,7 @@ def gaussian_smooth(
     >>> image[4, 4] = 1.0
     >>> smoothed = gaussian_smooth(image, fwhm=2.0)  # doctest: +SKIP
     """
-    array = as_image(data)
+    array = as_2d(data)
     valid = validity_mask(array, mask)
     width = resolve_sigma(sigma, fwhm, pixel_scale)
     return masked_filter(
@@ -117,7 +117,7 @@ def box_smooth(data: Any, size: Any = 3, *, mode: str = "reflect", mask: Any = N
     numpy.ndarray
         Smoothed image with the same shape as *data*.
     """
-    array = as_image(data)
+    array = as_2d(data)
     valid = validity_mask(array, mask)
     kernel = as_pair(size, name="size")
     return masked_filter(array, valid, lambda values: ndimage.uniform_filter(values, size=kernel, mode=mode))
@@ -150,7 +150,7 @@ def median_filter(data: Any, size: Any = 3, *, mode: str = "nearest", mask: Any 
     numpy.ndarray
         Filtered image with the same shape as *data*.
     """
-    array = as_image(data)
+    array = as_2d(data)
     valid = validity_mask(array, mask)
     kernel = as_pair(size, name="size")
     kernel_y, kernel_x = (kernel, kernel) if isinstance(kernel, int) else kernel
@@ -269,7 +269,7 @@ def downsample(data: Any, factor: Any = 2, *, func: str = "mean") -> np.ndarray:
     """
     if func not in _REDUCERS:
         raise ValueError(f"Unknown func {func!r}; choose from {', '.join(sorted(_REDUCERS))}.")
-    array = as_image(data)
+    array = as_2d(data)
     pair = as_pair(factor, name="factor")
     factor_y, factor_x = (pair, pair) if isinstance(pair, int) else pair
     if factor_y < 1 or factor_x < 1:
