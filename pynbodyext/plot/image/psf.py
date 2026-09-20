@@ -15,14 +15,27 @@ signal, and stay non-finite in the result.
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from scipy import signal
 
 from ._arrays import as_image, as_pair, masked_filter, resolve_sigma, validity_mask
 
-__all__ = ["convolve_psf", "deconvolve_psf", "gaussian_psf", "normalize_psf", "richardson_lucy", "wiener_deconvolve"]
+if TYPE_CHECKING:
+    from .data import ImageData
+
+__all__ = [
+    "PsfMixin",
+    "PsfOps",
+    "convolve_psf",
+    "deconvolve_psf",
+    "gaussian_psf",
+    "normalize_psf",
+    "richardson_lucy",
+    "wiener_deconvolve",
+]
 
 _METHODS = ("auto", "fft", "direct")
 
@@ -314,3 +327,88 @@ def deconvolve_psf(image: Any, psf: Any, *, method: str = "wiener", **kwargs: An
     if method == "richardson_lucy":
         return richardson_lucy(image, psf, **kwargs)
     raise ValueError(f"Unknown method {method!r}; choose 'wiener' or 'richardson_lucy'.")
+
+
+@dataclass(frozen=True)
+class PsfOps:
+    """The observational family of an image: ``image.psf.convolve(fwhm=3)``.
+
+    Each method returns a new :class:`~pynbodyext.plot.image.data.ImageData`.  As
+    with smoothing, a Gaussian width is given in the units of the axes whenever
+    the grid is evenly spaced, and in pixels otherwise.
+    """
+
+    image: ImageData
+
+    def _pixel_scale(self) -> tuple[float, float] | None:
+        """Pixel size in axis units, or ``None`` when the grid has none."""
+        try:
+            return self.image.pixel_size
+        except ValueError:  # unevenly spaced bins: fall back to pixels
+            return None
+
+    def convolve(
+        self,
+        psf: Any = None,
+        *,
+        fwhm: Any = None,
+        sigma: Any = None,
+        mode: str = "same",
+        method: str = "auto",
+        mask: Any = None,
+        normalize: bool = True,
+        **psf_kwargs: Any,
+    ) -> ImageData:
+        """Blur the image with a PSF, forward-modelling an observation.
+
+        Parameters
+        ----------
+        psf : array_like, optional
+            Measured kernel; or give ``fwhm``/``sigma`` for a Gaussian one.
+        fwhm, sigma, mode, method, mask, normalize, **psf_kwargs :
+            As in :func:`convolve_psf`.
+
+        Returns
+        -------
+        ImageData
+            The blurred image, with the same geometry as this one.
+        """
+        blurred = convolve_psf(
+            self.image.data,
+            psf,
+            fwhm=fwhm,
+            sigma=sigma,
+            mode=mode,
+            method=method,
+            mask=mask,
+            normalize=normalize,
+            pixel_scale=self._pixel_scale(),
+            **psf_kwargs,
+        )
+        return self.image._derived(
+            blurred, "convolve_psf", {"fwhm": fwhm, "sigma": sigma, "mode": mode, "method": method, "mask": mask}
+        )
+
+    def wiener(self, psf: Any, *, balance: float = 1e-2, mask: Any = None) -> ImageData:
+        """Undo a blur with a Wiener filter; see :func:`wiener_deconvolve`."""
+        restored = wiener_deconvolve(self.image.data, psf, balance=balance, mask=mask)
+        return self.image._derived(restored, "wiener_deconvolve", {"balance": balance, "mask": mask})
+
+    def richardson_lucy(self, psf: Any, *, iterations: int = 10, epsilon: float = 1e-12, mask: Any = None) -> ImageData:
+        """Undo a blur iteratively; see :func:`richardson_lucy`."""
+        restored = richardson_lucy(self.image.data, psf, iterations=iterations, epsilon=epsilon, mask=mask)
+        return self.image._derived(restored, "richardson_lucy", {"iterations": iterations, "mask": mask})
+
+    def deconvolve(self, psf: Any, *, method: str = "wiener", **kwargs: Any) -> ImageData:
+        """Undo a blur with the chosen algorithm; see :func:`deconvolve_psf`."""
+        restored = deconvolve_psf(self.image.data, psf, method=method, **kwargs)
+        return self.image._derived(restored, "deconvolve_psf", {"method": method, **kwargs})
+
+
+class PsfMixin:
+    """Gives an image its ``.psf`` accessor."""
+
+    @property
+    def psf(self) -> PsfOps:
+        """Observational methods of this image, e.g. ``image.psf.convolve(fwhm=3)``."""
+        return PsfOps(self)  # type: ignore[arg-type]

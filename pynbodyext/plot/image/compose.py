@@ -11,28 +11,107 @@ the dividing line so there is no seam::
     image.imshow_compose(
         gas_density,
         dm_density,
-        cmap1="inferno",
-        cmap2="cividis",
+        style1=image.MapStyle(cmap="inferno", stretch="log"),
+        style2=image.MapStyle(cmap="cividis"),
         label1="gas",
         label2="dark matter",
-        line_angle=45,
-        width=0.15,
         extent=(-50, 50, -50, 50),
     )
 
 The masks are plain arrays in ``[0, 1]``, so they also drive :func:`blend_images`
 and :func:`blend_stack` directly when the two layers are already rendered.
+How a map becomes colours lives in one place, :class:`MapStyle`, which is also
+what the colour bars are built from.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .cmaps import K_B_C_G_Y_R_W, get_cmap, to_rgba
+from .cmaps import get_cmap, to_rgba
+from .postprocess import value_limits
 
-__all__ = ["blend_images", "blend_stack", "compose_maps", "create_map_mask", "imshow_compose"]
+__all__ = [
+    "ComposeMixin",
+    "MapStyle",
+    "blend_images",
+    "blend_stack",
+    "compose_maps",
+    "create_map_mask",
+    "imshow_compose",
+]
+
+
+@dataclass(frozen=True)
+class MapStyle:
+    """How one map is turned into colours.
+
+    Bundles the choices that a compose call would otherwise spell out twice
+    (``cmap1``/``vmin1``/``vmax1``/``stretch1`` …), and knows the limits its own
+    colour bar should show.
+
+    Parameters
+    ----------
+    cmap : str or Colormap, optional
+        Colour map; defaults to the velocity map ``K_B_C_G_Y_R_W``.
+    vmin, vmax : float, optional
+        Value limits; default to the data range, or to *percentiles*.
+    stretch : {"linear", "sqrt", "log", "asinh", "hist"}, default: "linear"
+        Display stretch, see :func:`~pynbodyext.plot.image.postprocess.normalize`.
+    percentiles : (float, float), optional
+        Percentiles used for whichever limit is not given, e.g. ``(1, 99)``.
+    bad : color, optional
+        Colour for non-finite pixels; fully transparent by default.
+
+    Examples
+    --------
+    >>> style = MapStyle(cmap="inferno", vmin=0.0, vmax=1.0)
+    >>> style.limits([0.0, 0.5, 1.0])
+    (0.0, 1.0)
+    """
+
+    cmap: Any = None
+    vmin: float | None = None
+    vmax: float | None = None
+    stretch: str = "linear"
+    percentiles: tuple[float, float] | None = None
+    bad: Any = None
+
+    def limits(self, data: Any) -> tuple[float, float]:
+        """The value limits this style uses for *data*, colour bar included."""
+        return value_limits(data, vmin=self.vmin, vmax=self.vmax, percentiles=self.percentiles)
+
+    def to_rgba(self, data: Any) -> np.ndarray:
+        """Colour *data* with this style."""
+        return to_rgba(
+            data,
+            get_cmap(self.cmap),
+            vmin=self.vmin,
+            vmax=self.vmax,
+            stretch=self.stretch,
+            percentiles=self.percentiles,
+            bad=self.bad,
+        )
+
+
+def as_map_style(style: MapStyle | str | dict[str, Any] | None) -> MapStyle:
+    """Coerce a style argument into a :class:`MapStyle`.
+
+    ``None`` gives the default style, a string or colour map is taken as ``cmap``,
+    and a mapping is expanded into the fields.
+    """
+    if style is None:
+        return MapStyle()
+    if isinstance(style, MapStyle):
+        return style
+    if isinstance(style, str) or hasattr(style, "name") and not isinstance(style, dict):
+        return MapStyle(cmap=style)
+    if isinstance(style, dict):
+        return MapStyle(**style)
+    raise TypeError(f"Cannot read {style!r} as a MapStyle.")
 
 
 def create_map_mask(
@@ -185,14 +264,8 @@ def compose_maps(
     data1: Any,
     data2: Any,
     *,
-    cmap1: Any = K_B_C_G_Y_R_W,
-    cmap2: Any = K_B_C_G_Y_R_W,
-    vmin1: float | None = None,
-    vmax1: float | None = None,
-    vmin2: float | None = None,
-    vmax2: float | None = None,
-    stretch1: str = "linear",
-    stretch2: str = "linear",
+    style1: MapStyle | str | dict[str, Any] | None = None,
+    style2: MapStyle | str | dict[str, Any] | None = None,
     mask: Any = None,
     line_angle: float = 45.0,
     width: float = 0.1,
@@ -207,13 +280,10 @@ def compose_maps(
     ----------
     data1, data2 : array_like
         The two maps, with the same shape.
-    cmap1, cmap2 : str or Colormap, optional
-        Colour map of each map; defaults to ``K_B_C_G_Y_R_W``.
-    vmin1, vmax1, vmin2, vmax2 : float, optional
-        Display limits of each map; default to that map's own range.
-    stretch1, stretch2 : str, default: "linear"
-        Display stretch of each map, see
-        :func:`~pynbodyext.plot.image.postprocess.normalize`.
+    style1, style2 : MapStyle, str or dict, optional
+        How each map becomes colours.  A bare string or colour map is read as
+        ``cmap``, a mapping is expanded into the fields, and the default is a
+        plain ``K_B_C_G_Y_R_W`` rendering of that map's own range.
     mask : array_like, optional
         Weight of the first map in ``[0, 1]``.  Defaults to the soft split from
         :func:`create_map_mask` with *line_angle* and *width*.
@@ -228,7 +298,7 @@ def compose_maps(
 
     Examples
     --------
-    >>> composite = compose_maps(gas_density, dm_density, cmap1="inferno", cmap2="cividis")  # doctest: +SKIP
+    >>> composite = compose_maps(gas_density, dm_density, style1="inferno", style2="cividis")  # doctest: +SKIP
     """
     first = np.asarray(data1, dtype=float)
     second = np.asarray(data2, dtype=float)
@@ -242,8 +312,8 @@ def compose_maps(
             raise ValueError(f"mask shape {weights.shape} does not match the data shape {first.shape}.")
         weights = np.clip(weights, 0.0, 1.0)
 
-    rgba1 = to_rgba(first, get_cmap(cmap1), vmin=vmin1, vmax=vmax1, stretch=stretch1)
-    rgba2 = to_rgba(second, get_cmap(cmap2), vmin=vmin2, vmax=vmax2, stretch=stretch2)
+    rgba1 = as_map_style(style1).to_rgba(first)
+    rgba2 = as_map_style(style2).to_rgba(second)
     weight1 = weights[..., None]
     alpha1 = rgba1[..., 3:4] * weight1
     alpha2 = rgba2[..., 3:4] * (1.0 - weight1)
@@ -264,6 +334,8 @@ def imshow_compose(
     ax: Any = None,
     extent: tuple[float, float, float, float] | None = None,
     colorbars: bool = True,
+    style1: MapStyle | str | dict[str, Any] | None = None,
+    style2: MapStyle | str | dict[str, Any] | None = None,
     label1: str | None = None,
     label2: str | None = None,
     **kwargs: Any,
@@ -280,6 +352,8 @@ def imshow_compose(
         ``(xmin, xmax, ymin, ymax)`` of the maps.
     colorbars : bool, default: True
         Draw one colour bar per map, on the left and right of the image.
+    style1, style2 : MapStyle, str or dict, optional
+        How each map becomes colours; also what the colour bars are labelled with.
     label1, label2 : str, optional
         Colour bar labels.
     **kwargs
@@ -296,19 +370,17 @@ def imshow_compose(
 
     first = np.asarray(data1, dtype=float)
     second = np.asarray(data2, dtype=float)
+    styles = (as_map_style(style1), as_map_style(style2))
     figsize = kwargs.pop("figsize", (6.0, 5.0))
     if ax is None:
         _, ax = plt.subplots(figsize=figsize)
-    composite = compose_maps(first, second, **kwargs)
+    composite = compose_maps(first, second, style1=styles[0], style2=styles[1], **kwargs)
     artist = ax.imshow(composite, origin="lower", extent=extent)
     if colorbars:
-        bars = (
-            ("left", kwargs.get("cmap1", K_B_C_G_Y_R_W), kwargs.get("vmin1"), kwargs.get("vmax1"), label1, first),
-            ("right", kwargs.get("cmap2", K_B_C_G_Y_R_W), kwargs.get("vmin2"), kwargs.get("vmax2"), label2, second),
-        )
-        for side, colors, vmin, vmax, label, data in bars:
+        bars = (("left", styles[0], label1, first), ("right", styles[1], label2, second))
+        for side, style, label, data in bars:
             bar = ax.figure.colorbar(
-                ScalarMappable(norm=Normalize(*_display_limits(data, vmin, vmax)), cmap=get_cmap(colors)),
+                ScalarMappable(norm=Normalize(*style.limits(data)), cmap=get_cmap(style.cmap)),
                 ax=ax,
                 location=side,
                 fraction=0.046,
@@ -319,11 +391,78 @@ def imshow_compose(
     return artist
 
 
-def _display_limits(data: np.ndarray, vmin: float | None, vmax: float | None) -> tuple[float, float]:
-    """Colour limits of one map, mirroring the defaults used by ``compose_maps``."""
-    finite = np.isfinite(data)
-    if vmin is None:
-        vmin = float(np.nanmin(data)) if finite.any() else 0.0
-    if vmax is None:
-        vmax = float(np.nanmax(data)) if finite.any() else 1.0
-    return float(vmin), float(vmax)
+class ComposeMixin:
+    """Gives an image the ``create_mask``/``compose``/``imshow_compose`` methods.
+
+    The methods are thin wrappers over :func:`create_map_mask`, :func:`compose_maps`
+    and :func:`imshow_compose`; related free functions stay available for plain
+    arrays.
+    """
+
+    if TYPE_CHECKING:
+        data: np.ndarray
+
+    def create_mask(
+        self, line_angle: float = 45.0, width: float = 0.1, *, center: tuple[float, float] | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Split this image with two complementary soft masks; see :func:`create_map_mask`."""
+        return create_map_mask(self.data, line_angle=line_angle, width=width, center=center)
+
+    def compose(
+        self,
+        other: Any,
+        *,
+        style: MapStyle | str | dict[str, Any] | None = None,
+        other_style: MapStyle | str | dict[str, Any] | None = None,
+        mask: Any = None,
+        line_angle: float = 45.0,
+        width: float = 0.1,
+    ) -> np.ndarray:
+        """Stitch this image together with *other* into one RGBA array.
+
+        Parameters
+        ----------
+        other : ImageData or array_like
+            The second map; an image must have the same shape as this one.
+        style, other_style : MapStyle, str or dict, optional
+            How each map becomes colours; *style* describes this image.
+        mask, line_angle, width :
+            As in :func:`compose_maps`; the mask weights this image.
+
+        Returns
+        -------
+        numpy.ndarray
+            Float RGBA image.
+        """
+        return compose_maps(
+            self.data, _as_data(other), style1=style, style2=other_style, mask=mask, line_angle=line_angle, width=width
+        )
+
+    def imshow_compose(self, other: Any, **kwargs: Any) -> Any:
+        """Draw this image stitched with *other*, with one colour bar each.
+
+        Parameters
+        ----------
+        other : ImageData or array_like
+            The second map.
+        style, other_style : MapStyle, str or dict, optional
+            How each map becomes colours; *style* describes this image.
+        **kwargs
+            Forwarded to :func:`imshow_compose`, e.g. ``ax``, ``extent``,
+            ``label1``/``label2``.
+
+        Returns
+        -------
+        matplotlib.image.AxesImage
+            The artist.
+        """
+        style = kwargs.pop("style", None)
+        other_style = kwargs.pop("other_style", None)
+        return imshow_compose(self.data, _as_data(other), style1=style, style2=other_style, **kwargs)
+
+
+def _as_data(value: Any) -> np.ndarray:
+    """Raw values of an image or of an array, so both can be composited."""
+    from .data import ImageData  # local import: data.py composes this module
+
+    return np.asarray(value.data if isinstance(value, ImageData) else value, dtype=float)

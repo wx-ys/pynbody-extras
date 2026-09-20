@@ -79,10 +79,15 @@ class BinPlotMixin:
     def imshow(self: _BinQueryable, field: str, ax: Any = None, **kwargs: Any) -> Any:
         """Show a 2-D bin grid as an image.
 
-        Requires exactly two axes.  The first axis maps to the x-direction and
-        the second to the y-direction::
+        Requires exactly two axes, the first mapping to x and the second to y::
 
             bins2d.imshow("mass.sum")
+
+        The drawing itself belongs to :mod:`pynbodyext.plot.image`: this method
+        builds an :class:`~pynbodyext.plot.image.ImageData` from the query — which
+        carries the bin edges, units and axis names of the result — and lets it
+        draw.  Logarithmic or otherwise uneven bins therefore come out as a
+        ``pcolormesh`` instead of being forced onto a regular pixel grid.
 
         Parameters
         ----------
@@ -90,11 +95,15 @@ class BinPlotMixin:
             String query for the field to display.
         ax:
             Matplotlib axes object.  A new figure/axes is created if ``None``.
+        **kwargs:
+            Forwarded to the image artist, e.g. ``cmap``, ``colorbar``,
+            ``aspect`` (``"auto"`` by default, as for the older implementation),
+            or ``figsize`` when *ax* is ``None``.
 
         Returns
         -------
-        AxesImage
-            The returned ``ax.imshow`` artist.
+        AxesImage or QuadMesh
+            The artist drawing the grid.
 
         Raises
         ------
@@ -107,12 +116,9 @@ class BinPlotMixin:
         >>> fig, ax = plt.subplots()
         >>> im = bins2d.imshow("mass.sum", ax=ax)
         """
-        import matplotlib.pyplot as plt
+        from pynbodyext.plot.image import ImageData
 
         if self.ndim != 2:
             raise ValueError("imshow requires exactly 2 bin axes.")
-        if ax is None:
-            _, ax = plt.subplots(figsize=kwargs.pop("figsize", (5, 5)))
-
-        grid = np.asarray(self[field]).reshape(self.shape_bins)
-        return ax.imshow(grid.T, origin="lower", aspect="auto", extent=self.axes.extent, **kwargs)
+        kwargs.setdefault("aspect", "auto")
+        return ImageData.from_bins(self, field).draw(ax=ax, **kwargs)

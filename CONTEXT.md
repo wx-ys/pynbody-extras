@@ -98,11 +98,17 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   layer (`plot/image/`) takes plain 2-D arrays rather than calculator nodes, so
   any map producer can feed it; `ImageData` is the only place that knows the
   calculator layer.
+- [ADR-0005](docs/adr/0005-image-data-is-the-pipeline-object.md): the image layer
+  is class-centric — one `ImageData` composed from capability mixins, free
+  functions underneath — and every image drawn anywhere in the package goes
+  through it.
 
 ## Image layer (`pynbodyext/plot/image/`)
 
 The vocabulary for turning a 2-D map into a figure. Code lives in
-`pynbodyext/plot/image/`; the unit of work is a plain `numpy` 2-D array.
+`pynbodyext/plot/image/`. Every operation is a free function over a plain `numpy`
+2-D array, and the same operations are methods of `ImageData`, which is the
+object a caller normally holds.
 
 - **`ImageData`** (`plot/image/data.py`) — a 2-D array plus the metadata needed
   to display and measure it. Geometry is per axis: `x_edges`/`y_edges` are the
@@ -116,6 +122,22 @@ The vocabulary for turning a 2-D map into a figure. Code lives in
   `(dy, dx)` needed to express a kernel width in physical units, and refuses when
   a direction has bins of unequal width. Display accordingly:
   `.imshow()` for evenly spaced bins, `.pcolormesh()` for arbitrary edges.
+  The class is assembled from one **capability mixin** per family, each defined
+  next to the free functions it wraps: `SmoothMixin` (`.smooth.gaussian/box/median/
+  downsample`), `PsfMixin` (`.psf.convolve/wiener/richardson_lucy/deconvolve`),
+  `ComposeMixin` (`create_mask`, `compose`, `imshow_compose`), `AdaptiveMixin`
+  (`adaptive_bin`) and `DisplayMixin` (`normalize`, `to_rgba`, `draw`, `imshow`,
+  `pcolormesh`). Families with several variants sit behind an accessor
+  (`image.smooth.gaussian(fwhm=2)`); single-call operations are plain methods, so
+  no operation has two spellings. Methods that produce an image return a new
+  `ImageData` — geometry and units intact — with the call appended to
+  **`ops`** (`tuple[ImageOp, ...]`, `ImageOp(name, params)`), which is what
+  `repr(image)` summarises.
+- **`BinNDResult.imshow`** (`core/calculate/bins/plot.py`) — a one-line bridge:
+  it builds `ImageData.from_bins(self, query)` and calls `.draw()`. A bin grid is
+  `(x, y)` and an image is `(row=y, column=x)`, so `from_bins` transposes; uneven
+  bins therefore come out as a `pcolormesh` rather than being forced onto a
+  regular pixel grid. No image drawing is implemented in the calculator layer.
 - **Adaptive bin map** (`AdaptiveMap`, `plot/image/adaptive.py`) — a partition of
   a map into regions of comparable *capacity* made with PowerBin (centroidal
   power diagrams, the successor of Voronoi binning). The capacity is the

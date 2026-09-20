@@ -1,15 +1,34 @@
-"""``ImageData``: a 2-D array plus the metadata needed to display and measure it.
+"""``ImageData``: a 2-D array plus the metadata and the tools to work on it.
 
-Everything in :mod:`pynbodyext.plot.image` works on plain arrays, but a map
-carries more than numbers: where its axes sit, what they are measured in, what to
-call them, and what the values are.  :class:`ImageData` keeps those together and
-bridges the calculator layer::
+Most of this package operates on plain arrays, but a map carries more than
+numbers: where its axes sit, what they are measured in, what to call them, what
+the values are, and how they were produced.  :class:`ImageData` keeps those
+together and is the entry point for the whole image layer::
 
     from pynbodyext.plot import image
 
-    density = image.ImageData.from_bins(bins2d, "mass.sum")
-    smoothed = density.with_data(image.gaussian_smooth(density.data, fwhm=0.5, pixel_scale=density.pixel_size))
-    smoothed.imshow(colorbar=True)
+    velocity = image.ImageData.from_bins(bins2d, "vz.mean")
+    velocity.smooth.gaussian(fwhm=2.0).psf.convolve(fwhm=3.0).imshow(colorbar=True)
+
+How it is put together:
+
+- :class:`ImageData` itself owns the values, the geometry, the metadata and the
+  provenance (``.ops``).
+- The *families* of operations live in one mixin each, next to the free functions
+  they wrap: :class:`~pynbodyext.plot.image.postprocess.SmoothMixin` (``.smooth``),
+  :class:`~pynbodyext.plot.image.psf.PsfMixin` (``.psf``),
+  :class:`~pynbodyext.plot.image.compose.ComposeMixin` (``create_mask``,
+  ``compose``), :class:`~pynbodyext.plot.image.adaptive.AdaptiveMixin`
+  (``adaptive_bin``) and :class:`~pynbodyext.plot.image.display.DisplayMixin`
+  (``normalize``, ``to_rgba``, ``draw``, ``imshow``, ``pcolormesh``).
+  Single-call, everyday operations are plain methods; families with several
+  variants are grouped behind an accessor (``image.smooth.gaussian(...)``), so no
+  operation has two spellings.
+- Methods that produce an image return a new :class:`ImageData` with the
+  operation appended to :attr:`ops`; everything else returns what the free
+  function returns (an array, a mask pair, an
+  :class:`~pynbodyext.plot.image.adaptive.AdaptiveMap`).  The free functions stay
+  the implementation and the tested contract.
 
 Three things vary between maps, and all three are supported here:
 
@@ -19,8 +38,8 @@ Three things vary between maps, and all three are supported here:
    independent, so an image whose axes are, say, ``kpc`` and ``K`` is ordinary.
 3. **Bin edges that are not evenly spaced** — give ``x_edges``/``y_edges``
    (logarithmic, quantile, or any explicit edges) and the image knows its real
-   geometry: ``pcolormesh`` draws it correctly, and anything that needs a single
-   pixel size (``pixel_size``, ``imshow``) refuses rather than lying.
+   geometry: ``pcolormesh``/``draw`` place the bins correctly, and anything that
+   needs a single pixel size (``pixel_size``, ``imshow``) refuses rather than lying.
 
 Pass either ``extent`` or both ``x_edges``/``y_edges``; the ``extent`` is derived
 from the edges when only the latter are given.
@@ -28,38 +47,59 @@ from the edges when only the latter are given.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
 
 from ._arrays import bin_centers, edges_are_uniform, pixel_width, resolve_edges
+from .adaptive import AdaptiveMixin
+from .compose import ComposeMixin
+from .display import DisplayMixin, _unit_text
+from .postprocess import SmoothMixin
+from .psf import PsfMixin
 
-__all__ = ["ImageData"]
-
-#: Unit spellings that mean "no units at all", so they never reach a figure label.
-_EMPTY_UNITS = {"", "1", "NoUnit()", "dimensionless", "unitless"}
-
-
-def _unit_text(units: Any) -> str | None:
-    """Render *units* for a figure label, or ``None`` when there is nothing to show."""
-    if units is None or type(units).__name__ == "NoUnit":
-        return None
-    text = str(units)
-    return None if text in _EMPTY_UNITS else text
+__all__ = ["ImageData", "ImageOp"]
 
 
-def _annotation(label: str | None, units: Any) -> str | None:
-    """Combine a quantity label and its units for an axis or colour bar."""
-    unit_text = _unit_text(units)
-    if label is None:
-        return None if unit_text is None else f"[{unit_text}]"
-    return str(label) if unit_text is None else f"{label} [{unit_text}]"
+def _describe(value: Any) -> str:
+    """Compact rendering of one recorded operation parameter."""
+    if isinstance(value, np.ndarray):
+        return f"<array {value.shape}>"
+    if isinstance(value, ImageData):
+        return f"<ImageData {value.shape}>"
+    return repr(value)
 
 
 @dataclass(frozen=True)
-class ImageData:
-    """A 2-D image with the metadata needed to display it.
+class ImageOp:
+    """One operation applied to an image, recorded for provenance.
+
+    Parameters
+    ----------
+    name : str
+        Name of the free function that did the work, e.g. ``"gaussian_smooth"``.
+    params : dict
+        The arguments it was called with; treat as read-only.
+
+    Examples
+    --------
+    >>> op = ImageOp("gaussian_smooth", {"fwhm": 2.0})
+    >>> repr(op)
+    'gaussian_smooth(fwhm=2.0)'
+    """
+
+    name: str
+    params: dict[str, Any] = field(default_factory=dict)
+
+    def __repr__(self) -> str:
+        arguments = ", ".join(f"{key}={_describe(value)}" for key, value in self.params.items())
+        return f"{self.name}({arguments})"
+
+
+@dataclass(frozen=True)
+class ImageData(SmoothMixin, PsfMixin, ComposeMixin, AdaptiveMixin, DisplayMixin):
+    """A 2-D image with the metadata needed to display, measure and process it.
 
     Parameters
     ----------
@@ -67,9 +107,9 @@ class ImageData:
         2-D array of values; the first axis is the y-direction, the second the
         x-direction (the convention of ``matplotlib.imshow``).
     extent : (float, float, float, float), optional
-        ``(xmin, xmax, ymin, ymax)`` of a uniformly sampled image, matching
-        ``matplotlib.axes.Axes.imshow(extent=...)``.  Mutually exclusive with
-        *x_edges*/*y_edges* (but derived from them when only those are given).
+        ``(xmin, xmax, ymin, ymax)`` of a uniformly sampled image.  Shorthand for
+        evenly spaced bin edges, and mutually exclusive with *x_edges*/*y_edges*
+        (but derived from them when only those are given).
     x_edges, y_edges : array_like, optional
         Bin edges along each direction, with ``len(edges) == n + 1`` for ``n``
         columns or rows.  Edges need not be evenly spaced.  Give both or neither.
@@ -82,6 +122,9 @@ class ImageData:
         Name of the quantity the values represent (``"mass.sum"``, ``"vz.mean"``).
     units : object, optional
         Units of the values, shown on the colour bar.
+    ops : tuple of ImageOp, optional
+        Operations already applied, oldest first.  Filled in by the processing
+        methods; plain construction starts empty.
 
     Examples
     --------
@@ -92,6 +135,7 @@ class ImageData:
     (4, 5)
     >>> image.pixel_size
     (1.0, 1.0)
+    >>> image.imshow(colorbar=True)  # doctest: +SKIP
 
     The general map — per-axis units and logarithmic bins:
 
@@ -100,6 +144,7 @@ class ImageData:
     array([1.5, 3. , 6. ])
     >>> image.uniform
     False
+    >>> image.draw()  # picks pcolormesh on its own  # doctest: +SKIP
     """
 
     data: np.ndarray
@@ -112,6 +157,7 @@ class ImageData:
     y_label: str | None = None
     label: str | None = None
     units: Any = None
+    ops: tuple[ImageOp, ...] = ()
 
     def __post_init__(self) -> None:
         array = np.asarray(self.data)
@@ -125,6 +171,7 @@ class ImageData:
         if x_edges is not None and y_edges is not None:
             span = (float(x_edges[0]), float(x_edges[-1]), float(y_edges[0]), float(y_edges[-1]))
         object.__setattr__(self, "extent", span)
+        object.__setattr__(self, "ops", tuple(self.ops))
 
     # ------------------------------------------------------------------
     # geometry
@@ -185,6 +232,20 @@ class ImageData:
         """Expose the raw values, so ``np.asarray(image)`` does the obvious thing."""
         return np.array(self.data, dtype=dtype, copy=copy)
 
+    # ------------------------------------------------------------------
+    # derivation
+    # ------------------------------------------------------------------
+
+    def _derived(self, data: Any, op_name: str, params: dict[str, Any] | None = None, **overrides: Any) -> ImageData:
+        """Return a copy carrying *data*, with *op_name* appended to :attr:`ops`.
+
+        Used by the processing methods; everything that changes shape must pass
+        its own ``x_edges``/``y_edges`` through ``overrides``.
+        """
+        recorded = {key: value for key, value in (params or {}).items() if value is not None}
+        overrides.setdefault("ops", (*self.ops, ImageOp(op_name, recorded)))
+        return replace(self, data=np.asarray(data), **overrides)
+
     def with_data(self, data: Any, **overrides: Any) -> ImageData:
         """Return a copy with new values, keeping (or overriding) the metadata.
 
@@ -198,7 +259,7 @@ class ImageData:
         Returns
         -------
         ImageData
-            The new image.
+            The new image, with the same provenance as this one.
         """
         replacement = np.asarray(data)
         if replacement.shape != self.shape:
@@ -224,9 +285,11 @@ class ImageData:
     ) -> ImageData:
         """Build an image from one query of a 2-D :class:`BinNDResult`.
 
-        The bin edges, per-axis units and axis names come from the binned result,
-        so non-uniform bins (``mode="log"``, ``equaln``, explicit ``edges``) and
-        axes measured in different units both work without further input.
+        The bin grid arrives as ``(x, y)`` — ``bins.shape_bins`` follows the axis
+        order — and is transposed into the image convention of rows ``= y``,
+        columns ``= x``.  Bin edges, per-axis units and axis names come from the
+        binned result, so non-uniform bins (``mode="log"``, ``equaln``, explicit
+        ``edges``) and axes measured in different units both work directly.
 
         Parameters
         ----------
@@ -244,7 +307,7 @@ class ImageData:
         Returns
         -------
         ImageData
-            The query on the bin grid, with the geometry of that grid.
+            The query as an image, with the geometry of that grid.
 
         Raises
         ------
@@ -255,7 +318,7 @@ class ImageData:
         Examples
         --------
         >>> image = ImageData.from_bins(bins2d, "mass.sum")  # doctest: +SKIP
-        >>> image.pcolormesh()  # doctest: +SKIP
+        >>> image.draw()  # doctest: +SKIP
         """
         ndim = getattr(bins, "ndim", None)
         if ndim != 2:
@@ -264,7 +327,7 @@ class ImageData:
         edges = [_axis_edges(axis, index) for index, axis in enumerate(axes)]
         array = bins[query]
         return cls(
-            data=np.asarray(array.grid),
+            data=np.asarray(array.grid).T,  # (x, y) grid -> (row=y, column=x)
             x_edges=edges[0],
             y_edges=edges[1],
             x_units=axes[0].units if x_units is None else x_units,
@@ -276,78 +339,19 @@ class ImageData:
         )
 
     # ------------------------------------------------------------------
-    # display
+    # repr
     # ------------------------------------------------------------------
 
-    def imshow(self, ax: Any = None, *, colorbar: bool = False, **kwargs: Any) -> Any:
-        """Draw the image with matplotlib, labelling it from the metadata.
-
-        Use this for evenly spaced bins; for arbitrary bin edges use
-        :meth:`pcolormesh` instead.
-
-        Parameters
-        ----------
-        ax : matplotlib.axes.Axes, optional
-            Axes to draw on; a new figure is created when omitted.
-        colorbar : bool, default: False
-            Add a colour bar labelled with :attr:`label` and :attr:`units`.
-        **kwargs
-            Forwarded to ``matplotlib.axes.Axes.imshow``; ``extent`` defaults to
-            :attr:`extent` and ``origin`` to ``"lower"``.
-
-        Returns
-        -------
-        matplotlib.image.AxesImage
-            The artist.
-        """
-        import matplotlib.pyplot as plt
-
-        if not self.uniform:
-            raise ValueError("These bins are not evenly spaced; use pcolormesh() to draw them correctly.")
-        if ax is None:
-            _, ax = plt.subplots(figsize=kwargs.pop("figsize", (5.0, 5.0)))
-        kwargs.setdefault("origin", "lower")
-        kwargs.setdefault("extent", self.extent)
-        artist = ax.imshow(self.data, **kwargs)
-        _apply_axis_labels(ax, self)
-        if colorbar:
-            ax.figure.colorbar(artist, ax=ax, label=_annotation(self.label, self.units))
-        return artist
-
-    def pcolormesh(self, ax: Any = None, *, colorbar: bool = False, shading: str = "flat", **kwargs: Any) -> Any:
-        """Draw the image as quadrilateral cells, honouring arbitrary bin edges.
-
-        Unlike :meth:`imshow`, this places every bin where it really is, so it is
-        the right call whenever the bin widths are uneven (logarithmic, quantile,
-        explicit edges).
-
-        Parameters
-        ----------
-        ax : matplotlib.axes.Axes, optional
-            Axes to draw on; a new figure is created when omitted.
-        colorbar : bool, default: False
-            Add a colour bar labelled with :attr:`label` and :attr:`units`.
-        shading : str, default: "flat"
-            Matplotlib shading mode; ``"flat"`` pairs the data with the given edges.
-        **kwargs
-            Forwarded to ``matplotlib.axes.Axes.pcolormesh``.
-
-        Returns
-        -------
-        matplotlib.collections.QuadMesh
-            The artist.
-        """
-        import matplotlib.pyplot as plt
-
-        if ax is None:
-            _, ax = plt.subplots(figsize=kwargs.pop("figsize", (5.0, 5.0)))
-        x_edges = self.x_edges if self.x_edges is not None else np.arange(self.shape[1] + 1, dtype=float)
-        y_edges = self.y_edges if self.y_edges is not None else np.arange(self.shape[0] + 1, dtype=float)
-        artist = ax.pcolormesh(x_edges, y_edges, self.data, shading=shading, **kwargs)
-        _apply_axis_labels(ax, self)
-        if colorbar:
-            ax.figure.colorbar(artist, ax=ax, label=_annotation(self.label, self.units))
-        return artist
+    def __repr__(self) -> str:
+        parts = [f"shape={self.shape}"]
+        if self.extent is not None:
+            parts.append(f"extent={self.extent}")
+        if self.label is not None or self.units is not None:
+            unit_text = _unit_text(self.units)
+            parts.append(f"label={self.label!r}" if unit_text is None else f"label={self.label!r} [{unit_text}]")
+        if self.ops:
+            parts.append("ops=" + " → ".join(repr(op) for op in self.ops))
+        return f"ImageData({', '.join(parts)})"
 
 
 def _axis_edges(axis: Any, index: int) -> np.ndarray:
@@ -367,15 +371,3 @@ def _axis_name(axis: Any) -> str:
     """Display name of an axis: its property when that is a plain name, else its alias."""
     prop = getattr(axis, "prop", None)
     return prop if isinstance(prop, str) else str(getattr(axis, "alias", ""))
-
-
-def _apply_axis_labels(ax: Any, image: ImageData) -> None:
-    """Label the axes from the image metadata, without overwriting the caller's labels."""
-    if not ax.get_xlabel():
-        annotation = _annotation(image.x_label, image.x_units)
-        if annotation is not None:
-            ax.set_xlabel(annotation)
-    if not ax.get_ylabel():
-        annotation = _annotation(image.y_label, image.y_units)
-        if annotation is not None:
-            ax.set_ylabel(annotation)

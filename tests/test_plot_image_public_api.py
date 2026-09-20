@@ -10,9 +10,11 @@ import pytest
 EXPECTED_NAMES = {
     "AdaptiveMap",
     "ImageData",
+    "ImageOp",
     "K_B_C_G_Y_R_W",
     "K_B_C_G_Y_R_W_COLORS",
     "K_B_C_G_Y_R_W_POSITIONS",
+    "MapStyle",
     "STRETCHES",
     "adaptive_bin_map",
     "adaptive_map_from_bins",

@@ -6,8 +6,9 @@ This package turns the 2-D arrays produced by the calculator layer
 (:class:`~pynbodyext.core.calculate.BinND`, and later SPH rendering or
 tessellation) into publication-ready figures:
 
-- :mod:`.data` wraps an array with the metadata needed to display it
-  (``extent``, units, axis aliases) and bridges :class:`BinNDResult` queries.
+- :mod:`.data` holds :class:`ImageData` — the array, its geometry and metadata,
+  and the provenance of the operations applied to it.  It also bridges
+  :class:`BinNDResult` queries, which is what ``BinNDResult.imshow`` uses.
 - :mod:`.postprocess` smooths, resamples and stretches images, keeping empty
   bins (``NaN``) out of the averages.
 - :mod:`.psf` applies an observational point-spread function, and inverts one.
@@ -15,10 +16,14 @@ tessellation) into publication-ready figures:
   region of the figure carries a comparable amount of signal.
 - :mod:`.cmaps` provides the ``K_B_C_G_Y_R_W`` velocity colour map.
 - :mod:`.compose` joins two maps drawn with different colour maps through a soft
-  transition mask.
+  transition mask (:class:`MapStyle` says how each one becomes colours).
+- :mod:`.display` is the matplotlib side: artist choice, axis labels, colour bars.
 
-Everything here operates on plain 2-D ``numpy`` arrays; nothing in this package
-requires a live simulation object.
+Each free function stays available for plain 2-D ``numpy`` arrays — nothing in
+this package requires a live simulation object — and :class:`ImageData` offers the
+same operations as methods, grouped by family::
+
+    image.ImageData.from_bins(bins2d, "vz.mean").smooth.gaussian(fwhm=2).imshow(colorbar=True)
 """
 
 from .adaptive import AdaptiveMap, adaptive_bin_map, adaptive_map_from_bins
@@ -33,17 +38,19 @@ from .cmaps import (
     vel_cmap,
     vel_cmap_r,
 )
-from .compose import blend_images, blend_stack, compose_maps, create_map_mask, imshow_compose
-from .data import ImageData
+from .compose import MapStyle, blend_images, blend_stack, compose_maps, create_map_mask, imshow_compose
+from .data import ImageData, ImageOp
 from .postprocess import STRETCHES, box_smooth, downsample, gaussian_smooth, median_filter, normalize
 from .psf import convolve_psf, deconvolve_psf, gaussian_psf, normalize_psf, richardson_lucy, wiener_deconvolve
 
 __all__ = [
     "AdaptiveMap",
     "ImageData",
+    "ImageOp",
     "K_B_C_G_Y_R_W",
     "K_B_C_G_Y_R_W_COLORS",
     "K_B_C_G_Y_R_W_POSITIONS",
+    "MapStyle",
     "STRETCHES",
     "adaptive_bin_map",
     "adaptive_map_from_bins",

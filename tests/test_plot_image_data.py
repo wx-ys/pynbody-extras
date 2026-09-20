@@ -115,12 +115,7 @@ def test_extent_is_derived_from_edges_when_only_edges_are_given() -> None:
 
 def test_extent_and_edges_must_agree() -> None:
     with pytest.raises(ValueError, match="extent"):
-        ImageData(
-            np.zeros((2, 2)),
-            extent=(0.0, 1.0, 0.0, 1.0),
-            x_edges=[0.0, 1.0, 2.0],
-            y_edges=[0.0, 1.0, 2.0],
-        )
+        ImageData(np.zeros((2, 2)), extent=(0.0, 1.0, 0.0, 1.0), x_edges=[0.0, 1.0, 2.0], y_edges=[0.0, 1.0, 2.0])
 
 
 def test_edges_must_match_the_image_shape() -> None:
@@ -169,9 +164,7 @@ def test_pixel_size_defaults_to_pixels_without_edges() -> None:
 
 
 def test_pixel_size_is_undefined_for_non_uniform_bins() -> None:
-    image = ImageData(
-        np.zeros((4, 4)), x_edges=[0.0, 1.0, 3.0, 6.0, 10.0], y_edges=[0.0, 1.0, 2.0, 3.0, 4.0]
-    )
+    image = ImageData(np.zeros((4, 4)), x_edges=[0.0, 1.0, 3.0, 6.0, 10.0], y_edges=[0.0, 1.0, 2.0, 3.0, 4.0])
 
     with pytest.raises(ValueError, match="uniform"):
         _ = image.pixel_size
@@ -220,8 +213,9 @@ def test_from_bins_reads_edges_units_labels_and_value_metadata() -> None:
 
     image = ImageData.from_bins(bins, "mass.sum")
 
-    assert image.data.shape == bins.shape_bins
-    np.testing.assert_allclose(image.data, np.asarray(bins["mass.sum"].grid))
+    # A bin grid is (x, y); an image is (row=y, column=x).
+    assert image.data.shape == bins.shape_bins[::-1]
+    np.testing.assert_allclose(image.data, np.asarray(bins["mass.sum"].grid).T)
     np.testing.assert_allclose(image.x_edges, np.asarray(bins.axes[0].edges))
     np.testing.assert_allclose(image.y_edges, np.asarray(bins.axes[1].edges))
     assert image.extent == tuple(bins.axes.extent)
@@ -295,12 +289,7 @@ def test_imshow_uses_the_stored_extent_and_axis_labels() -> None:
     import matplotlib.pyplot as plt
 
     image = ImageData(
-        np.zeros((4, 6)),
-        extent=(0.0, 30.0, -5.0, 5.0),
-        x_label="radius",
-        y_label="height",
-        x_units="kpc",
-        y_units="pc",
+        np.zeros((4, 6)), extent=(0.0, 30.0, -5.0, 5.0), x_label="radius", y_label="height", x_units="kpc", y_units="pc"
     )
 
     fig, ax = plt.subplots()
@@ -344,9 +333,7 @@ def test_colorbar_is_opt_in_and_uses_the_value_metadata() -> None:
 
 
 def test_imshow_refuses_non_uniform_bins() -> None:
-    image = ImageData(
-        np.zeros((4, 4)), x_edges=[0.0, 1.0, 3.0, 6.0, 10.0], y_edges=[0.0, 1.0, 2.0, 3.0, 4.0]
-    )
+    image = ImageData(np.zeros((4, 4)), x_edges=[0.0, 1.0, 3.0, 6.0, 10.0], y_edges=[0.0, 1.0, 2.0, 3.0, 4.0])
 
     with pytest.raises(ValueError, match="pcolormesh"):
         image.imshow()

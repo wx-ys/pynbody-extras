@@ -202,8 +202,9 @@ subpr[Sphere("30 kpc")]  # Returns a new sub-profile
 
 `pynbodyext.plot.image` turns the 2-D arrays produced by the calculator layer
 (`BinND`, and later SPH renders or tessellations) into publication-ready figures.
-Everything takes a plain 2-D array, so any producer works; `ImageData` is the
-bridge that carries the extent, units and label of a binned result.
+Every operation is a free function over a plain 2-D array, and the same operations
+are methods of `ImageData`, which carries the geometry, the units and the record
+of what was done to it.
 
 ```python
 from pynbodyext.plot import image
@@ -212,38 +213,44 @@ from pynbodyext.plot import image
 bins2d = (Bin1D("x", vmin=-50, vmax=50, nbins=200, alias="x")
         @ Bin1D("y", vmin=-50, vmax=50, nbins=200, alias="y"))(sim)
 
-# A plain map, with its extent and units attached
+# `BinNDResult.imshow` itself goes through ImageData: extent, axis units and
+# labels, and the choice between imshow and pcolormesh for uneven bins
+bins2d.imshow("mass.sum", cmap="inferno", colorbar=True)
+
+# Or hold the map and chain: geometry and metadata survive every step, and the
+# calls are recorded in `.ops` (repr shows them)
 density = image.ImageData.from_bins(bins2d, "mass.sum")
-density.imshow(cmap="inferno")
+smoothed = density.smooth.gaussian(fwhm=1.0)        # fwhm in the units of the axes
+observed = smoothed.psf.convolve(fwhm=3.0)          # what a telescope would see
+observed.imshow(cmap="inferno", colorbar=True)
 
-# Axes keep their own units and labels; uneven bins stay where they belong
-velocity_map = image.ImageData.from_bins(bins2d, "vz.mean")   # e.g. kpc and kpc
-velocity_map.pcolormesh(cmap="coolwarm", colorbar=True)       # works for log/quantile bins too
-
-# Smooth it: empty bins are NaN and do not smear over their neighbours.
-# fwhm is in the units of the extent (kpc here), via pixel_scale.
-smoothed = density.with_data(image.gaussian_smooth(density.data, fwhm=1.0, pixel_scale=density.pixel_size))
-
-# What an observation would see, and what deconvolution gives back
-observed = image.convolve_psf(smoothed.data, fwhm=3.0)
-restored = image.wiener_deconvolve(observed, image.gaussian_psf(fwhm=3.0), balance=1e-6)
+# Deconvolution goes the other way (and amplifies noise: it is a visualisation tool)
+restored = observed.psf.wiener(image.gaussian_psf(fwhm=3.0), balance=1e-6)
 
 # A velocity map: adaptive bins of equal mass, green on zero velocity
-velocity = image.adaptive_map_from_bins(bins2d, "vz.mean", "mass.sum", target_nbins=200, min_signal=1e6)
-velocity.imshow(cmap="K_B_C_G_Y_R_W", symmetric=True)
+velocity = image.ImageData.from_bins(bins2d, "vz.mean")
+mass = image.ImageData.from_bins(bins2d, "mass.sum")
+binned = velocity.adaptive_bin(mass, target_nbins=200, min_signal=1e6)
+binned.imshow(cmap="K_B_C_G_Y_R_W", symmetric=True)
+binned.image.smooth.box(size=3)       # the painted map is an ImageData too
 
 # Gas density and dark-matter density in one figure, crossfaded along a line
-image.imshow_compose(
-    gas_density, dm_density,
-    cmap1="inferno", cmap2="cividis",
+gas = image.ImageData.from_bins(bins2d, "mass.sum", units="1e10 Msol")
+dm = image.ImageData.from_bins(bins2d, "dm_mass.sum", units="1e10 Msol")
+gas.imshow_compose(
+    dm,
+    style1=image.MapStyle(cmap="inferno", stretch="log"),
+    style2=image.MapStyle(cmap="cividis"),
     label1="gas", label2="dark matter",
-    line_angle=45, width=0.15,
-    extent=(-50, 50, -50, 50),
 )
 ```
 
-The velocity colour map (black → blue → cyan → **green on zero** → yellow → red →
-white, also known as `image.vel_cmap`) is registered with matplotlib, so
+Families with several variants sit behind an accessor (`image.smooth.gaussian`,
+`image.psf.convolve`), single operations are plain methods (`normalize`,
+`to_rgba`, `draw`, `compose`, `adaptive_bin`), and the underlying free functions
+(`gaussian_smooth(data, ...)`, `compose_maps(...)`, …) remain available for plain
+arrays. The velocity colour map (black → blue → cyan → **green on zero** → yellow
+→ red → white, also known as `image.vel_cmap`) is registered with matplotlib, so
 `cmap="K_B_C_G_Y_R_W"` works; the masks behind the stitching are exposed on their
 own:
 

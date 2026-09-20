@@ -7,7 +7,14 @@ import numpy as np
 import pytest
 
 from pynbodyext.plot.image.cmaps import K_B_C_G_Y_R_W, to_rgba
-from pynbodyext.plot.image.compose import blend_images, blend_stack, compose_maps, create_map_mask, imshow_compose
+from pynbodyext.plot.image.compose import (
+    MapStyle,
+    blend_images,
+    blend_stack,
+    compose_maps,
+    create_map_mask,
+    imshow_compose,
+)
 
 
 def gradient(shape: tuple[int, int] = (20, 30)) -> np.ndarray:
@@ -159,7 +166,14 @@ def test_compose_maps_uses_each_cmap_on_its_own_side() -> None:
     data2 = gradient()
 
     # A zero-angle line leaves map 1 on the right and map 2 on the left.
-    composed = compose_maps(data1, data2, cmap1="viridis", cmap2="magma", line_angle=0.0, width=0.0)
+    composed = compose_maps(
+        data1,
+        data2,
+        style1=MapStyle(cmap="viridis", vmin=0.0, vmax=1.0),
+        style2=MapStyle(cmap="magma", vmin=0.0, vmax=1.0),
+        line_angle=0.0,
+        width=0.0,
+    )
 
     left = to_rgba(data1, "viridis", vmin=0.0, vmax=1.0)[..., :3]
     right = to_rgba(data2, "magma", vmin=0.0, vmax=1.0)[..., :3]
@@ -175,12 +189,8 @@ def test_compose_maps_crossfades_in_the_transition_band() -> None:
     composed = compose_maps(
         data1,
         data2,
-        cmap1="gray",
-        cmap2="gray",
-        vmin1=0.0,
-        vmax1=1.0,
-        vmin2=0.0,
-        vmax2=1.0,
+        style1=MapStyle(cmap="gray", vmin=0.0, vmax=1.0),
+        style2=MapStyle(cmap="gray", vmin=0.0, vmax=1.0),
         line_angle=180.0,  # map 1 (white) on the left, map 2 (black) on the right
         width=0.4,
     )
@@ -206,7 +216,7 @@ def test_compose_maps_accepts_an_explicit_mask() -> None:
     data2 = np.ones((4, 4))
     mask = np.zeros((4, 4))
 
-    composed = compose_maps(data1, data2, cmap1="gray", cmap2="gray", vmin2=0.0, vmax2=1.0, mask=mask)
+    composed = compose_maps(data1, data2, style2=MapStyle(cmap="gray", vmin=0.0, vmax=1.0), mask=mask)
 
     np.testing.assert_allclose(composed[..., 0], 1.0)  # only the second (white) map shows
 
@@ -219,9 +229,57 @@ def test_compose_maps_validates_the_mask_shape() -> None:
 def test_compose_maps_defaults_to_the_velocity_cmap() -> None:
     data = gradient()
 
-    composed = compose_maps(data, data, vmin1=0.0, vmax1=1.0, vmin2=0.0, vmax2=1.0)
+    composed = compose_maps(data, data)
 
     np.testing.assert_allclose(composed[..., :3], np.asarray(K_B_C_G_Y_R_W(data))[..., :3])
+
+
+def test_compose_maps_accepts_a_bare_cmap_name_as_a_style() -> None:
+    data = gradient()
+
+    from_string = compose_maps(data, data, style1="inferno", style2="inferno")
+    from_style = compose_maps(data, data, style1=MapStyle(cmap="inferno"), style2=MapStyle(cmap="inferno"))
+
+    np.testing.assert_allclose(from_string, from_style)
+
+
+def test_map_style_limits_follow_percentiles() -> None:
+    values = np.concatenate([np.linspace(0.0, 1.0, 100), [1000.0]]).reshape(1, -1)
+
+    vmin, vmax = MapStyle(cmap="inferno", percentiles=(0, 99)).limits(values)
+
+    assert vmin == 0.0
+    assert vmax == pytest.approx(1.0)
+
+
+def test_map_style_limits_honour_explicit_values() -> None:
+    assert MapStyle(vmin=0.0, vmax=10.0).limits(np.zeros((2, 2))) == (0.0, 10.0)
+
+
+def test_map_style_rejects_nonsense() -> None:
+    with pytest.raises(TypeError, match="MapStyle"):
+        compose_maps(np.zeros((2, 2)), np.zeros((2, 2)), style1=42)
+
+
+def test_image_data_can_compose_with_another_image() -> None:
+    from pynbodyext.plot.image import ImageData
+
+    first = ImageData(gradient(), extent=(0, 30, 0, 20), label="gas")
+    second = ImageData(gradient()[:, ::-1], extent=(0, 30, 0, 20), label="dm")
+
+    composed = first.compose(second, style=MapStyle(cmap="inferno"), other_style=MapStyle(cmap="cividis"))
+
+    assert composed.shape == (20, 30, 4)
+    np.testing.assert_allclose(composed, compose_maps(first.data, second.data, style1="inferno", style2="cividis"))
+    masks = first.create_mask(line_angle=0.0, width=0.0)
+    assert masks[0].shape == first.shape
+
+
+def test_image_data_compose_rejects_a_mismatched_other_map() -> None:
+    from pynbodyext.plot.image import ImageData
+
+    with pytest.raises(ValueError, match="shape"):
+        ImageData(np.zeros((4, 4))).compose(np.zeros((5, 5)))
 
 
 def test_imshow_compose_draws_the_image_and_two_colorbars() -> None:

@@ -17,14 +17,28 @@ units instead — ``ImageData.pixel_size`` supplies exactly that::
 from __future__ import annotations
 
 import warnings
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from scipy import ndimage
 
 from ._arrays import as_image, as_pair, masked_filter, resolve_sigma, validity_mask
 
-__all__ = ["STRETCHES", "box_smooth", "downsample", "gaussian_smooth", "median_filter", "normalize"]
+if TYPE_CHECKING:
+    from .data import ImageData
+
+__all__ = [
+    "STRETCHES",
+    "SmoothMixin",
+    "SmoothOps",
+    "box_smooth",
+    "downsample",
+    "gaussian_smooth",
+    "median_filter",
+    "normalize",
+    "value_limits",
+]
 
 #: Accepted values of the ``stretch`` argument of :func:`normalize`.
 STRETCHES = ("linear", "sqrt", "log", "asinh", "hist")
@@ -222,6 +236,42 @@ def normalize(
         raise ValueError(f"Unknown stretch {stretch!r}; choose from {', '.join(STRETCHES)}.")
     array = np.asarray(data, dtype=float)
     finite = np.isfinite(array)
+    vmin, vmax = value_limits(array, vmin=vmin, vmax=vmax, percentiles=percentiles)
+    if vmax == vmin:
+        return np.where(finite, 0.0, np.nan)
+    with np.errstate(invalid="ignore"):  # non-finite entries are masked out below
+        unit = np.clip((array - vmin) / (vmax - vmin), 0.0, 1.0)
+    return np.where(finite, _apply_stretch(unit, stretch, asinh_a), np.nan)
+
+
+_REDUCERS = {"mean": np.nanmean, "sum": np.nansum, "median": np.nanmedian, "max": np.nanmax}
+
+
+def value_limits(
+    data: Any, *, vmin: float | None = None, vmax: float | None = None, percentiles: tuple[float, float] | None = None
+) -> tuple[float, float]:
+    """The ``(vmin, vmax)`` that :func:`normalize` would use for *data*.
+
+    Exposed so that anything drawing a colour bar labels the same range the image
+    was drawn with, instead of repeating the rules.
+
+    Parameters
+    ----------
+    data : array_like
+        Values to take the limits from; non-finite entries are ignored.
+    vmin, vmax : float, optional
+        Explicit limits; each falls back to the requested percentile, then to the
+        data range.
+    percentiles : (float, float), optional
+        Percentiles used for whichever of *vmin*/*vmax* is not given.
+
+    Returns
+    -------
+    tuple of float
+        ``(vmin, vmax)``.
+    """
+    array = np.asarray(data, dtype=float)
+    finite = np.isfinite(array)
     if percentiles is not None:
         if vmin is None:
             vmin = float(np.nanpercentile(array, percentiles[0])) if finite.any() else 0.0
@@ -233,14 +283,7 @@ def normalize(
         vmax = float(np.nanmax(array)) if finite.any() else 1.0
     if vmax < vmin:
         raise ValueError(f"vmax ({vmax}) must not be smaller than vmin ({vmin}).")
-    if vmax == vmin:
-        return np.where(finite, 0.0, np.nan)
-    with np.errstate(invalid="ignore"):  # non-finite entries are masked out below
-        unit = np.clip((array - vmin) / (vmax - vmin), 0.0, 1.0)
-    return np.where(finite, _apply_stretch(unit, stretch, asinh_a), np.nan)
-
-
-_REDUCERS = {"mean": np.nanmean, "sum": np.nansum, "median": np.nanmedian, "max": np.nanmax}
+    return float(vmin), float(vmax)
 
 
 def downsample(data: Any, factor: Any = 2, *, func: str = "mean") -> np.ndarray:
@@ -278,3 +321,72 @@ def downsample(data: Any, factor: Any = 2, *, func: str = "mean") -> np.ndarray:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN blocks are expected
         return _REDUCERS[func](blocks, axis=(2, 3))
+
+
+def _factor_pair(factor: Any) -> tuple[int, int]:
+    """Normalise a ``factor`` into an explicit ``(y, x)`` pair."""
+    pair = as_pair(factor, name="factor")
+    return (pair, pair) if isinstance(pair, int) else pair
+
+
+@dataclass(frozen=True)
+class SmoothOps:
+    """The smoothing family of an image: ``image.smooth.gaussian(fwhm=2)``.
+
+    Each method returns a new :class:`~pynbodyext.plot.image.data.ImageData`, so
+    calls chain and the geometry, units and provenance travel along with the
+    values.  ``sigma``/``fwhm`` are in the units of the axes whenever the grid is
+    evenly spaced (the image's own ``pixel_size`` is used for the conversion), and
+    in pixels otherwise.
+    """
+
+    image: ImageData
+
+    def _pixel_scale(self) -> tuple[float, float] | None:
+        """Pixel size in axis units, or ``None`` when the grid has none."""
+        try:
+            return self.image.pixel_size
+        except ValueError:  # unevenly spaced bins: fall back to pixels
+            return None
+
+    def gaussian(
+        self, sigma: Any = None, *, fwhm: Any = None, truncate: float = 4.0, mode: str = "reflect", mask: Any = None
+    ) -> ImageData:
+        """Smooth with a Gaussian kernel; see :func:`gaussian_smooth`."""
+        smoothed = gaussian_smooth(
+            self.image.data, sigma, fwhm=fwhm, truncate=truncate, mode=mode, mask=mask, pixel_scale=self._pixel_scale()
+        )
+        return self.image._derived(
+            smoothed,
+            "gaussian_smooth",
+            {"sigma": sigma, "fwhm": fwhm, "truncate": truncate, "mode": mode, "mask": mask},
+        )
+
+    def box(self, size: Any = 3, *, mode: str = "reflect", mask: Any = None) -> ImageData:
+        """Smooth with a top-hat kernel; see :func:`box_smooth`."""
+        smoothed = box_smooth(self.image.data, size, mode=mode, mask=mask)
+        return self.image._derived(smoothed, "box_smooth", {"size": size, "mode": mode, "mask": mask})
+
+    def median(self, size: Any = 3, *, mode: str = "nearest", mask: Any = None) -> ImageData:
+        """Median-filter the image; see :func:`median_filter`."""
+        filtered = median_filter(self.image.data, size, mode=mode, mask=mask)
+        return self.image._derived(filtered, "median_filter", {"size": size, "mode": mode, "mask": mask})
+
+    def downsample(self, factor: Any = 2, *, func: str = "mean") -> ImageData:
+        """Block-average the image, shrinking it by *factor*; see :func:`downsample`."""
+        reduced = downsample(self.image.data, factor, func=func)
+        factor_y, factor_x = _factor_pair(factor)
+        overrides: dict[str, Any] = {}
+        if self.image.x_edges is not None and self.image.y_edges is not None:
+            overrides["x_edges"] = self.image.x_edges[::factor_x]
+            overrides["y_edges"] = self.image.y_edges[::factor_y]
+        return self.image._derived(reduced, "downsample", {"factor": factor, "func": func}, **overrides)
+
+
+class SmoothMixin:
+    """Gives an image its ``.smooth`` accessor."""
+
+    @property
+    def smooth(self) -> SmoothOps:
+        """Smoothing methods of this image, e.g. ``image.smooth.gaussian(fwhm=2)``."""
+        return SmoothOps(self)  # type: ignore[arg-type]

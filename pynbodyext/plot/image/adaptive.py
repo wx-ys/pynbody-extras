@@ -32,16 +32,18 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from pynbodyext.util.deps import POWERBIN_AVAILABLE
 
-from ._arrays import as_image, bin_centers, checked_edges, edges_are_uniform, resolve_edges, typical_width
-from .data import ImageData
+from ._arrays import as_image, bin_centers, resolve_edges, typical_width
 
-__all__ = ["AdaptiveMap", "adaptive_bin_map", "adaptive_map_from_bins"]
+if TYPE_CHECKING:
+    from .data import ImageData
+
+__all__ = ["AdaptiveMap", "AdaptiveMixin", "adaptive_bin_map", "adaptive_map_from_bins"]
 
 _METHODS = ("mean", "median", "sum", "weighted")
 
@@ -50,8 +52,17 @@ _METHODS = ("mean", "median", "sum", "weighted")
 class AdaptiveMap:
     """The result of :func:`adaptive_bin_map`.
 
+    The painted map is an ordinary :class:`~pynbodyext.plot.image.data.ImageData`
+    (``.image``), so it keeps the geometry, units and labels of the grid it was
+    binned from and can be processed further; the attributes below describe the
+    partition itself.
+
     Attributes
     ----------
+    image : ImageData
+        The painted map: every binned pixel carries its bin's value, unbinned
+        pixels stay non-finite.  ``.value``, ``.extent``, ``.x_edges`` … are
+        shortcuts to it.
     value : numpy.ndarray
         Per-pixel image painted with its bin's value; non-finite outside the
         binned region.
@@ -73,17 +84,11 @@ class AdaptiveMap:
         How the per-bin value was aggregated.
     rms_frac : float
         Percent scatter of the achieved bin capacities (from PowerBin).
-    x_edges, y_edges : numpy.ndarray
-        Bin edges of the input grid; they need not be evenly spaced.
-    x_units, y_units : object, optional
-        Units of each axis, which may differ.
-    x_label, y_label : str, optional
-        Names of the two axes.
-    label, units : str, object, optional
-        Description and units of ``value``, for labelling a figure.
+    label, units : str, object
+        Description and units of ``value``, taken from ``image``.
     """
 
-    value: np.ndarray
+    image: ImageData
     bin_num: np.ndarray
     bin_value: np.ndarray
     bin_capacity: np.ndarray
@@ -95,50 +100,81 @@ class AdaptiveMap:
     target_capacity: float
     method: str
     rms_frac: float
-    x_edges: np.ndarray | None = None
-    y_edges: np.ndarray | None = None
-    x_units: Any = None
-    y_units: Any = None
-    x_label: str | None = None
-    y_label: str | None = None
-    label: str | None = None
-    units: Any = None
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "x_edges", checked_edges(self.x_edges, "x_edges", self.value.shape[1]))
-        object.__setattr__(self, "y_edges", checked_edges(self.y_edges, "y_edges", self.value.shape[0]))
+    @property
+    def value(self) -> np.ndarray:
+        """Per-pixel image painted with its bin's value; non-finite outside the binned region."""
+        return self.image.data
 
     @property
     def extent(self) -> tuple[float, float, float, float] | None:
-        """``(xmin, xmax, ymin, ymax)`` of the input map, when it has a grid."""
-        if self.x_edges is None or self.y_edges is None:
-            return None
-        return (float(self.x_edges[0]), float(self.x_edges[-1]), float(self.y_edges[0]), float(self.y_edges[-1]))
+        """``(xmin, xmax, ymin, ymax)`` of the binned map."""
+        return self.image.extent
+
+    @property
+    def x_edges(self) -> np.ndarray | None:
+        """Bin edges of the input grid along x, which need not be evenly spaced."""
+        return self.image.x_edges
+
+    @property
+    def y_edges(self) -> np.ndarray | None:
+        """Bin edges of the input grid along y, which need not be evenly spaced."""
+        return self.image.y_edges
 
     @property
     def x_centers(self) -> np.ndarray:
         """Centre of every column of the input grid, in the units of the x axis."""
-        return bin_centers(self.x_edges, self.value.shape[1])
+        return self.image.x_centers
 
     @property
     def y_centers(self) -> np.ndarray:
         """Centre of every row of the input grid, in the units of the y axis."""
-        return bin_centers(self.y_edges, self.value.shape[0])
+        return self.image.y_centers
 
     @property
     def x_uniform(self) -> bool:
         """Whether the input columns are evenly spaced."""
-        return edges_are_uniform(self.x_edges)
+        return self.image.x_uniform
 
     @property
     def y_uniform(self) -> bool:
         """Whether the input rows are evenly spaced."""
-        return edges_are_uniform(self.y_edges)
+        return self.image.y_uniform
 
     @property
     def uniform(self) -> bool:
         """Whether the whole input grid is evenly spaced."""
-        return self.x_uniform and self.y_uniform
+        return self.image.uniform
+
+    @property
+    def label(self) -> str | None:
+        """Name of the binned quantity."""
+        return self.image.label
+
+    @property
+    def units(self) -> Any:
+        """Units of the binned quantity."""
+        return self.image.units
+
+    @property
+    def x_label(self) -> str | None:
+        """Name of the x axis, taken from ``image``."""
+        return self.image.x_label
+
+    @property
+    def y_label(self) -> str | None:
+        """Name of the y axis, taken from ``image``."""
+        return self.image.y_label
+
+    @property
+    def x_units(self) -> Any:
+        """Units of the x axis, taken from ``image``."""
+        return self.image.x_units
+
+    @property
+    def y_units(self) -> Any:
+        """Units of the y axis, taken from ``image``."""
+        return self.image.y_units
 
     @property
     def n_bins(self) -> int:
@@ -151,22 +187,12 @@ class AdaptiveMap:
         return self.bin_count <= 1
 
     def to_image_data(self) -> ImageData:
-        """Return the painted map as an :class:`~pynbodyext.plot.image.data.ImageData`.
+        """The painted map as an :class:`~pynbodyext.plot.image.data.ImageData`.
 
-        The result carries the geometry of the input grid, so it can be drawn or
-        processed like any other image.
+        This is the image the binned values were painted onto; because it is an
+        ordinary image, it can be smoothed, stretched or composited like any other.
         """
-        return ImageData(
-            self.value,
-            x_edges=self.x_edges,
-            y_edges=self.y_edges,
-            x_units=self.x_units,
-            y_units=self.y_units,
-            x_label=self.x_label,
-            y_label=self.y_label,
-            label=self.label,
-            units=self.units,
-        )
+        return self.image
 
     def imshow(self, ax: Any = None, *, symmetric: bool = False, **kwargs: Any) -> Any:
         """Draw :attr:`value` as an image, leaving unbinned pixels transparent.
@@ -189,13 +215,10 @@ class AdaptiveMap:
         matplotlib.image.AxesImage or matplotlib.collections.QuadMesh
             The artist.
         """
-        image = self.to_image_data()
         if symmetric and "vmin" not in kwargs and "vmax" not in kwargs:
             limit = float(np.nanmax(np.abs(self.value)))
             kwargs["vmin"], kwargs["vmax"] = -limit, limit
-        if image.uniform:
-            return image.imshow(ax=ax, **kwargs)
-        return image.pcolormesh(ax=ax, **kwargs)
+        return self.image.draw(ax=ax, **kwargs)
 
 
 def _aggregate(values: np.ndarray, bin_num: np.ndarray, weights: np.ndarray, n_bins: int, method: str) -> np.ndarray:
@@ -360,6 +383,8 @@ def adaptive_bin_map(
         )
     from powerbin import PowerBin
 
+    from .data import ImageData  # local import: data.py composes this module
+
     values = as_image(value, name="value")
     signals = as_image(signal, name="signal")
     if signals.shape != values.shape:
@@ -418,8 +443,19 @@ def adaptive_bin_map(
     painted_bins = np.full(values.shape, -1, dtype=int)
     painted_bins[valid] = bin_num
     bin_value = _aggregate(values[valid], bin_num, capacity[valid], n_bins, method)
+    painted = np.where(painted_bins >= 0, bin_value[np.clip(painted_bins, 0, None)], np.nan)
     return AdaptiveMap(
-        value=np.where(painted_bins >= 0, bin_value[np.clip(painted_bins, 0, None)], np.nan),
+        image=ImageData(
+            painted,
+            x_edges=grid_x,
+            y_edges=grid_y,
+            x_units=x_units,
+            y_units=y_units,
+            x_label=x_label,
+            y_label=y_label,
+            label=label,
+            units=units,
+        ),
         bin_num=painted_bins,
         bin_value=bin_value,
         bin_capacity=np.asarray(binned.bin_capacity, dtype=float),
@@ -431,14 +467,6 @@ def adaptive_bin_map(
         target_capacity=target,
         method=method,
         rms_frac=float(binned.rms_frac),
-        x_edges=grid_x,
-        y_edges=grid_y,
-        x_units=x_units,
-        y_units=y_units,
-        x_label=x_label,
-        y_label=y_label,
-        label=label,
-        units=units,
     )
 
 
@@ -468,6 +496,8 @@ def adaptive_map_from_bins(
     --------
     >>> binned = adaptive_map_from_bins(bins2d, "vz.mean", "mass.sum", target_nbins=200)  # doctest: +SKIP
     """
+    from .data import ImageData  # local import: data.py composes this module
+
     value_image = ImageData.from_bins(bins, value)  # rejects anything but a 2-D result
     kwargs.setdefault("x_edges", value_image.x_edges)
     kwargs.setdefault("y_edges", value_image.y_edges)
@@ -484,3 +514,89 @@ def adaptive_map_from_bins(
         np.asarray(ImageData.from_bins(bins, signal).data, dtype=float),
         **kwargs,
     )
+
+
+class AdaptiveMixin:
+    """Gives an image the ``adaptive_bin`` method."""
+
+    if TYPE_CHECKING:
+        data: np.ndarray
+        x_edges: np.ndarray | None
+        y_edges: np.ndarray | None
+        x_units: Any
+        y_units: Any
+        x_label: str | None
+        y_label: str | None
+        label: str | None
+        units: Any
+
+    def adaptive_bin(
+        self,
+        signal: Any,
+        *,
+        noise: Any = None,
+        target_capacity: float | None = None,
+        target_signal: float | None = None,
+        target_nbins: int | None = None,
+        mask: Any = None,
+        min_signal: float | None = None,
+        method: str = "mean",
+        regul: bool = True,
+        maxiter: int = 50,
+        verbose: int = 0,
+    ) -> AdaptiveMap:
+        """Bin this image adaptively by *signal*, keeping its geometry.
+
+        Parameters
+        ----------
+        signal : ImageData or array_like
+            Signal strength driving the bin size, e.g. the ``mass.sum`` map that
+            goes with this ``vz.mean`` map.
+        noise : ImageData or array_like, optional
+            Per-pixel noise, turning the capacity into ``(S/N)**2``.
+        target_capacity, target_signal, target_nbins, mask, min_signal, method, regul, maxiter, verbose :
+            As in :func:`adaptive_bin_map`; give exactly one target.
+
+        Returns
+        -------
+        AdaptiveMap
+            The partition, and the painted map as ``.image``.
+
+        Examples
+        --------
+        >>> velocity = ImageData.from_bins(bins2d, "vz.mean")  # doctest: +SKIP
+        >>> mass = ImageData.from_bins(bins2d, "mass.sum")  # doctest: +SKIP
+        >>> binned = velocity.adaptive_bin(mass, target_nbins=200)  # doctest: +SKIP
+        >>> binned.imshow(cmap="K_B_C_G_Y_R_W", symmetric=True)  # doctest: +SKIP
+        """
+        return adaptive_bin_map(
+            self.data,
+            _as_map_data(signal),
+            noise=None if noise is None else _as_map_data(noise),
+            target_capacity=target_capacity,
+            target_signal=target_signal,
+            target_nbins=target_nbins,
+            mask=mask,
+            min_signal=min_signal,
+            method=method,
+            x_edges=self.x_edges,
+            y_edges=self.y_edges,
+            x_units=self.x_units,
+            y_units=self.y_units,
+            x_label=self.x_label,
+            y_label=self.y_label,
+            regul=regul,
+            maxiter=maxiter,
+            verbose=verbose,
+            label=self.label,
+            units=self.units,
+        )
+
+
+def _as_map_data(value: Any) -> np.ndarray:
+    """Raw values of an image or of an array, so both can drive the binning."""
+    from .data import ImageData  # local import: data.py composes this module
+
+    if isinstance(value, ImageData):
+        return np.asarray(value.data, dtype=float)
+    return np.asarray(value, dtype=float)
