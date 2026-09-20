@@ -39,7 +39,7 @@ import numpy as np
 from pynbodyext.util.deps import POWERBIN_AVAILABLE
 
 from ._arrays import as_image, bin_centers, resolve_edges, typical_width
-from .ops import ImageOps, register_ops
+from .ops import ImageDataView, ImageOps, register_ops
 
 if TYPE_CHECKING:
     from .data import ImageData
@@ -50,7 +50,7 @@ _METHODS = ("mean", "median", "sum", "weighted")
 
 
 @dataclass(frozen=True)
-class AdaptiveMap:
+class AdaptiveMap(ImageDataView):
     """The result of :func:`adaptive_bin_map`.
 
     The painted map is an ordinary :class:`~pynbodyext.plot.image.data.ImageData`
@@ -105,77 +105,7 @@ class AdaptiveMap:
     @property
     def value(self) -> np.ndarray:
         """Per-pixel image painted with its bin's value; non-finite outside the binned region."""
-        return self.image.data
-
-    @property
-    def extent(self) -> tuple[float, float, float, float] | None:
-        """``(xmin, xmax, ymin, ymax)`` of the binned map."""
-        return self.image.extent
-
-    @property
-    def x_edges(self) -> np.ndarray | None:
-        """Bin edges of the input grid along x, which need not be evenly spaced."""
-        return self.image.x_edges
-
-    @property
-    def y_edges(self) -> np.ndarray | None:
-        """Bin edges of the input grid along y, which need not be evenly spaced."""
-        return self.image.y_edges
-
-    @property
-    def x_centers(self) -> np.ndarray:
-        """Centre of every column of the input grid, in the units of the x axis."""
-        return self.image.x_centers
-
-    @property
-    def y_centers(self) -> np.ndarray:
-        """Centre of every row of the input grid, in the units of the y axis."""
-        return self.image.y_centers
-
-    @property
-    def x_uniform(self) -> bool:
-        """Whether the input columns are evenly spaced."""
-        return self.image.x_uniform
-
-    @property
-    def y_uniform(self) -> bool:
-        """Whether the input rows are evenly spaced."""
-        return self.image.y_uniform
-
-    @property
-    def uniform(self) -> bool:
-        """Whether the whole input grid is evenly spaced."""
-        return self.image.uniform
-
-    @property
-    def label(self) -> str | None:
-        """Name of the binned quantity."""
-        return self.image.label
-
-    @property
-    def units(self) -> Any:
-        """Units of the binned quantity."""
-        return self.image.units
-
-    @property
-    def x_label(self) -> str | None:
-        """Name of the x axis, taken from ``image``."""
-        return self.image.x_label
-
-    @property
-    def y_label(self) -> str | None:
-        """Name of the y axis, taken from ``image``."""
-        return self.image.y_label
-
-    @property
-    def x_units(self) -> Any:
-        """Units of the x axis, taken from ``image``."""
-        return self.image.x_units
-
-    @property
-    def y_units(self) -> Any:
-        """Units of the y axis, taken from ``image``."""
-        return self.image.y_units
+        return self.data
 
     @property
     def n_bins(self) -> int:
@@ -222,20 +152,6 @@ class AdaptiveMap:
             limit = float(np.nanmax(np.abs(self.value)))
             kwargs["vmin"], kwargs["vmax"] = -limit, limit
         return self.image.draw(ax=ax, **kwargs)
-
-    def add_colorbar(self, mappable: Any = None, ax: Any = None, **kwargs: Any) -> Any:
-        """Dock a colour bar describing the painted map to its panel.
-
-        Shorthand for :func:`pynbodyext.plot.image.display.add_colorbar` on
-        :attr:`image`; with no *mappable* the artist drawn from the painted map in
-        *ax* is used, so ``binned.imshow(); binned.add_colorbar()`` just works.
-
-        Returns
-        -------
-        matplotlib.colorbar.Colorbar
-            The colour bar.
-        """
-        return self.image.add_colorbar(mappable, ax=ax, **kwargs)
 
 
 def _aggregate(values: np.ndarray, bin_num: np.ndarray, weights: np.ndarray, n_bins: int, method: str) -> np.ndarray:

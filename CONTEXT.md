@@ -133,13 +133,18 @@ object a caller normally holds.
   Single-call operations stay methods of `ImageData` itself (`normalize`,
   `to_rgba`, `draw`, `imshow`, `pcolormesh`, `add_colorbar`), so no operation has
   two spellings.
-- **`ImageOps`** (`plot/image/ops.py`) — the shared parent of every view. It hands
-  a view the image's geometry and metadata (`data`, `shape`, `extent`, edges,
-  units, labels), plus `derive()` (return a new image with the operation recorded)
-  and `kernel_scale()` (pixel size, or `None` on uneven bins). **`register_ops`** /
-  `ImageData.register_ops("tessellation", TessellationOps)` adds a family through
-  the registry, so a new processing stage is a new module and a registration — no
-  base-class list to edit (`ImageData.operations()` lists what is registered).
+- **`ImageDataView`** (`plot/image/ops.py`) — "an `ImageData` seen from one angle":
+  it holds the image and forwards its data and metadata (`data`, `shape`, `ndim`,
+  `extent`, edges, centers, uniformity, `pixel_size`, units, labels) plus
+  `add_colorbar`. Every view of an image derives from it, so nothing forwards the
+  same property twice. **`ImageOps`** extends it with the two things a capability
+  family needs: `derive()` (return a new image with the operation recorded) and
+  `kernel_scale()` (pixel size, or `None` on uneven bins). `AdaptiveMap` derives
+  from it directly — it *is* a view of its painted map, not a capability.
+- **`register_ops`** / `ImageData.register_ops("tessellation", TessellationOps)`
+  adds a capability family through the registry, so a new processing stage is a new
+  module and a registration — no base-class list to edit
+  (`ImageData.operations()` lists what is registered).
 - Methods that produce an image return a new
   `ImageData` — geometry and units intact — with the call appended to
   **`ops`** (`tuple[ImageOp, ...]`, `ImageOp(name, params)`), which is what

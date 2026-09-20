@@ -41,7 +41,7 @@ from .cmaps import (
 from .compose import MapStyle, blend_images, blend_stack, compose_maps, create_map_mask, imshow_compose
 from .data import OPERATIONS, ImageData, ImageOp, register_ops
 from .display import COLORBAR_LOCATIONS, add_colorbar
-from .ops import ImageOps
+from .ops import ImageDataView, ImageOps
 from .postprocess import STRETCHES, box_smooth, downsample, gaussian_smooth, median_filter, normalize
 from .psf import convolve_psf, deconvolve_psf, gaussian_psf, normalize_psf, richardson_lucy, wiener_deconvolve
 
@@ -49,6 +49,7 @@ __all__ = [
     "COLORBAR_LOCATIONS",
     "AdaptiveMap",
     "ImageData",
+    "ImageDataView",
     "ImageOp",
     "ImageOps",
     "K_B_C_G_Y_R_W",

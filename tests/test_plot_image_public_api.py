@@ -11,6 +11,7 @@ EXPECTED_NAMES = {
     "COLORBAR_LOCATIONS",
     "AdaptiveMap",
     "ImageData",
+    "ImageDataView",
     "ImageOp",
     "ImageOps",
     "K_B_C_G_Y_R_W",

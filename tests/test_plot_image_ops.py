@@ -7,6 +7,30 @@ import pytest
 
 from pynbodyext.plot.image import OPERATIONS, ImageData, ImageOps, register_ops
 from pynbodyext.plot.image._arrays import value_limits
+from pynbodyext.plot.image.adaptive import AdaptiveMap
+from pynbodyext.plot.image.ops import ImageDataView
+
+#: Everything a view re-exposes from the image it is a view of.
+FORWARDED = (
+    "data",
+    "shape",
+    "ndim",
+    "extent",
+    "x_edges",
+    "y_edges",
+    "x_centers",
+    "y_centers",
+    "x_uniform",
+    "y_uniform",
+    "uniform",
+    "pixel_size",
+    "x_units",
+    "y_units",
+    "x_label",
+    "y_label",
+    "label",
+    "units",
+)
 
 
 def image(shape: tuple[int, int] = (6, 6), **kwargs: object) -> ImageData:
@@ -25,6 +49,44 @@ def image(shape: tuple[int, int] = (6, 6), **kwargs: object) -> ImageData:
 # ---------------------------------------------------------------------------
 # one parent, several views
 # ---------------------------------------------------------------------------
+
+
+def test_one_base_forwards_the_image_to_every_view() -> None:
+    """Views (and the binned map) share ``ImageDataView`` instead of copying it."""
+    assert issubclass(ImageOps, ImageDataView)
+    assert issubclass(AdaptiveMap, ImageDataView)
+
+
+@pytest.mark.parametrize("name", FORWARDED)
+def test_forwarding_is_declared_once(name: str) -> None:
+    assert isinstance(getattr(ImageDataView, name), property), f"{name} should live on ImageDataView"
+    assert name not in ImageOps.__dict__, f"ImageOps must not re-declare {name}"
+    assert name not in AdaptiveMap.__dict__, f"AdaptiveMap must not re-declare {name}"
+
+
+def test_views_forward_the_image_itself() -> None:
+    source = image()
+
+    for view in (source.smooth, source.psf, source.compose, source.adaptive):
+        assert view.image is source
+        assert view.data is source.data
+        assert view.shape == source.shape
+        assert view.extent == source.extent
+        assert (view.x_units, view.y_units) == ("kpc", "kpc")
+        assert (view.x_label, view.y_label) == (source.x_label, source.y_label)
+        assert (view.label, view.units) == ("vz.mean", "km/s")
+        assert view.uniform is source.uniform
+        assert view.pixel_size == source.pixel_size
+        np.testing.assert_array_equal(view.x_centers, source.x_centers)
+
+
+def test_views_are_frozen() -> None:
+    from dataclasses import FrozenInstanceError
+
+    source = image()
+
+    with pytest.raises(FrozenInstanceError):
+        source.smooth.image = image()  # type: ignore[misc]
 
 
 def test_image_data_does_not_inherit_its_capabilities() -> None:
@@ -55,6 +117,46 @@ def test_views_expose_the_helpers_a_plugin_needs() -> None:
     assert view.kernel_scale() == (2.0, 2.0)
     uneven = ImageData(np.zeros((4, 4)), x_edges=[0.0, 1.0, 3.0, 6.0, 10.0], y_edges=[0.0, 1.0, 2.0, 3.0, 4.0])
     assert uneven.smooth.kernel_scale() is None
+
+
+def test_a_view_can_add_the_colour_bar_of_its_image() -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    source = image(label="vz.mean")
+    fig, ax = plt.subplots()
+    try:
+        artist = source.imshow(ax=ax)
+
+        bar = source.smooth.add_colorbar(ax=ax)
+
+        assert bar.mappable is artist
+        assert bar.ax.get_ylabel() == "vz.mean [km/s]"
+    finally:
+        plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# a binned map is a view too
+# ---------------------------------------------------------------------------
+
+
+def test_adaptive_map_is_a_view_of_its_painted_image() -> None:
+    pytest.importorskip("powerbin")
+    source = image((20, 20))
+    signal = ImageData(np.ones((20, 20)), extent=(0.0, 20.0, 0.0, 20.0), label="mass.sum")
+
+    binned = source.adaptive.bin(signal, target_nbins=4)
+
+    assert isinstance(binned, ImageDataView)
+    assert not isinstance(binned, ImageOps)  # it is a result, not a capability
+    assert binned.value is binned.image.data
+    assert binned.data is binned.image.data
+    assert (binned.shape, binned.extent) == (binned.image.shape, binned.image.extent)
+    assert (binned.x_units, binned.label) == (binned.image.x_units, binned.image.label)
+    np.testing.assert_array_equal(binned.x_edges, binned.image.x_edges)
 
 
 def test_derive_returns_a_new_image_and_records_the_operation() -> None:

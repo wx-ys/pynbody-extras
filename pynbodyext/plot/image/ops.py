@@ -1,13 +1,19 @@
-"""The shared parent of the image's capability views, and the registry that finds them.
+"""Views onto an image: the shared base, the capability views, and their registry.
 
-``ImageData.smooth``, ``.psf``, ``.compose`` and ``.adaptive`` are *views*: small
-objects that hold the image and expose one family of operations.  They all derive
-from :class:`ImageOps`, which gives them — and any plugin added later — the same
-surface: the image's geometry and metadata, :meth:`ImageOps.derive` to return a new
-image with the operation recorded, and :meth:`ImageOps.limits` for colour scaling.
+Two kinds of object in this package mean "an :class:`ImageData`, seen from a
+particular angle":
 
-New families do not require touching :class:`ImageData` (and certainly not its base
-classes): define a subclass and register it::
+- a **capability view** — ``ImageData.smooth``, ``.psf``, ``.compose``, ``.adaptive``
+  — which exposes one family of operations (all of them derive from
+  :class:`ImageOps`);
+- a **result that is also an image** — :class:`~pynbodyext.plot.image.adaptive.AdaptiveMap`,
+  whose painted map is an ``ImageData``.
+
+Both need the image's geometry, units and labels, so that forwarding lives here,
+once, in :class:`ImageDataView`.  Subclasses only add what is theirs.
+
+New capability families do not require touching :class:`ImageData` (and certainly
+not its base classes): define a subclass and register it::
 
     from pynbodyext.plot.image import ImageData, ImageOps
 
@@ -33,7 +39,7 @@ if TYPE_CHECKING:
 
     from .data import ImageData
 
-__all__ = ["OPERATIONS", "ImageOps", "register_ops"]
+__all__ = ["OPERATIONS", "ImageDataView", "ImageOps", "register_ops"]
 
 #: Registered capability views, keyed by the attribute they answer to.
 OPERATIONS: dict[str, type[ImageOps]] = {}
@@ -65,22 +71,26 @@ def register_ops(name: str, view: type[ImageOps] | None = None, *, overwrite: bo
 
 
 @dataclass(frozen=True)
-class ImageOps:
-    """Base class for the capability views of an image.
+class ImageDataView:
+    """An :class:`ImageData` seen from one angle, forwarding its data and metadata.
 
-    Subclasses implement one family of operations; this class gives them the
-    image's geometry and metadata, plus the two helpers a plugin needs.
+    The view holds the image as :attr:`image` and re-exposes what every view is
+    asked for — values, shape, geometry, units, labels — so subclasses (capability
+    views, :class:`AdaptiveMap`) declare only the attributes that are their own.
+    Forwards :meth:`add_colorbar` as well, since it always applies to the image
+    behind the view.
+
+    Attributes are read-only: writing to a view is not how anything here is
+    meant to work.
 
     Examples
     --------
-    >>> ops = SomeOps(image)  # doctest: +SKIP
-    >>> ops.shape == image.shape  # doctest: +SKIP
+    >>> view = ImageDataView(image)  # doctest: +SKIP
+    >>> (view.shape, view.extent) == (image.shape, image.extent)  # doctest: +SKIP
     True
     """
 
     image: ImageData
-
-    # ---- geometry and metadata, so a plugin never reaches into ImageData ----
 
     @property
     def data(self) -> np.ndarray:
@@ -91,6 +101,11 @@ class ImageOps:
     def shape(self) -> tuple[int, int]:
         """Shape of the image."""
         return self.image.shape
+
+    @property
+    def ndim(self) -> int:
+        """Number of dimensions: always 2."""
+        return self.image.ndim
 
     @property
     def extent(self) -> tuple[float, float, float, float] | None:
@@ -106,6 +121,36 @@ class ImageOps:
     def y_edges(self) -> np.ndarray | None:
         """Bin edges along y."""
         return self.image.y_edges
+
+    @property
+    def x_centers(self) -> np.ndarray:
+        """Centre of every column."""
+        return self.image.x_centers
+
+    @property
+    def y_centers(self) -> np.ndarray:
+        """Centre of every row."""
+        return self.image.y_centers
+
+    @property
+    def x_uniform(self) -> bool:
+        """Whether the columns are evenly spaced."""
+        return self.image.x_uniform
+
+    @property
+    def y_uniform(self) -> bool:
+        """Whether the rows are evenly spaced."""
+        return self.image.y_uniform
+
+    @property
+    def uniform(self) -> bool:
+        """Whether both axes are evenly spaced."""
+        return self.image.uniform
+
+    @property
+    def pixel_size(self) -> tuple[float, float]:
+        """Size of one pixel as ``(dy, dx)``, in the units of the axes."""
+        return self.image.pixel_size
 
     @property
     def x_units(self) -> Any:
@@ -137,17 +182,30 @@ class ImageOps:
         """Units of the values."""
         return self.image.units
 
-    @property
-    def uniform(self) -> bool:
-        """Whether both axes are evenly spaced."""
-        return self.image.uniform
+    def add_colorbar(self, mappable: Any = None, ax: Any = None, **kwargs: Any) -> Any:
+        """Dock a colour bar to the panel showing the image behind this view.
 
-    @property
-    def pixel_size(self) -> tuple[float, float]:
-        """Size of one pixel as ``(dy, dx)``, in the units of the axes."""
-        return self.image.pixel_size
+        Shorthand for :func:`~pynbodyext.plot.image.display.add_colorbar`; with no
+        *mappable*, the artist drawn from the image in *ax* is used.
+        """
+        from .display import add_colorbar  # local import: keeps this module free of display
 
-    # ---- what a plugin actually needs ----
+        return add_colorbar(self.image if mappable is None else mappable, ax=ax, **kwargs)
+
+
+@dataclass(frozen=True)
+class ImageOps(ImageDataView):
+    """Base class for the capability views of an image.
+
+    Subclasses implement one family of operations; on top of the image metadata
+    forwarded by :class:`ImageDataView`, this adds the two helpers a family needs.
+
+    Examples
+    --------
+    >>> ops = SomeOps(image)  # doctest: +SKIP
+    >>> ops.shape == image.shape  # doctest: +SKIP
+    True
+    """
 
     def derive(self, data: Any, op_name: str, params: dict[str, Any] | None = None, **overrides: Any) -> ImageData:
         """Return a new image carrying *data*, recording *op_name* in ``.ops``.
