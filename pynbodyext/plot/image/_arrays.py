@@ -14,6 +14,7 @@ __all__ = [
     "FWHM_PER_SIGMA",
     "as_2d",
     "as_pair",
+    "aligned_values",
     "bin_centers",
     "checked_edges",
     "edges_are_uniform",
@@ -95,7 +96,7 @@ def validity_mask(data: np.ndarray, mask: Any) -> np.ndarray:
         return valid
     extra = np.asarray(mask, dtype=bool)
     if extra.shape != data.shape:
-        raise ValueError(f"mask must have shape {data.shape}, got {extra.shape}.")
+        raise ValueError(shape_hint(data.shape, extra.shape, name="mask"))
     return valid & extra
 
 
@@ -111,6 +112,19 @@ def masked_filter(data: np.ndarray, valid: np.ndarray, apply: Any) -> np.ndarray
     averaged = np.full(data.shape, np.nan)
     np.divide(numerator, denominator, out=averaged, where=denominator > 0.0)
     return np.where(valid, averaged, np.nan)
+
+
+def aligned_values(value: Any) -> np.ndarray:
+    """Values of anything image-like, in the image's own orientation.
+
+    A binned array is ``(x, y)`` while an image is ``(row=y, column=x)``, so this is
+    the single place that asks :func:`~pynbodyext.plot.image.data.as_image` to sort
+    that out — used by every method that takes a second map (a signal, a noise map,
+    a mask, the other side of a composite).
+    """
+    from .data import as_image  # local import: data.py imports this module
+
+    return np.asarray(as_image(value).data, dtype=float)
 
 
 # ---------------------------------------------------------------------------

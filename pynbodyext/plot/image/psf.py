@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from scipy import signal
 
-from ._arrays import as_2d, as_pair, masked_filter, resolve_sigma, validity_mask
+from ._arrays import aligned_values, as_2d, as_pair, masked_filter, resolve_sigma, validity_mask
 from .ops import ImageOps, register_ops
 
 if TYPE_CHECKING:
@@ -371,7 +371,7 @@ class PsfOps(ImageOps):
             sigma=sigma,
             mode=mode,
             method=method,
-            mask=mask,
+            mask=None if mask is None else aligned_values(mask),
             normalize=normalize,
             pixel_scale=self.kernel_scale(),
             **psf_kwargs,
@@ -382,12 +382,20 @@ class PsfOps(ImageOps):
 
     def wiener(self, psf: Any, *, balance: float = 1e-2, mask: Any = None) -> ImageData:
         """Undo a blur with a Wiener filter; see :func:`wiener_deconvolve`."""
-        restored = wiener_deconvolve(self.image.data, psf, balance=balance, mask=mask)
+        restored = wiener_deconvolve(
+            self.image.data, psf, balance=balance, mask=None if mask is None else aligned_values(mask)
+        )
         return self.image._derived(restored, "wiener_deconvolve", {"balance": balance, "mask": mask})
 
     def richardson_lucy(self, psf: Any, *, iterations: int = 10, epsilon: float = 1e-12, mask: Any = None) -> ImageData:
         """Undo a blur iteratively; see :func:`richardson_lucy`."""
-        restored = richardson_lucy(self.image.data, psf, iterations=iterations, epsilon=epsilon, mask=mask)
+        restored = richardson_lucy(
+            self.image.data,
+            psf,
+            iterations=iterations,
+            epsilon=epsilon,
+            mask=None if mask is None else aligned_values(mask),
+        )
         return self.image._derived(restored, "richardson_lucy", {"iterations": iterations, "mask": mask})
 
     def deconvolve(self, psf: Any, *, method: str = "wiener", **kwargs: Any) -> ImageData:

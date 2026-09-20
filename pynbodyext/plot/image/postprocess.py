@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from scipy import ndimage
 
-from ._arrays import as_2d, as_pair, masked_filter, resolve_sigma, validity_mask, value_limits
+from ._arrays import aligned_values, as_2d, as_pair, masked_filter, resolve_sigma, validity_mask, value_limits
 from .ops import ImageOps, register_ops
 
 if TYPE_CHECKING:
@@ -290,6 +290,11 @@ def _factor_pair(factor: Any) -> tuple[int, int]:
     return (pair, pair) if isinstance(pair, int) else pair
 
 
+def _mask(mask: Any) -> np.ndarray | None:
+    """Bring a mask into image orientation, accepting a binned array as well."""
+    return None if mask is None else aligned_values(mask)
+
+
 @dataclass(frozen=True)
 class SmoothOps(ImageOps):
     """The smoothing family of an image: ``image.smooth.gaussian(fwhm=2)``.
@@ -306,7 +311,13 @@ class SmoothOps(ImageOps):
     ) -> ImageData:
         """Smooth with a Gaussian kernel; see :func:`gaussian_smooth`."""
         smoothed = gaussian_smooth(
-            self.image.data, sigma, fwhm=fwhm, truncate=truncate, mode=mode, mask=mask, pixel_scale=self.kernel_scale()
+            self.image.data,
+            sigma,
+            fwhm=fwhm,
+            truncate=truncate,
+            mode=mode,
+            mask=_mask(mask),
+            pixel_scale=self.kernel_scale(),
         )
         return self.image._derived(
             smoothed,
@@ -316,12 +327,12 @@ class SmoothOps(ImageOps):
 
     def box(self, size: Any = 3, *, mode: str = "reflect", mask: Any = None) -> ImageData:
         """Smooth with a top-hat kernel; see :func:`box_smooth`."""
-        smoothed = box_smooth(self.image.data, size, mode=mode, mask=mask)
+        smoothed = box_smooth(self.image.data, size, mode=mode, mask=_mask(mask))
         return self.image._derived(smoothed, "box_smooth", {"size": size, "mode": mode, "mask": mask})
 
     def median(self, size: Any = 3, *, mode: str = "nearest", mask: Any = None) -> ImageData:
         """Median-filter the image; see :func:`median_filter`."""
-        filtered = median_filter(self.image.data, size, mode=mode, mask=mask)
+        filtered = median_filter(self.image.data, size, mode=mode, mask=_mask(mask))
         return self.image._derived(filtered, "median_filter", {"size": size, "mode": mode, "mask": mask})
 
     def downsample(self, factor: Any = 2, *, func: str = "mean") -> ImageData:

@@ -31,7 +31,7 @@ from typing import Any
 
 import numpy as np
 
-from ._arrays import shape_hint, value_limits
+from ._arrays import aligned_values, shape_hint, value_limits
 from .cmaps import get_cmap, to_rgba
 from .display import add_colorbar
 from .ops import ImageOps, register_ops
@@ -462,9 +462,7 @@ def _values(value: Any) -> np.ndarray:
     :func:`~pynbodyext.plot.image.data.as_image`), so ``image.compose(bins.s[q])``
     lines up instead of silently turning the map on its side.
     """
-    from .data import as_image  # local import: data.py composes this module
-
-    return np.asarray(as_image(value).data, dtype=float)
+    return aligned_values(value)
 
 
 register_ops("compose", ComposeOps)

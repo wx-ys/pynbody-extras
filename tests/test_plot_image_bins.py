@@ -186,6 +186,28 @@ def test_with_data_hints_at_a_transposed_grid() -> None:
         velocity.with_data(np.asarray(bins["mass.sum"]))
 
 
+def test_masks_can_be_taken_from_an_image() -> None:
+    pytest.importorskip("powerbin")
+    bins = make_bins(make_sim())
+    velocity = ImageData.from_bins(bins, "vz.mean")
+    mask = ImageData.from_bins(bins, "mass.sum").data > 0.0  # already image-oriented
+
+    blurred = velocity.psf.convolve(fwhm=2.0, mask=mask)
+
+    assert blurred.shape == velocity.shape
+    assert bool(np.isfinite(blurred.data).any())
+
+
+def test_a_mask_cut_from_a_binned_array_gets_the_orientation_hint() -> None:
+    """Comparing a BinsArray drops its type, so only the hint can save the user."""
+    bins = make_bins(make_sim())
+    velocity = ImageData.from_bins(bins, "vz.mean")
+    mask = bins["mass.sum"] > 0.0  # a plain (x, y) array by now
+
+    with pytest.raises(ValueError, match="transpos"):
+        velocity.smooth.box(size=3, mask=mask)
+
+
 # ---------------------------------------------------------------------------
 # BinNDResult.imshow delegates to the image layer
 # ---------------------------------------------------------------------------

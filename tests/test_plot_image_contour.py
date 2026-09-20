@@ -144,3 +144,21 @@ def test_adaptive_map_can_contour_its_painted_map() -> None:
         assert artist in ax.collections
     finally:
         plt.close(fig)
+
+
+def test_adaptive_map_contours_can_be_made_symmetric() -> None:
+    pytest.importorskip("powerbin")
+    rng = np.random.default_rng(2)
+    value = blob()
+    signal = ImageData(rng.uniform(1.0, 10.0, value.shape), extent=value.extent)
+    binned = value.adaptive.bin(signal, target_nbins=5)
+
+    fig, ax = plt.subplots()
+    try:
+        artist = binned.contour(ax=ax, symmetric=True, count=3)
+
+        assert artist.levels.size == 7
+        assert artist.levels[0] == pytest.approx(-artist.levels[-1])
+        assert 0.0 in artist.levels
+    finally:
+        plt.close(fig)

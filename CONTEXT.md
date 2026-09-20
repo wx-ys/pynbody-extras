@@ -170,6 +170,9 @@ object a caller normally holds.
   `bins.s["count"]` means what it looks like. A *raw* array cannot be told apart
   from an image, so when its shape is the transpose of the image's, the error says
   exactly that instead of failing obscurely (silent when the grid is square).
+  The rule holds for the **methods** (signals, noise maps, masks, the other side of
+  a composite): they accept an image-like input. The free functions underneath take
+  arrays you have already oriented, which is the array-level contract.
 - **`BinNDResult.imshow`** (`core/calculate/bins/plot.py`) — a one-line bridge:
   it builds `ImageData.from_bins(self, query)` and calls `.draw()`. A bin grid is
   `(x, y)` and an image is `(row=y, column=x)`, so `from_bins` transposes; uneven

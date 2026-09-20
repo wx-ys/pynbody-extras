@@ -38,7 +38,7 @@ import numpy as np
 
 from pynbodyext.util.deps import POWERBIN_AVAILABLE
 
-from ._arrays import bin_centers, resolve_edges, shape_hint, typical_width
+from ._arrays import aligned_values, bin_centers, resolve_edges, shape_hint, typical_width
 from .ops import ImageDataView, ImageOps, register_ops
 
 if TYPE_CHECKING:
@@ -153,7 +153,7 @@ class AdaptiveMap(ImageDataView):
             kwargs["vmin"], kwargs["vmax"] = -limit, limit
         return self.image.draw(ax=ax, **kwargs)
 
-    def contour(self, ax: Any = None, *, symmetric: bool = False, **kwargs: Any) -> Any:
+    def contour(self, ax: Any = None, *, symmetric: bool = False, count: int = 6, **kwargs: Any) -> Any:
         """Draw contours of the painted map; see :meth:`ImageData.contour`.
 
         Parameters
@@ -163,6 +163,8 @@ class AdaptiveMap(ImageDataView):
         symmetric : bool, default: False
             Suggest levels symmetric about zero — the right choice for a velocity
             map.  Ignored if ``levels`` is given explicitly.
+        count : int, default: 6
+            How many levels on each side of zero when *symmetric* is set.
         **kwargs
             Forwarded to :meth:`ImageData.contour`, e.g. ``levels``, ``filled``,
             ``colors``, ``colorbar``.
@@ -174,8 +176,7 @@ class AdaptiveMap(ImageDataView):
         """
         if symmetric and "levels" not in kwargs:
             limit = float(np.nanmax(np.abs(self.value)))
-            levels = int(kwargs.pop("count", 6))
-            kwargs["levels"] = np.linspace(-limit, limit, 2 * levels + 1)
+            kwargs["levels"] = np.linspace(-limit, limit, 2 * count + 1)
         return self.image.contour(ax=ax, **kwargs)
 
 
@@ -524,7 +525,7 @@ class AdaptiveOps(ImageOps):
             target_capacity=target_capacity,
             target_signal=target_signal,
             target_nbins=target_nbins,
-            mask=mask,
+            mask=None if mask is None else aligned_values(mask),
             min_signal=min_signal,
             method=method,
             x_edges=self.x_edges,
@@ -543,9 +544,7 @@ class AdaptiveOps(ImageOps):
 
 def _as_map_data(value: Any) -> np.ndarray:
     """Values of anything image-like, transposing a binned array on the way."""
-    from .data import as_image  # local import: data.py composes this module
-
-    return np.asarray(as_image(value).data, dtype=float)
+    return aligned_values(value)
 
 
 register_ops("adaptive", AdaptiveOps)
