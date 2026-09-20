@@ -70,6 +70,13 @@ version = {attr = "pynbodyext.__version__"}
 
 chunk = ["dask"]
 
+# 2-D image post-processing and visualization (`pynbodyext.plot.image`).
+# `scipy` already comes with pynbody; `powerbin` powers the adaptive
+# (centroidal power diagram) binning in `pynbodyext.plot.image.adaptive`.
+image = [
+    "powerbin>=1.1",
+]
+
 # Relational database result store (SQLAlchemy-backed adapter).
 store = [
     "sqlalchemy>=2.0",
