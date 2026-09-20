@@ -35,6 +35,7 @@ from ._arrays import aligned_values, shape_hint, value_limits
 from .cmaps import get_cmap, to_rgba
 from .display import add_colorbar
 from .ops import ImageOps, register_ops
+from .postprocess import STRETCHES
 
 __all__ = ["ComposeOps", "MapStyle", "blend_images", "blend_stack", "compose_maps", "create_map_mask", "imshow_compose"]
 
@@ -73,6 +74,12 @@ class MapStyle:
     stretch: str = "linear"
     percentiles: tuple[float, float] | None = None
     bad: Any = None
+
+    def __post_init__(self) -> None:
+        if self.stretch not in STRETCHES:
+            raise ValueError(f"Unknown stretch {self.stretch!r}; choose from {', '.join(STRETCHES)}.")
+        if self.percentiles is not None and self.percentiles[0] > self.percentiles[1]:
+            raise ValueError(f"percentiles must be increasing, got {self.percentiles!r}.")
 
     def limits(self, data: Any) -> tuple[float, float]:
         """The value limits this style uses for *data*, colour bar included."""

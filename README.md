@@ -224,6 +224,10 @@ smoothed = density.smooth.gaussian(fwhm=1.0)        # fwhm in the units of the a
 observed = smoothed.psf.convolve(fwhm=3.0)          # what a telescope would see
 observed.imshow(cmap="inferno", colorbar=True)
 
+# ...and what the detector would do to it: seeded, maskable, recorded in .ops
+detected = observed.noise.poisson(exposure=0.05, background=2.0, rng=1)
+detected.imshow(cmap="inferno", colorbar=True)
+
 # Deconvolution goes the other way (and amplifies noise: it is a visualisation tool)
 restored = observed.psf.wiener(image.gaussian_psf(fwhm=3.0), balance=1e-6)
 

@@ -261,6 +261,16 @@ def test_map_style_rejects_nonsense() -> None:
         compose_maps(np.zeros((2, 2)), np.zeros((2, 2)), style1=42)
 
 
+def test_map_style_validates_the_stretch_at_construction() -> None:
+    with pytest.raises(ValueError, match="stretch"):
+        MapStyle(cmap="inferno", stretch="gamma")
+
+
+def test_map_style_validates_the_percentile_range() -> None:
+    with pytest.raises(ValueError, match="percentiles"):
+        MapStyle(percentiles=(99, 1))
+
+
 def test_image_data_can_compose_with_another_image() -> None:
     from pynbodyext.plot.image import ImageData
 

@@ -53,7 +53,7 @@ from the edges when only the latter are given.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
@@ -63,46 +63,12 @@ from .adaptive import AdaptiveOps
 from .cmaps import K_B_C_G_Y_R_W, to_rgba
 from .compose import ComposeOps
 from .display import _unit_text, add_colorbar, draw_contour, draw_image, draw_imshow, draw_pcolormesh
-from .ops import OPERATIONS, ImageOps, register_ops
+from .noise import NoiseOps
+from .ops import OPERATIONS, ImageOp, ImageOps, register_ops
 from .postprocess import SmoothOps, normalize
 from .psf import PsfOps
 
 __all__ = ["ImageData", "ImageOp", "OPERATIONS", "as_image", "register_ops"]
-
-
-def _describe(value: Any) -> str:
-    """Compact rendering of one recorded operation parameter."""
-    if isinstance(value, np.ndarray):
-        return f"<array {value.shape}>"
-    if isinstance(value, ImageData):
-        return f"<ImageData {value.shape}>"
-    return repr(value)
-
-
-@dataclass(frozen=True)
-class ImageOp:
-    """One operation applied to an image, recorded for provenance.
-
-    Parameters
-    ----------
-    name : str
-        Name of the free function that did the work, e.g. ``"gaussian_smooth"``.
-    params : dict
-        The arguments it was called with; treat as read-only.
-
-    Examples
-    --------
-    >>> op = ImageOp("gaussian_smooth", {"fwhm": 2.0})
-    >>> repr(op)
-    'gaussian_smooth(fwhm=2.0)'
-    """
-
-    name: str
-    params: dict[str, Any] = field(default_factory=dict)
-
-    def __repr__(self) -> str:
-        arguments = ", ".join(f"{key}={_describe(value)}" for key, value in self.params.items())
-        return f"{self.name}({arguments})"
 
 
 @dataclass(frozen=True)
@@ -295,6 +261,11 @@ class ImageData:
     def adaptive(self) -> AdaptiveOps:
         """Adaptive binning: ``image.adaptive.bin(signal, target_nbins=200)``."""
         return AdaptiveOps(self)
+
+    @property
+    def noise(self) -> NoiseOps:
+        """Noise family: ``image.noise.gaussian(snr=20)`` / ``.poisson(exposure=…)``."""
+        return NoiseOps(self)
 
     # ------------------------------------------------------------------
     # display
@@ -575,6 +546,8 @@ class ImageData:
         if bins is None:
             raise TypeError(f"from_bins_array needs a binned array, got {type(array).__name__}.")
         axes = bins.axes
+        if len(axes) != 2:
+            raise ValueError(f"from_bins_array needs a 2-D binned result, got {len(axes)} axes.")
         edges = [_axis_edges(axis, index) for index, axis in enumerate(axes)]
         return cls(
             data=np.asarray(array.grid).T,  # (x, y) grid -> (row=y, column=x)

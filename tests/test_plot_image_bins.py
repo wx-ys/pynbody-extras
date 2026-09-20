@@ -209,6 +209,41 @@ def test_a_mask_cut_from_a_binned_array_gets_the_orientation_hint() -> None:
 
 
 # ---------------------------------------------------------------------------
+# the bridge, discoverable from the binned array itself
+# ---------------------------------------------------------------------------
+
+
+def test_a_binned_array_can_hand_over_its_image() -> None:
+    bins = make_bins(make_sim())
+
+    image = bins["mass.sum"].image
+
+    assert isinstance(image, ImageData)
+    assert image.shape == bins.shape_bins[::-1]
+    np.testing.assert_allclose(image.data, np.asarray(bins["mass.sum"].grid).T)
+    assert image.x_units == "kpc"
+    assert image.units == bins["mass.sum"].units
+
+
+def test_the_binned_image_can_be_drawn_directly() -> None:
+    import matplotlib.pyplot as plt
+
+    bins = make_bins(make_sim())
+
+    artist = bins["mass.sum"].image.draw(colorbar=True)
+
+    assert len(artist.figure.axes) == 2
+    plt.close(artist.figure)
+
+
+def test_a_one_dimensional_binned_array_has_no_image() -> None:
+    bins_1d = Bin1D("r", vmin=1.0, vmax=50.0, nbins=5, alias="R")(make_sim())
+
+    with pytest.raises(ValueError, match="2-D"):
+        _ = bins_1d["count"].image
+
+
+# ---------------------------------------------------------------------------
 # BinNDResult.imshow delegates to the image layer
 # ---------------------------------------------------------------------------
 

@@ -29,20 +29,55 @@ not its base classes): define a subclass and register it::
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+
+import numpy as np
 
 from ._arrays import value_limits
 
 if TYPE_CHECKING:
-    import numpy as np
-
     from .data import ImageData
 
-__all__ = ["OPERATIONS", "ImageDataView", "ImageOps", "register_ops"]
+__all__ = ["OPERATIONS", "ImageDataView", "ImageOp", "ImageOps", "register_ops"]
 
 #: Registered capability views, keyed by the attribute they answer to.
 OPERATIONS: dict[str, type[ImageOps]] = {}
+
+
+def _describe(value: Any) -> str:
+    """Compact rendering of one recorded operation parameter."""
+    if isinstance(value, np.ndarray):
+        return f"<array {value.shape}>"
+    if hasattr(value, "shape") and hasattr(value, "extent") and hasattr(value, "data"):
+        return f"<ImageData {value.shape}>"  # an image passed as an argument
+    return repr(value)
+
+
+@dataclass(frozen=True)
+class ImageOp:
+    """One operation applied to an image, recorded for provenance.
+
+    Parameters
+    ----------
+    name : str
+        Name of the free function that did the work, e.g. ``"gaussian_smooth"``.
+    params : dict
+        The arguments it was called with; treat as read-only.
+
+    Examples
+    --------
+    >>> op = ImageOp("gaussian_smooth", {"fwhm": 2.0})
+    >>> repr(op)
+    'gaussian_smooth(fwhm=2.0)'
+    """
+
+    name: str
+    params: dict[str, Any] = field(default_factory=dict)
+
+    def __repr__(self) -> str:
+        arguments = ", ".join(f"{key}={_describe(value)}" for key, value in self.params.items())
+        return f"{self.name}({arguments})"
 
 
 def register_ops(name: str, view: type[ImageOps] | None = None, *, overwrite: bool = False) -> Any:

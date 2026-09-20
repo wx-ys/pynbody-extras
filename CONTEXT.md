@@ -110,6 +110,9 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   decided by the type (`as_image` transposes a `BinsArray`), so
   `adaptive.bin(bins.s["count"])` means what it looks like, and a raw transposed
   grid is named in the error.
+- [ADR-0008](docs/adr/0008-image-noise-models.md): two explicit, seeded noise
+  models — Gaussian (`sigma` or `snr`) and Poisson (`exposure`, `background`) —
+  rather than hidden noise in the display path.
 
 ## Image layer (`pynbodyext/plot/image/`)
 
@@ -149,6 +152,9 @@ object a caller normally holds.
   adds a capability family through the registry, so a new processing stage is a new
   module and a registration — no base-class list to edit
   (`ImageData.operations()` lists what is registered).
+- **`ImageOp`** (`plot/image/ops.py`, next to the views and the registry) — one
+  recorded step of a chain (`name`, `params`), appended to `ImageData.ops` by every
+  processing method and summarised by `repr(image)`.
 - Methods that produce an image return a new
   `ImageData` — geometry and units intact — with the call appended to
   **`ops`** (`tuple[ImageOp, ...]`, `ImageOp(name, params)`), which is what
@@ -178,6 +184,9 @@ object a caller normally holds.
   `(x, y)` and an image is `(row=y, column=x)`, so `from_bins` transposes; uneven
   bins therefore come out as a `pcolormesh` rather than being forced onto a
   regular pixel grid. No image drawing is implemented in the calculator layer.
+  The same bridge is reachable from the array itself: `bins2d["mass.sum"].image`
+  (a `BinsArray` property) hands back the `ImageData`, so
+  `bins2d["mass.sum"].image.draw()` or `.contour(ax=ax)` need no further import.
 - **Adaptive bin map** (`AdaptiveMap`, `plot/image/adaptive.py`) — a partition of
   a map into regions of comparable *capacity* made with PowerBin (centroidal
   power diagrams, the successor of Voronoi binning). The capacity is the
@@ -205,3 +214,10 @@ object a caller normally holds.
   applies it (forward direction, for comparing a model to data), and
   `wiener_deconvolve` / `richardson_lucy` invert it (visualisation only — they
   amplify noise).
+- **Noise** (`plot/image/noise.py`, `image.noise.*`) — what the map looks like once
+  it is *counted*. `noise.gaussian(sigma=… | snr=…)` adds Gaussian white noise (a
+  scalar or per-pixel σ map, or σ = |data| / snr), and
+  `noise.poisson(exposure=…, background=…)` samples counting noise at a given
+  exposure (bigger = deeper; variance `(data + background) / exposure`). Both are
+  seeded (`rng=`), leave non-finite pixels alone, honour a mask, and record what
+  they did in `.ops`.
