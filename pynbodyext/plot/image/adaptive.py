@@ -40,7 +40,7 @@ from pynbodyext.util.deps import POWERBIN_AVAILABLE
 
 from ._arrays import aligned_values, bin_centers, resolve_edges, shape_hint, typical_width
 from .display import DisplayOps
-from .ops import ImageDataView, ImageOps, register_ops
+from .ops import ImageDataView, ImageOps
 
 if TYPE_CHECKING:
     from .data import ImageData
@@ -429,7 +429,7 @@ def adaptive_map_from_bins(
 
 @dataclass(frozen=True)
 class AdaptiveOps(ImageOps):
-    """The adaptive-binning family of an image: ``image.adaptive.bin(signal, …)``."""
+    """The adaptive-binning family of an image: ``image.postprocess.adaptive.bin(signal, …)``."""
 
     def bin(
         self,
@@ -497,6 +497,3 @@ class AdaptiveOps(ImageOps):
 def _as_map_data(value: Any) -> np.ndarray:
     """Values of anything image-like, transposing a binned array on the way."""
     return aligned_values(value)
-
-
-register_ops("adaptive", AdaptiveOps)

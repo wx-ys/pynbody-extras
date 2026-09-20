@@ -22,7 +22,7 @@ import numpy as np
 from scipy import signal
 
 from ._arrays import aligned_values, as_2d, as_pair, masked_filter, resolve_sigma, validity_mask
-from .ops import ImageOps, register_ops
+from .ops import ImageOps
 
 if TYPE_CHECKING:
     from .data import ImageData
@@ -331,7 +331,7 @@ def deconvolve_psf(image: Any, psf: Any, *, method: str = "wiener", **kwargs: An
 
 @dataclass(frozen=True)
 class PsfOps(ImageOps):
-    """The observational family of an image: ``image.psf.convolve(fwhm=3)``.
+    """The observational family of an image: ``image.postprocess.psf.convolve(fwhm=3)``.
 
     Each method returns a new :class:`~pynbodyext.plot.image.data.ImageData`.  As
     with smoothing, a Gaussian width is given in the units of the axes whenever
@@ -402,6 +402,3 @@ class PsfOps(ImageOps):
         """Undo a blur with the chosen algorithm; see :func:`deconvolve_psf`."""
         restored = deconvolve_psf(self.image.data, psf, method=method, **kwargs)
         return self.image._derived(restored, "deconvolve_psf", {"method": method, **kwargs})
-
-
-register_ops("psf", PsfOps)

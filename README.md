@@ -220,22 +220,22 @@ bins2d.imshow("mass.sum", cmap="inferno", colorbar=True)
 # Or hold the map and chain: geometry and metadata survive every step, and the
 # calls are recorded in `.ops` (repr shows them)
 density = image.ImageData.from_bins(bins2d, "mass.sum")
-smoothed = density.smooth.gaussian(fwhm=1.0)        # fwhm in the units of the axes
-observed = smoothed.psf.convolve(fwhm=3.0)          # what a telescope would see
+smoothed = density.postprocess.smooth.gaussian(fwhm=1.0)        # fwhm in the units of the axes
+observed = smoothed.postprocess.psf.convolve(fwhm=3.0)          # what a telescope would see
 observed.display.imshow(cmap="inferno", colorbar=True)
 
 # ...and what the detector would do to it: seeded, maskable, recorded in .ops
-detected = observed.noise.poisson(exposure=0.05, background=2.0, rng=1)
+detected = observed.postprocess.noise.poisson(exposure=0.05, background=2.0, rng=1)
 detected.display.imshow(cmap="inferno", colorbar=True)
 
 # Deconvolution goes the other way (and amplifies noise: it is a visualisation tool)
-restored = observed.psf.wiener(image.gaussian_psf(fwhm=3.0), balance=1e-6)
+restored = observed.postprocess.psf.wiener(image.gaussian_psf(fwhm=3.0), balance=1e-6)
 
 # A velocity map: adaptive bins of equal mass, green on zero velocity
 velocity = image.ImageData.from_bins(bins2d, "vz.mean")
-binned = velocity.adaptive.bin(bins2d["mass.sum"], target_nbins=200, min_signal=1e6)
+binned = velocity.postprocess.adaptive.bin(bins2d["mass.sum"], target_nbins=200, min_signal=1e6)
 binned.display.imshow(cmap="K_B_C_G_Y_R_W", symmetric=True, colorbar="bottom")
-binned.image.smooth.box(size=3)       # the painted map is an ImageData too
+binned.image.postprocess.smooth.box(size=3)       # the painted map is an ImageData too
 # a colour bar can also be added afterwards, on the artist or on the map
 binned.display.add_colorbar(loc="left", size="4%", tick_label_size=8)
 
@@ -258,9 +258,9 @@ gas.imshow_compose(
 )
 ```
 
-Every capability is an accessor — `image.smooth.gaussian`, `image.psf.convolve`,
-`image.noise.poisson`, `image.compose(other)`, `image.adaptive.bin`,
-`image.display.imshow/contour/normalize/to_rgba` — and `ImageData` itself carries
+An image has two entry points: `image.display.*` for showing it and
+`image.postprocess.*` for working on it (`smooth.gaussian`, `psf.convolve`,
+`noise.poisson`, `compose(other)`, `adaptive.bin`) — and `ImageData` itself carries
 only what it *is* (values, geometry, units, labels, `ops`, `with_data`,
 `from_bins`). The underlying free functions (`gaussian_smooth(data, ...)`,
 `compose_maps(...)`, …) remain available for plain arrays. A new family is a new module plus
@@ -271,7 +271,7 @@ classes. The velocity colour map (black → blue → cyan → **green on zero** 
 own:
 
 ```python
-mask1, mask2 = gas.compose.masks(line_angle=45, width=0.15)
+mask1, mask2 = gas.postprocess.compose.masks(line_angle=45, width=0.15)
 blended = image.blend_images(rgb_gas, rgb_dm, mask1)
 ```
 

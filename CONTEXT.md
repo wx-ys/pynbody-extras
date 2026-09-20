@@ -103,7 +103,7 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   functions underneath — and every image drawn anywhere in the package goes
   through it.
 - [ADR-0006](docs/adr/0006-image-capabilities-are-composed-views.md): the
-  capabilities are *views* reached as properties (`image.smooth.gaussian`), found
+  capabilities are *views* reached as properties, found
   through a registry so a new family is a new module rather than a new base class,
   and colour bars are docked to their panel by one helper.
 - [ADR-0007](docs/adr/0007-image-orientation-is-type-driven.md): orientation is
@@ -114,9 +114,12 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   models — Gaussian (`sigma` or `snr`) and Poisson (`exposure`, `background`) —
   rather than hidden noise in the display path.
 - [ADR-0009](docs/adr/0009-display-is-a-family-too.md): `display` is a capability
-  family like the others (`image.display.imshow/contour/normalize/...`), so no
-  operation has a flat spelling and `ImageData` carries only what it *is*
-  (supersedes decision 4 of ADR-0006).
+  family like the others, so no operation has a flat spelling and `ImageData`
+  carries only what it *is* (supersedes decision 4 of ADR-0006).
+- [ADR-0010](docs/adr/0010-two-entry-points-display-and-postprocess.md): an image
+  has two entry points — `image.display.*` for showing it and
+  `image.postprocess.*` for working on it — with the families nested inside the
+  second.
 
 ## Image layer (`pynbodyext/plot/image/`)
 
@@ -140,11 +143,11 @@ object a caller normally holds.
   edges, `.display.draw()` to let it pick.
   `ImageData` is a single class (no capability base classes). Each family is a
   **view** — `SmoothOps`, `PsfOps`, `ComposeOps`, `AdaptiveOps` — reached as a
-  property: `image.smooth.gaussian(fwhm=2)`, `image.psf.convolve(fwhm=3)`,
-  `image.compose(other)`, `image.adaptive.bin(signal, target_nbins=200)`.
-  Single-call operations stay methods of `ImageData` itself (`normalize`,
-  `to_rgba`, `draw`, `imshow`, `pcolormesh`, `add_colorbar`), so no operation has
-  two spellings.
+  property of `image.postprocess`: `image.postprocess.smooth.gaussian(fwhm=2)`,
+  `image.postprocess.psf.convolve(fwhm=3)`, `image.postprocess.noise.poisson(...)`,
+  `image.postprocess.compose(other)`, `image.postprocess.adaptive.bin(signal)`.
+  Display is the other entry point: `image.display.normalize/to_rgba/draw/imshow/
+  pcolormesh/contour/add_colorbar`. Every operation has exactly one spelling.
 - **`ImageDataView`** (`plot/image/ops.py`) — "an `ImageData` seen from one angle":
   it holds the image and forwards its data and metadata (`data`, `shape`, `ndim`,
   `extent`, edges, centers, uniformity, `pixel_size`, units, labels) plus
@@ -164,12 +167,14 @@ object a caller normally holds.
   `ImageData` — geometry and units intact — with the call appended to
   **`ops`** (`tuple[ImageOp, ...]`, `ImageOp(name, params)`), which is what
   `repr(image)` summarises.
-- **Every capability is an accessor; `ImageData` itself carries only data.** The
-  six families are `smooth`, `psf`, `noise`, `compose`, `adaptive` and `display`,
-  and no operation has a flat spelling: `image.display.imshow(...)`,
-  `image.display.contour(...)`, `image.display.normalize(...)`. What stays on
-  `ImageData` is what it *is* — values, geometry, units, labels, `ops`,
-  `with_data`, `from_bins`/`from_bins_array`, `as_image` and the registry.
+- **Two entry points: `display` and `postprocess`.** `PostprocessOps` (in
+  `ops.py`, the module that also holds the views and the registry) exposes the five
+  families that change or measure the values; `DisplayOps` exposes the seven
+  operations that show them. So `dir(image)` is short and unambiguous —
+  `image.postprocess.smooth.gaussian(...)` versus `image.display.imshow(...)` — and
+  `ImageData` itself carries only what it *is*: values, geometry, units, labels,
+  `ops`, `with_data`, `from_bins`/`from_bins_array`/`as_image`, the registry, and
+  those two properties.
 - **Colour bars** are docked to their panel, not floated: `add_colorbar(artist |
   image, loc=…)` (also `image.display.add_colorbar(…)`, and `colorbar=True|loc` +
   `colorbar_kwargs` on `display.draw`/`imshow`/`pcolormesh`/`contour`) uses

@@ -18,9 +18,9 @@ How it is put together:
   object — :class:`~pynbodyext.plot.image.postprocess.SmoothOps`,
   :class:`~pynbodyext.plot.image.psf.PsfOps`,
   :class:`~pynbodyext.plot.image.compose.ComposeOps`,
-  :class:`~pynbodyext.plot.image.adaptive.AdaptiveOps` — reached as a property
-  (``image.smooth.gaussian(fwhm=2)``, ``image.psf.convolve(...)``,
-  ``image.compose(other, ...)``, ``image.adaptive.bin(signal, ...)``).
+  :class:`~pynbodyext.plot.image.adaptive.AdaptiveOps` — reached through
+  ``image.postprocess`` (``.smooth.gaussian(fwhm=2)``, ``.psf.convolve(...)``,
+  ``.noise.poisson(...)``, ``.compose(other)``, ``.adaptive.bin(signal)``).
 - Every view derives from :class:`~pynbodyext.plot.image.ops.ImageOps`, which
   hands it the image's geometry, :meth:`~pynbodyext.plot.image.ops.ImageOps.derive`
   (return a new image with the operation recorded) and the pixel-size helper.  A
@@ -59,13 +59,8 @@ from typing import Any
 import numpy as np
 
 from ._arrays import bin_centers, edges_are_uniform, pixel_width, resolve_edges, shape_hint
-from .adaptive import AdaptiveOps
-from .compose import ComposeOps
 from .display import DisplayOps, _unit_text
-from .noise import NoiseOps
-from .ops import OPERATIONS, ImageOp, ImageOps, register_ops
-from .postprocess import SmoothOps
-from .psf import PsfOps
+from .ops import OPERATIONS, ImageDataView, ImageOp, ImageOps, PostprocessOps, register_ops
 
 __all__ = ["ImageData", "ImageOp", "OPERATIONS", "as_image", "register_ops"]
 
@@ -226,8 +221,8 @@ class ImageData:
         return register_ops(name, view, overwrite=overwrite)
 
     @classmethod
-    def operations(cls) -> dict[str, type[ImageOps]]:
-        """The registered capability views, keyed by the attribute they answer to."""
+    def operations(cls) -> dict[str, type[ImageDataView]]:
+        """The registered views, keyed by the attribute they answer to."""
         return dict(OPERATIONS)
 
     def __getattr__(self, name: str) -> Any:
@@ -242,29 +237,9 @@ class ImageData:
     # ------------------------------------------------------------------
 
     @property
-    def smooth(self) -> SmoothOps:
-        """Smoothing family: ``image.smooth.gaussian(fwhm=2)`` and friends."""
-        return SmoothOps(self)
-
-    @property
-    def psf(self) -> PsfOps:
-        """Observational family: ``image.psf.convolve(fwhm=3)`` and friends."""
-        return PsfOps(self)
-
-    @property
-    def compose(self) -> ComposeOps:
-        """Stitching family: ``image.compose(other)`` and friends."""
-        return ComposeOps(self)
-
-    @property
-    def adaptive(self) -> AdaptiveOps:
-        """Adaptive binning: ``image.adaptive.bin(signal, target_nbins=200)``."""
-        return AdaptiveOps(self)
-
-    @property
-    def noise(self) -> NoiseOps:
-        """Noise family: ``image.noise.gaussian(snr=20)`` / ``.poisson(exposure=…)``."""
-        return NoiseOps(self)
+    def postprocess(self) -> PostprocessOps:
+        """Everything that changes the values: ``image.postprocess.smooth.gaussian(…)``."""
+        return PostprocessOps(self)
 
     @property
     def display(self) -> DisplayOps:

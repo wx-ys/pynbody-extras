@@ -24,7 +24,7 @@ import numpy as np
 from scipy import ndimage
 
 from ._arrays import aligned_values, as_2d, as_pair, masked_filter, resolve_sigma, validity_mask, value_limits
-from .ops import ImageOps, register_ops
+from .ops import ImageOps
 
 if TYPE_CHECKING:
     from .data import ImageData
@@ -344,6 +344,3 @@ class SmoothOps(ImageOps):
             overrides["x_edges"] = self.image.x_edges[::factor_x]
             overrides["y_edges"] = self.image.y_edges[::factor_y]
         return self.image._derived(reduced, "downsample", {"factor": factor, "func": func}, **overrides)
-
-
-register_ops("smooth", SmoothOps)

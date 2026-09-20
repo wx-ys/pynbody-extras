@@ -21,6 +21,7 @@ EXPECTED_NAMES = {
     "MapStyle",
     "NoiseOps",
     "OPERATIONS",
+    "PostprocessOps",
     "STRETCHES",
     "add_colorbar",
     "add_noise",

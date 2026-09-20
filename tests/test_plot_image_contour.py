@@ -133,7 +133,7 @@ def test_adaptive_map_can_contour_its_painted_map() -> None:
     value = blob()
     signal = ImageData(rng.uniform(1.0, 10.0, value.shape), extent=value.extent)
 
-    binned = value.adaptive.bin(signal, target_nbins=5)
+    binned = value.postprocess.adaptive.bin(signal, target_nbins=5)
 
     fig, ax = plt.subplots()
     try:
@@ -151,7 +151,7 @@ def test_adaptive_map_contours_can_be_made_symmetric() -> None:
     rng = np.random.default_rng(2)
     value = blob()
     signal = ImageData(rng.uniform(1.0, 10.0, value.shape), extent=value.extent)
-    binned = value.adaptive.bin(signal, target_nbins=5)
+    binned = value.postprocess.adaptive.bin(signal, target_nbins=5)
 
     fig, ax = plt.subplots()
     try:

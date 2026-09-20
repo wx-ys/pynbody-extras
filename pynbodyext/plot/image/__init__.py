@@ -42,7 +42,7 @@ from .compose import MapStyle, blend_images, blend_stack, compose_maps, create_m
 from .data import OPERATIONS, ImageData, ImageOp, as_image, register_ops
 from .display import COLORBAR_LOCATIONS, DisplayOps, add_colorbar
 from .noise import NoiseOps, add_noise, add_poisson_noise
-from .ops import ImageDataView, ImageOps
+from .ops import ImageDataView, ImageOps, PostprocessOps
 from .postprocess import STRETCHES, box_smooth, downsample, gaussian_smooth, median_filter, normalize
 from .psf import convolve_psf, deconvolve_psf, gaussian_psf, normalize_psf, richardson_lucy, wiener_deconvolve
 
@@ -60,6 +60,7 @@ __all__ = [
     "MapStyle",
     "NoiseOps",
     "OPERATIONS",
+    "PostprocessOps",
     "STRETCHES",
     "add_colorbar",
     "add_noise",

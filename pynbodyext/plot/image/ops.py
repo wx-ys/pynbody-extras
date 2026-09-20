@@ -37,12 +37,17 @@ import numpy as np
 from ._arrays import value_limits
 
 if TYPE_CHECKING:
+    from .adaptive import AdaptiveOps
+    from .compose import ComposeOps
     from .data import ImageData
+    from .noise import NoiseOps
+    from .postprocess import SmoothOps
+    from .psf import PsfOps
 
-__all__ = ["OPERATIONS", "ImageDataView", "ImageOp", "ImageOps", "register_ops"]
+__all__ = ["OPERATIONS", "ImageDataView", "ImageOp", "ImageOps", "PostprocessOps", "register_ops"]
 
-#: Registered capability views, keyed by the attribute they answer to.
-OPERATIONS: dict[str, type[ImageOps]] = {}
+#: Registered views, keyed by the attribute they answer to.
+OPERATIONS: dict[str, type[ImageDataView]] = {}
 
 
 def _describe(value: Any) -> str:
@@ -80,22 +85,24 @@ class ImageOp:
         return f"{self.name}({arguments})"
 
 
-def register_ops(name: str, view: type[ImageOps] | None = None, *, overwrite: bool = False) -> Any:
-    """Register *view* as the capability answering to ``image.<name>``.
+def register_ops(name: str, view: type[ImageDataView] | None = None, *, overwrite: bool = False) -> Any:
+    """Register *view* as the view answering to ``image.<name>``.
 
     Usable as a decorator (``@ImageData.register_ops("name")``) or as a call.
+    A capability family registers an :class:`ImageOps` subclass; a container of
+    families (like :class:`PostprocessOps`) registers an :class:`ImageDataView`.
 
     Raises
     ------
     KeyError
         If *name* is taken and *overwrite* is false.
     TypeError
-        If *view* is not an :class:`ImageOps` subclass.
+        If *view* is not an :class:`ImageDataView` subclass.
     """
 
-    def register(view_class: type[ImageOps]) -> type[ImageOps]:
-        if not (isinstance(view_class, type) and issubclass(view_class, ImageOps)):
-            raise TypeError(f"{view_class!r} must be an ImageOps subclass.")
+    def register(view_class: type[ImageDataView]) -> type[ImageDataView]:
+        if not (isinstance(view_class, type) and issubclass(view_class, ImageDataView)):
+            raise TypeError(f"{view_class!r} must be an ImageDataView (or ImageOps) subclass.")
         existing = OPERATIONS.get(name)
         if existing is not None and existing is not view_class and not overwrite:
             raise KeyError(f"A capability named {name!r} is already registered; pass overwrite=True to replace it.")
@@ -247,3 +254,59 @@ class ImageOps(ImageDataView):
             return self.image.pixel_size
         except ValueError:  # unevenly spaced bins: kernel widths fall back to pixels
             return None
+
+
+@dataclass(frozen=True)
+class PostprocessOps(ImageDataView):
+    """Everything that changes or measures the values: ``image.postprocess.*``.
+
+    An image has two entry points: :mod:`~pynbodyext.plot.image.display` for showing
+    it, and this one for working on it.  The families stay separate inside —
+    ``smooth``, ``psf``, ``noise``, ``compose``, ``adaptive`` — so the kind of
+    processing is visible in the call, while the top level stays two buckets wide::
+
+        image.postprocess.smooth.gaussian(fwhm=2)
+        image.postprocess.psf.convolve(fwhm=3)
+        image.postprocess.noise.poisson(exposure=0.1)
+        image.postprocess.compose(other)
+        image.postprocess.adaptive.bin(signal, target_nbins=200)
+        image.display.imshow(colorbar=True)
+    """
+
+    @property
+    def smooth(self) -> SmoothOps:
+        """Smoothing family: ``image.postprocess.smooth.gaussian(fwhm=2)``."""
+        from .postprocess import SmoothOps  # local import: the family imports this module
+
+        return SmoothOps(self.image)
+
+    @property
+    def psf(self) -> PsfOps:
+        """Observational family: ``image.postprocess.psf.convolve(fwhm=3)``."""
+        from .psf import PsfOps
+
+        return PsfOps(self.image)
+
+    @property
+    def noise(self) -> NoiseOps:
+        """Noise family: ``image.postprocess.noise.gaussian(snr=20)``."""
+        from .noise import NoiseOps
+
+        return NoiseOps(self.image)
+
+    @property
+    def compose(self) -> ComposeOps:
+        """Stitching family: ``image.postprocess.compose(other)``."""
+        from .compose import ComposeOps
+
+        return ComposeOps(self.image)
+
+    @property
+    def adaptive(self) -> AdaptiveOps:
+        """Adaptive binning: ``image.postprocess.adaptive.bin(signal)``."""
+        from .adaptive import AdaptiveOps
+
+        return AdaptiveOps(self.image)
+
+
+register_ops("postprocess", PostprocessOps)

@@ -146,8 +146,8 @@ def test_poisson_noise_needs_a_positive_exposure() -> None:
 def test_the_noise_family_is_reachable_from_the_image() -> None:
     source = flat(50.0)
 
-    gaussian = source.noise.gaussian(sigma=1.0, rng=0)
-    poisson = source.noise.poisson(exposure=1.0, rng=0)
+    gaussian = source.postprocess.noise.gaussian(sigma=1.0, rng=0)
+    poisson = source.postprocess.noise.poisson(exposure=1.0, rng=0)
 
     assert isinstance(gaussian, ImageData)
     assert gaussian.shape == source.shape
@@ -162,5 +162,6 @@ def test_the_noise_family_is_reachable_from_the_image() -> None:
 def test_the_noise_family_is_registered_and_exposed() -> None:
     from pynbodyext.plot.image import OPERATIONS
 
-    assert "noise" in OPERATIONS
+    assert "postprocess" in OPERATIONS
+    assert hasattr(ImageData(np.zeros((4, 4))).postprocess, "noise")
     assert "add_noise" in __import__("pynbodyext.plot.image", fromlist=["image"]).__all__

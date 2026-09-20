@@ -67,7 +67,7 @@ def test_forwarding_is_declared_once(name: str) -> None:
 def test_views_forward_the_image_itself() -> None:
     source = image()
 
-    for view in (source.smooth, source.psf, source.compose, source.adaptive):
+    for view in (source.postprocess.smooth, source.postprocess.psf, source.postprocess.compose, source.postprocess.adaptive):
         assert view.image is source
         assert view.data is source.data
         assert view.shape == source.shape
@@ -86,7 +86,7 @@ def test_views_are_frozen() -> None:
     source = image()
 
     with pytest.raises(FrozenInstanceError):
-        source.smooth.image = image()  # type: ignore[misc]
+        source.postprocess.smooth.image = image()  # type: ignore[misc]
 
 
 def test_image_data_does_not_inherit_its_capabilities() -> None:
@@ -97,7 +97,7 @@ def test_image_data_does_not_inherit_its_capabilities() -> None:
 def test_every_capability_is_a_view_sharing_the_parent() -> None:
     source = image()
 
-    views = (source.smooth, source.psf, source.compose, source.adaptive)
+    views = (source.postprocess.smooth, source.postprocess.psf, source.postprocess.compose, source.postprocess.adaptive)
 
     assert all(isinstance(view, ImageOps) for view in views)
     for view in views:
@@ -111,12 +111,12 @@ def test_every_capability_is_a_view_sharing_the_parent() -> None:
 
 def test_views_expose_the_helpers_a_plugin_needs() -> None:
     source = image((4, 4), extent=(0.0, 8.0, 0.0, 8.0))
-    view = source.smooth
+    view = source.postprocess.smooth
 
     assert view.limits() == value_limits(source.data)
     assert view.kernel_scale() == (2.0, 2.0)
     uneven = ImageData(np.zeros((4, 4)), x_edges=[0.0, 1.0, 3.0, 6.0, 10.0], y_edges=[0.0, 1.0, 2.0, 3.0, 4.0])
-    assert uneven.smooth.kernel_scale() is None
+    assert uneven.postprocess.smooth.kernel_scale() is None
 
 
 def test_a_view_can_add_the_colour_bar_of_its_image() -> None:
@@ -148,7 +148,7 @@ def test_adaptive_map_is_a_view_of_its_painted_image() -> None:
     source = image((20, 20))
     signal = ImageData(np.ones((20, 20)), extent=(0.0, 20.0, 0.0, 20.0), label="mass.sum")
 
-    binned = source.adaptive.bin(signal, target_nbins=4)
+    binned = source.postprocess.adaptive.bin(signal, target_nbins=4)
 
     assert isinstance(binned, ImageDataView)
     assert not isinstance(binned, ImageOps)  # it is a result, not a capability
@@ -161,7 +161,7 @@ def test_adaptive_map_is_a_view_of_its_painted_image() -> None:
 
 def test_derive_returns_a_new_image_and_records_the_operation() -> None:
     source = image()
-    view = source.psf
+    view = source.postprocess.psf
 
     derived = view.derive(source.data * 2.0, "double", {"factor": 2.0})
 
@@ -214,25 +214,25 @@ def test_register_ops_works_as_a_decorator(toy_family: object) -> None:
 
 
 def test_register_ops_rejects_a_conflicting_name() -> None:
-    original = OPERATIONS["smooth"]
+    original = OPERATIONS["display"]
     try:
         with pytest.raises(KeyError, match="already registered"):
-            ImageData.register_ops("smooth", ToyOps)
+            ImageData.register_ops("display", ToyOps)
 
-        ImageData.register_ops("smooth", ToyOps, overwrite=True)
+        ImageData.register_ops("display", ToyOps, overwrite=True)
 
-        assert OPERATIONS["smooth"] is ToyOps
+        assert OPERATIONS["display"] is ToyOps
     finally:
-        OPERATIONS["smooth"] = original
+        OPERATIONS["display"] = original
 
 
 def test_register_ops_rejects_something_that_is_not_a_view() -> None:
-    with pytest.raises(TypeError, match="ImageOps"):
+    with pytest.raises(TypeError, match="ImageDataView|ImageOps"):
         register_ops("toy", dict)  # type: ignore[arg-type]
 
 
-def test_builtin_families_are_registered_for_discovery() -> None:
-    assert {"smooth", "psf", "compose", "adaptive"} <= set(OPERATIONS)
+def test_the_two_entry_points_are_registered_for_discovery() -> None:
+    assert {"display", "postprocess"} <= set(OPERATIONS)
 
 
 def test_unknown_attributes_still_raise(toy_family: object) -> None:
