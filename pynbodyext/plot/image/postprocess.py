@@ -23,14 +23,14 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from scipy import ndimage
 
-from ._arrays import as_image, as_pair, masked_filter, resolve_sigma, validity_mask
+from ._arrays import as_image, as_pair, masked_filter, resolve_sigma, validity_mask, value_limits
+from .ops import ImageOps, register_ops
 
 if TYPE_CHECKING:
     from .data import ImageData
 
 __all__ = [
     "STRETCHES",
-    "SmoothMixin",
     "SmoothOps",
     "box_smooth",
     "downsample",
@@ -247,45 +247,6 @@ def normalize(
 _REDUCERS = {"mean": np.nanmean, "sum": np.nansum, "median": np.nanmedian, "max": np.nanmax}
 
 
-def value_limits(
-    data: Any, *, vmin: float | None = None, vmax: float | None = None, percentiles: tuple[float, float] | None = None
-) -> tuple[float, float]:
-    """The ``(vmin, vmax)`` that :func:`normalize` would use for *data*.
-
-    Exposed so that anything drawing a colour bar labels the same range the image
-    was drawn with, instead of repeating the rules.
-
-    Parameters
-    ----------
-    data : array_like
-        Values to take the limits from; non-finite entries are ignored.
-    vmin, vmax : float, optional
-        Explicit limits; each falls back to the requested percentile, then to the
-        data range.
-    percentiles : (float, float), optional
-        Percentiles used for whichever of *vmin*/*vmax* is not given.
-
-    Returns
-    -------
-    tuple of float
-        ``(vmin, vmax)``.
-    """
-    array = np.asarray(data, dtype=float)
-    finite = np.isfinite(array)
-    if percentiles is not None:
-        if vmin is None:
-            vmin = float(np.nanpercentile(array, percentiles[0])) if finite.any() else 0.0
-        if vmax is None:
-            vmax = float(np.nanpercentile(array, percentiles[1])) if finite.any() else 1.0
-    if vmin is None:
-        vmin = float(np.nanmin(array)) if finite.any() else 0.0
-    if vmax is None:
-        vmax = float(np.nanmax(array)) if finite.any() else 1.0
-    if vmax < vmin:
-        raise ValueError(f"vmax ({vmax}) must not be smaller than vmin ({vmin}).")
-    return float(vmin), float(vmax)
-
-
 def downsample(data: Any, factor: Any = 2, *, func: str = "mean") -> np.ndarray:
     """Average neighbouring pixels into larger blocks.
 
@@ -330,7 +291,7 @@ def _factor_pair(factor: Any) -> tuple[int, int]:
 
 
 @dataclass(frozen=True)
-class SmoothOps:
+class SmoothOps(ImageOps):
     """The smoothing family of an image: ``image.smooth.gaussian(fwhm=2)``.
 
     Each method returns a new :class:`~pynbodyext.plot.image.data.ImageData`, so
@@ -340,21 +301,12 @@ class SmoothOps:
     in pixels otherwise.
     """
 
-    image: ImageData
-
-    def _pixel_scale(self) -> tuple[float, float] | None:
-        """Pixel size in axis units, or ``None`` when the grid has none."""
-        try:
-            return self.image.pixel_size
-        except ValueError:  # unevenly spaced bins: fall back to pixels
-            return None
-
     def gaussian(
         self, sigma: Any = None, *, fwhm: Any = None, truncate: float = 4.0, mode: str = "reflect", mask: Any = None
     ) -> ImageData:
         """Smooth with a Gaussian kernel; see :func:`gaussian_smooth`."""
         smoothed = gaussian_smooth(
-            self.image.data, sigma, fwhm=fwhm, truncate=truncate, mode=mode, mask=mask, pixel_scale=self._pixel_scale()
+            self.image.data, sigma, fwhm=fwhm, truncate=truncate, mode=mode, mask=mask, pixel_scale=self.kernel_scale()
         )
         return self.image._derived(
             smoothed,
@@ -383,10 +335,4 @@ class SmoothOps:
         return self.image._derived(reduced, "downsample", {"factor": factor, "func": func}, **overrides)
 
 
-class SmoothMixin:
-    """Gives an image its ``.smooth`` accessor."""
-
-    @property
-    def smooth(self) -> SmoothOps:
-        """Smoothing methods of this image, e.g. ``image.smooth.gaussian(fwhm=2)``."""
-        return SmoothOps(self)  # type: ignore[arg-type]
+register_ops("smooth", SmoothOps)

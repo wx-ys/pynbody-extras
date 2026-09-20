@@ -7,21 +7,27 @@ bars, and the choice between ``imshow`` and ``pcolormesh``.
 
 from __future__ import annotations
 
+import weakref
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from ._arrays import edges_are_uniform
-from .cmaps import K_B_C_G_Y_R_W, get_cmap, to_rgba
-from .postprocess import normalize
+from ._arrays import edges_are_uniform, value_limits
+from .cmaps import get_cmap
 
 if TYPE_CHECKING:
     from .data import ImageData
 
-__all__ = ["DisplayMixin"]
+__all__ = ["COLORBAR_LOCATIONS", "add_colorbar", "draw_image", "draw_imshow", "draw_pcolormesh"]
 
 #: Unit spellings that mean "no units at all", so they never reach a figure label.
 _EMPTY_UNITS = {"", "1", "NoUnit()", "dimensionless", "unitless"}
+
+#: Places :func:`add_colorbar` can dock a colour bar to.
+COLORBAR_LOCATIONS = ("right", "left", "top", "bottom")
+
+#: One divider per panel, so that several colour bars can be docked to it.
+_DIVIDERS: weakref.WeakKeyDictionary[Any, Any] = weakref.WeakKeyDictionary()
 
 
 def _unit_text(units: Any) -> str | None:
@@ -52,204 +58,293 @@ def _apply_axis_labels(ax: Any, image: ImageData) -> None:
             ax.set_ylabel(annotation)
 
 
-class DisplayMixin:
-    """Display and colour methods of :class:`~pynbodyext.plot.image.data.ImageData`.
+def add_colorbar(
+    mappable: Any = None,
+    ax: Any = None,
+    *,
+    loc: str = "right",
+    size: str = "5%",
+    pad: float = 0.05,
+    label_pad: float = 2.0,
+    tick_label_size: float = 10.0,
+    label: str | None = None,
+    cmap: Any = None,
+    vmin: float | None = None,
+    vmax: float | None = None,
+    **kwargs: Any,
+) -> Any:
+    """Dock a colour bar to the panel that holds *mappable*.
 
-    The mixin reads the image's own attributes; it holds no state of its own.
+    The colour bar is placed with ``mpl_toolkits.axes_grid1.make_axes_locatable``,
+    so it hugs the image at the requested relative *size* instead of floating at
+    matplotlib's default distance: compact, aligned with the panel, and easy to
+    control.  Tick labels and the axis label go on the outside edge for every
+    location.
+
+    Parameters
+    ----------
+    mappable : artist, ImageData or AdaptiveMap, optional
+        What to describe.  A drawn artist (``AxesImage``/``QuadMesh``/…) is used
+        exactly as it was drawn.  An image is accepted too: the artist already
+        drawn from it in *ax* is used when there is one, otherwise a colour bar is
+        built from the image's own values (with *cmap*/*vmin*/*vmax*).  ``None``
+        means "the image this method was called on".
+    ax : matplotlib.axes.Axes, optional
+        Panel to dock to; defaults to the artist's axes, then to the current axes.
+    loc : {"right", "left", "top", "bottom"}, default: "right"
+        Side of the panel to dock to; top/bottom give a horizontal bar.
+    size : str, default: "5%"
+        Thickness of the colour bar relative to the panel.
+    pad : float, default: 0.05
+        Gap between the panel and the colour bar, in inches.
+    label_pad : float, default: 2.0
+        Padding between the ticks and their labels.
+    tick_label_size : float, default: 10.0
+        Font size of the tick labels.
+    label : str, optional
+        Axis label of the colour bar; defaults to the image's ``label`` and
+        ``units`` when the mappable is one of ours.
+    cmap, vmin, vmax :
+        Used only when *mappable* is an image that has not been drawn yet.
+    **kwargs
+        Forwarded to ``Figure.colorbar``.
+
+    Returns
+    -------
+    matplotlib.colorbar.Colorbar
+        The colour bar.
+
+    Raises
+    ------
+    ValueError
+        If no axes can be found to dock to, or *loc* is unknown.
+    TypeError
+        If *mappable* is neither an artist nor an image.
+
+    Examples
+    --------
+    >>> art = image.imshow()  # doctest: +SKIP
+    >>> add_colorbar(art, loc="bottom", size="8%")  # doctest: +SKIP
+    >>> add_colorbar(image, loc="left")  # the image may be passed directly  # doctest: +SKIP
     """
+    import matplotlib.pyplot as plt
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
 
-    if TYPE_CHECKING:
-        data: np.ndarray
-        extent: tuple[float, float, float, float] | None
-        x_edges: np.ndarray | None
-        y_edges: np.ndarray | None
-        label: str | None
-        units: Any
-        x_units: Any
-        y_units: Any
-        x_label: str | None
-        y_label: str | None
-
-        def _derived(
-            self, data: Any, op_name: str, params: dict[str, Any] | None = None, **overrides: Any
-        ) -> ImageData: ...
-
-    def normalize(
-        self,
-        *,
-        vmin: float | None = None,
-        vmax: float | None = None,
-        stretch: str = "linear",
-        percentiles: tuple[float, float] | None = None,
-        asinh_a: float = 10.0,
-    ) -> ImageData:
-        """Map the values to ``[0, 1]`` for display, keeping the geometry.
-
-        Parameters
-        ----------
-        vmin, vmax, stretch, percentiles, asinh_a :
-            As in :func:`~pynbodyext.plot.image.postprocess.normalize`.  Unlike the
-            free function, this returns an image (so it can be chained) rather
-            than a bare array.
-
-        Returns
-        -------
-        ImageData
-            The stretched image; non-finite pixels stay non-finite.
-
-        Examples
-        --------
-        >>> stretched = image.normalize(stretch="asinh", percentiles=(1, 99))  # doctest: +SKIP
-        """
-        stretched = normalize(
-            self.data, vmin=vmin, vmax=vmax, stretch=stretch, percentiles=percentiles, asinh_a=asinh_a
-        )
-        return self._derived(
-            stretched, "normalize", {"vmin": vmin, "vmax": vmax, "stretch": stretch, "percentiles": percentiles}
+    if loc not in COLORBAR_LOCATIONS:
+        raise ValueError(f"loc must be one of {', '.join(COLORBAR_LOCATIONS)}, got {loc!r}.")
+    artist, source = _as_mappable(mappable)
+    axes = ax if ax is not None else getattr(artist, "axes", None)
+    if axes is None:
+        figure = plt.gcf()
+        axes = figure.axes[-1] if figure.axes else None
+    if axes is None:
+        raise ValueError("No axes found for a colour bar; pass ax=... or draw the image first.")
+    if artist is None:  # an image that has not been drawn yet
+        if source is None:  # pragma: no cover - _as_mappable returns a mappable or an image
+            raise TypeError("Nothing to describe with a colour bar.")
+        artist = _artist_in(axes, source) or ScalarMappable(
+            norm=Normalize(*value_limits(source.data, vmin=vmin, vmax=vmax)), cmap=get_cmap(cmap)
         )
 
-    def to_rgba(
-        self,
-        cmap: Any = None,
-        *,
-        vmin: float | None = None,
-        vmax: float | None = None,
-        stretch: str = "linear",
-        percentiles: tuple[float, float] | None = None,
-        norm: Any = None,
-        alpha: Any = None,
-        bad: Any = None,
-    ) -> np.ndarray:
-        """Map the values to an ``(ny, nx, 4)`` RGBA array.
-
-        Parameters
-        ----------
-        cmap : str or Colormap, optional
-            Colour map; defaults to the velocity map ``K_B_C_G_Y_R_W``.
-        vmin, vmax, stretch, percentiles, norm, alpha, bad :
-            As in :func:`~pynbodyext.plot.image.cmaps.to_rgba`.
-
-        Returns
-        -------
-        numpy.ndarray
-            Float RGBA image, with non-finite pixels transparent by default.
-        """
-        return to_rgba(
-            self.data,
-            get_cmap(cmap) if cmap is not None else K_B_C_G_Y_R_W,
-            vmin=vmin,
-            vmax=vmax,
-            stretch=stretch,
-            percentiles=percentiles,
-            norm=norm,
-            alpha=alpha,
-            bad=bad,
-        )
-
-    def draw(self, ax: Any = None, *, colorbar: bool = False, aspect: Any = None, **kwargs: Any) -> Any:
-        """Draw the image, picking the right artist for the bin spacing.
-
-        Evenly spaced bins go through :meth:`imshow`; unevenly spaced ones through
-        :meth:`pcolormesh`, so a logarithmic or quantile grid is drawn where its
-        bins really are.
-
-        Parameters
-        ----------
-        ax : matplotlib.axes.Axes, optional
-            Axes to draw on; a new figure is created when omitted.
-        colorbar : bool, default: False
-            Add a colour bar labelled with the image's ``label`` and ``units``.
-        aspect : optional
-            Axes aspect, e.g. ``"auto"``; matplotlib's default when omitted.
-        **kwargs
-            Forwarded to the chosen artist.
-
-        Returns
-        -------
-        matplotlib.image.AxesImage or matplotlib.collections.QuadMesh
-            The artist.
-        """
-        uniform = edges_are_uniform(getattr(self, "x_edges", None)) and edges_are_uniform(
-            getattr(self, "y_edges", None)
-        )
-        draw = self.imshow if uniform else self.pcolormesh
-        return draw(ax=ax, colorbar=colorbar, aspect=aspect, **kwargs)
-
-    def imshow(self, ax: Any = None, *, colorbar: bool = False, aspect: Any = None, **kwargs: Any) -> Any:
-        """Draw the image with ``imshow``, labelling it from the metadata.
-
-        Use this for evenly spaced bins; :meth:`pcolormesh` handles arbitrary bin
-        edges, and :meth:`draw` picks between them for you.
-
-        Parameters
-        ----------
-        ax : matplotlib.axes.Axes, optional
-            Axes to draw on; a new figure is created when omitted.
-        colorbar : bool, default: False
-            Add a colour bar labelled with the image's ``label`` and ``units``.
-        aspect : optional
-            Axes aspect, e.g. ``"auto"``.
-        **kwargs
-            Forwarded to ``matplotlib.axes.Axes.imshow``; ``extent`` defaults to
-            the image's own and ``origin`` to ``"lower"``.
-
-        Returns
-        -------
-        matplotlib.image.AxesImage
-            The artist.
-        """
-        import matplotlib.pyplot as plt
-
-        if not (edges_are_uniform(self.x_edges) and edges_are_uniform(self.y_edges)):
-            raise ValueError("These bins are not evenly spaced; use pcolormesh() or draw() instead.")
-        figsize = kwargs.pop("figsize", (5.0, 5.0))
-        if ax is None:
-            _, ax = plt.subplots(figsize=figsize)
-        kwargs.setdefault("origin", "lower")
-        kwargs.setdefault("extent", self.extent)
-        artist = ax.imshow(self.data, **kwargs)
-        _finish(ax, self, artist, colorbar, aspect)
-        return artist
-
-    def pcolormesh(
-        self, ax: Any = None, *, colorbar: bool = False, aspect: Any = None, shading: str = "flat", **kwargs: Any
-    ) -> Any:
-        """Draw the image as quadrilateral cells, honouring arbitrary bin edges.
-
-        Parameters
-        ----------
-        ax : matplotlib.axes.Axes, optional
-            Axes to draw on; a new figure is created when omitted.
-        colorbar : bool, default: False
-            Add a colour bar labelled with the image's ``label`` and ``units``.
-        aspect : optional
-            Axes aspect, e.g. ``"auto"``.
-        shading : str, default: "flat"
-            Matplotlib shading mode; ``"flat"`` pairs the data with the given edges.
-        **kwargs
-            Forwarded to ``matplotlib.axes.Axes.pcolormesh``.
-
-        Returns
-        -------
-        matplotlib.collections.QuadMesh
-            The artist.
-        """
-        import matplotlib.pyplot as plt
-
-        figsize = kwargs.pop("figsize", (5.0, 5.0))
-        if ax is None:
-            _, ax = plt.subplots(figsize=figsize)
-        x_edges = self.x_edges if self.x_edges is not None else np.arange(self.data.shape[1] + 1, dtype=float)
-        y_edges = self.y_edges if self.y_edges is not None else np.arange(self.data.shape[0] + 1, dtype=float)
-        artist = ax.pcolormesh(x_edges, y_edges, self.data, shading=shading, **kwargs)
-        _finish(ax, self, artist, colorbar, aspect)
-        return artist
+    horizontal = loc in ("top", "bottom")
+    cax = _divider_for(axes).append_axes(loc, size=size, pad=pad)
+    colorbar = axes.figure.colorbar(artist, cax=cax, orientation="horizontal" if horizontal else "vertical", **kwargs)
+    axis = cax.xaxis if horizontal else cax.yaxis
+    axis.set_ticks_position(loc)
+    axis.set_label_position(loc)
+    colorbar.ax.tick_params(labelsize=tick_label_size, pad=label_pad)
+    if label is None and source is not None:
+        label = _annotation(source.label, source.units)
+    if label is not None:
+        colorbar.set_label(label)
+    return colorbar
 
 
-def _finish(ax: Any, image: Any, artist: Any, colorbar: bool, aspect: Any) -> None:
+def _divider_for(axes: Any) -> Any:
+    """The divider installed on *axes*, shared so several bars can share a panel.
+
+    ``make_axes_locatable`` installs a fresh divider each time it is called, and
+    two of them on one panel fight over its box (one bar ends up underneath the
+    image), so the divider is cached per panel.
+    """
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+    divider = _DIVIDERS.get(axes)
+    if divider is None:
+        divider = make_axes_locatable(axes)
+        _DIVIDERS[axes] = divider
+    return divider
+
+
+def _as_mappable(mappable: Any) -> tuple[Any, ImageData | None]:
+    """Split a colour-bar argument into a drawn artist and the image behind it."""
+    from matplotlib.cm import ScalarMappable
+
+    if mappable is None or isinstance(mappable, ScalarMappable) or hasattr(mappable, "get_array"):
+        return mappable, None
+    image = getattr(mappable, "image", mappable)  # AdaptiveMap carries an ImageData
+    if hasattr(image, "data") and hasattr(image, "extent"):
+        return None, image
+    raise TypeError(f"add_colorbar expects a drawn artist or an ImageData/AdaptiveMap, got {type(mappable).__name__}.")
+
+
+def _artist_in(axes: Any, image: ImageData) -> Any:
+    """The artist in *axes* that was drawn from *image*, if it is still there."""
+    candidates = list(getattr(axes, "images", ())) + list(getattr(axes, "collections", ()))
+    for artist in reversed(candidates):
+        array = getattr(artist, "get_array", lambda: None)()
+        if array is not None and np.shape(array) == image.shape:
+            return artist
+    return None
+
+
+def _finish(
+    ax: Any, image: Any, artist: Any, colorbar: bool | str, aspect: Any, colorbar_kwargs: dict[str, Any] | None = None
+) -> None:
     """Shared tail of the drawing methods: labels, aspect and colour bar."""
     _apply_axis_labels(ax, image)
     if aspect is not None:
         ax.set_aspect(aspect)
     if colorbar:
-        ax.figure.colorbar(artist, ax=ax, label=_annotation(image.label, image.units))
+        options = dict(colorbar_kwargs or {})
+        if isinstance(colorbar, str):
+            options.setdefault("loc", colorbar)
+        add_colorbar(artist, ax=ax, label=_annotation(image.label, image.units), **options)
+
+
+def draw_image(
+    image: Any,
+    ax: Any = None,
+    *,
+    colorbar: bool | str = False,
+    colorbar_kwargs: dict[str, Any] | None = None,
+    aspect: Any = None,
+    **kwargs: Any,
+) -> Any:
+    """Draw *image*, picking the right artist for the bin spacing.
+
+    Evenly spaced bins go through :func:`draw_imshow`; unevenly spaced ones through
+    :func:`draw_pcolormesh`, so a logarithmic or quantile grid is drawn where its
+    bins really are.
+
+    Parameters
+    ----------
+    image : ImageData
+        The image to draw.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on; a new figure is created when omitted.
+    colorbar : bool or str, default: False
+        Add a colour bar labelled with the image's ``label`` and ``units``.
+        ``True`` docks it on the right; ``"left"``/``"top"``/``"bottom"`` docks it
+        there.
+    colorbar_kwargs : dict, optional
+        Forwarded to :func:`add_colorbar`, e.g. ``{"size": "8%", "pad": 0.1}``.
+    aspect : optional
+        Axes aspect, e.g. ``"auto"``; matplotlib's default when omitted.
+    **kwargs
+        Forwarded to the chosen artist.
+
+    Returns
+    -------
+    matplotlib.image.AxesImage or matplotlib.collections.QuadMesh
+        The artist.
+    """
+    uniform = edges_are_uniform(image.x_edges) and edges_are_uniform(image.y_edges)
+    draw = draw_imshow if uniform else draw_pcolormesh
+    return draw(image, ax=ax, colorbar=colorbar, colorbar_kwargs=colorbar_kwargs, aspect=aspect, **kwargs)
+
+
+def draw_imshow(
+    image: Any,
+    ax: Any = None,
+    *,
+    colorbar: bool | str = False,
+    colorbar_kwargs: dict[str, Any] | None = None,
+    aspect: Any = None,
+    **kwargs: Any,
+) -> Any:
+    """Draw *image* with ``imshow``, labelling it from its metadata.
+
+    Use this for evenly spaced bins; :func:`draw_pcolormesh` handles arbitrary bin
+    edges, and :func:`draw_image` picks between them.
+
+    Parameters
+    ----------
+    image : ImageData
+        The image to draw.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on; a new figure is created when omitted.
+    colorbar : bool or str, default: False
+        Add a docked colour bar; see :func:`draw_image`.
+    colorbar_kwargs : dict, optional
+        Forwarded to :func:`add_colorbar`.
+    aspect : optional
+        Axes aspect, e.g. ``"auto"``.
+    **kwargs
+        Forwarded to ``matplotlib.axes.Axes.imshow``; ``extent`` defaults to the
+        image's own and ``origin`` to ``"lower"``.
+
+    Returns
+    -------
+    matplotlib.image.AxesImage
+        The artist.
+    """
+    import matplotlib.pyplot as plt
+
+    if not (edges_are_uniform(image.x_edges) and edges_are_uniform(image.y_edges)):
+        raise ValueError("These bins are not evenly spaced; use pcolormesh() or draw() instead.")
+    figsize = kwargs.pop("figsize", (5.0, 5.0))
+    if ax is None:
+        _, ax = plt.subplots(figsize=figsize)
+    kwargs.setdefault("origin", "lower")
+    kwargs.setdefault("extent", image.extent)
+    artist = ax.imshow(image.data, **kwargs)
+    _finish(ax, image, artist, colorbar, aspect, colorbar_kwargs)
+    return artist
+
+
+def draw_pcolormesh(
+    image: Any,
+    ax: Any = None,
+    *,
+    colorbar: bool | str = False,
+    colorbar_kwargs: dict[str, Any] | None = None,
+    aspect: Any = None,
+    shading: str = "flat",
+    **kwargs: Any,
+) -> Any:
+    """Draw *image* as quadrilateral cells, honouring arbitrary bin edges.
+
+    Parameters
+    ----------
+    image : ImageData
+        The image to draw.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on; a new figure is created when omitted.
+    colorbar : bool or str, default: False
+        Add a docked colour bar; see :func:`draw_image`.
+    colorbar_kwargs : dict, optional
+        Forwarded to :func:`add_colorbar`.
+    aspect : optional
+        Axes aspect, e.g. ``"auto"``.
+    shading : str, default: "flat"
+        Matplotlib shading mode; ``"flat"`` pairs the data with the given edges.
+    **kwargs
+        Forwarded to ``matplotlib.axes.Axes.pcolormesh``.
+
+    Returns
+    -------
+    matplotlib.collections.QuadMesh
+        The artist.
+    """
+    import matplotlib.pyplot as plt
+
+    figsize = kwargs.pop("figsize", (5.0, 5.0))
+    if ax is None:
+        _, ax = plt.subplots(figsize=figsize)
+    x_edges = image.x_edges if image.x_edges is not None else np.arange(image.shape[1] + 1, dtype=float)
+    y_edges = image.y_edges if image.y_edges is not None else np.arange(image.shape[0] + 1, dtype=float)
+    artist = ax.pcolormesh(x_edges, y_edges, image.data, shading=shading, **kwargs)
+    _finish(ax, image, artist, colorbar, aspect, colorbar_kwargs)
+    return artist

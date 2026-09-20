@@ -271,7 +271,7 @@ def test_image_data_can_compose_with_another_image() -> None:
 
     assert composed.shape == (20, 30, 4)
     np.testing.assert_allclose(composed, compose_maps(first.data, second.data, style1="inferno", style2="cividis"))
-    masks = first.create_mask(line_angle=0.0, width=0.0)
+    masks = first.compose.masks(line_angle=0.0, width=0.0)
     assert masks[0].shape == first.shape
 
 

@@ -12,18 +12,24 @@ together and is the entry point for the whole image layer::
 
 How it is put together:
 
-- :class:`ImageData` itself owns the values, the geometry, the metadata and the
-  provenance (``.ops``).
-- The *families* of operations live in one mixin each, next to the free functions
-  they wrap: :class:`~pynbodyext.plot.image.postprocess.SmoothMixin` (``.smooth``),
-  :class:`~pynbodyext.plot.image.psf.PsfMixin` (``.psf``),
-  :class:`~pynbodyext.plot.image.compose.ComposeMixin` (``create_mask``,
-  ``compose``), :class:`~pynbodyext.plot.image.adaptive.AdaptiveMixin`
-  (``adaptive_bin``) and :class:`~pynbodyext.plot.image.display.DisplayMixin`
-  (``normalize``, ``to_rgba``, ``draw``, ``imshow``, ``pcolormesh``).
-  Single-call, everyday operations are plain methods; families with several
-  variants are grouped behind an accessor (``image.smooth.gaussian(...)``), so no
-  operation has two spellings.
+- :class:`ImageData` is a single class: it owns the values, the geometry, the
+  metadata, the provenance (``.ops``) and the display methods, and it *composes*
+  the capability families instead of inheriting them.  Each family is a small view
+  object — :class:`~pynbodyext.plot.image.postprocess.SmoothOps`,
+  :class:`~pynbodyext.plot.image.psf.PsfOps`,
+  :class:`~pynbodyext.plot.image.compose.ComposeOps`,
+  :class:`~pynbodyext.plot.image.adaptive.AdaptiveOps` — reached as a property
+  (``image.smooth.gaussian(fwhm=2)``, ``image.psf.convolve(...)``,
+  ``image.compose(other, ...)``, ``image.adaptive.bin(signal, ...)``).
+- Every view derives from :class:`~pynbodyext.plot.image.ops.ImageOps`, which
+  hands it the image's geometry, :meth:`~pynbodyext.plot.image.ops.ImageOps.derive`
+  (return a new image with the operation recorded) and the pixel-size helper.  A
+  new family is therefore a new module plus a registration —
+  ``ImageData.register_ops("tessellation", TessellationOps)`` — with no change to
+  this class and no base-class list to edit.
+- Single-call, everyday operations are methods of :class:`ImageData` itself
+  (``normalize``, ``to_rgba``, ``draw``, ``imshow``, ``pcolormesh``,
+  ``add_colorbar``), so no operation has two spellings.
 - Methods that produce an image return a new :class:`ImageData` with the
   operation appended to :attr:`ops`; everything else returns what the free
   function returns (an array, a mask pair, an
@@ -53,13 +59,15 @@ from typing import Any
 import numpy as np
 
 from ._arrays import bin_centers, edges_are_uniform, pixel_width, resolve_edges
-from .adaptive import AdaptiveMixin
-from .compose import ComposeMixin
-from .display import DisplayMixin, _unit_text
-from .postprocess import SmoothMixin
-from .psf import PsfMixin
+from .adaptive import AdaptiveOps
+from .cmaps import K_B_C_G_Y_R_W, to_rgba
+from .compose import ComposeOps
+from .display import _unit_text, add_colorbar, draw_image, draw_imshow, draw_pcolormesh
+from .ops import OPERATIONS, ImageOps, register_ops
+from .postprocess import SmoothOps, normalize
+from .psf import PsfOps
 
-__all__ = ["ImageData", "ImageOp"]
+__all__ = ["ImageData", "ImageOp", "OPERATIONS", "register_ops"]
 
 
 def _describe(value: Any) -> str:
@@ -98,7 +106,7 @@ class ImageOp:
 
 
 @dataclass(frozen=True)
-class ImageData(SmoothMixin, PsfMixin, ComposeMixin, AdaptiveMixin, DisplayMixin):
+class ImageData:
     """A 2-D image with the metadata needed to display, measure and process it.
 
     Parameters
@@ -235,6 +243,170 @@ class ImageData(SmoothMixin, PsfMixin, ComposeMixin, AdaptiveMixin, DisplayMixin
     # ------------------------------------------------------------------
     # derivation
     # ------------------------------------------------------------------
+
+    @classmethod
+    def register_ops(cls, name: str, view: type[ImageOps] | None = None, *, overwrite: bool = False) -> Any:
+        """Register a capability view under ``image.<name>``.
+
+        Lets a new family of image operations live in its own module without
+        touching this class::
+
+            @ImageData.register_ops("tessellation")
+            class TessellationOps(ImageOps):
+                def cells(self): ...
+
+        Usable as a decorator or as a call; see
+        :func:`~pynbodyext.plot.image.ops.register_ops`.
+        """
+        return register_ops(name, view, overwrite=overwrite)
+
+    @classmethod
+    def operations(cls) -> dict[str, type[ImageOps]]:
+        """The registered capability views, keyed by the attribute they answer to."""
+        return dict(OPERATIONS)
+
+    def __getattr__(self, name: str) -> Any:
+        """Resolve a registered capability view, e.g. ``image.tessellation``."""
+        view = OPERATIONS.get(name)
+        if view is not None:
+            return view(self)
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
+
+    # ------------------------------------------------------------------
+    # capability views
+    # ------------------------------------------------------------------
+
+    @property
+    def smooth(self) -> SmoothOps:
+        """Smoothing family: ``image.smooth.gaussian(fwhm=2)`` and friends."""
+        return SmoothOps(self)
+
+    @property
+    def psf(self) -> PsfOps:
+        """Observational family: ``image.psf.convolve(fwhm=3)`` and friends."""
+        return PsfOps(self)
+
+    @property
+    def compose(self) -> ComposeOps:
+        """Stitching family: ``image.compose(other)`` and friends."""
+        return ComposeOps(self)
+
+    @property
+    def adaptive(self) -> AdaptiveOps:
+        """Adaptive binning: ``image.adaptive.bin(signal, target_nbins=200)``."""
+        return AdaptiveOps(self)
+
+    # ------------------------------------------------------------------
+    # display
+    # ------------------------------------------------------------------
+
+    def normalize(
+        self,
+        *,
+        vmin: float | None = None,
+        vmax: float | None = None,
+        stretch: str = "linear",
+        percentiles: tuple[float, float] | None = None,
+        asinh_a: float = 10.0,
+    ) -> ImageData:
+        """Map the values to ``[0, 1]`` for display, keeping the geometry.
+
+        Unlike the free :func:`~pynbodyext.plot.image.postprocess.normalize`, this
+        returns an image, so it can be chained.
+        """
+        stretched = normalize(
+            self.data, vmin=vmin, vmax=vmax, stretch=stretch, percentiles=percentiles, asinh_a=asinh_a
+        )
+        return self._derived(
+            stretched, "normalize", {"vmin": vmin, "vmax": vmax, "stretch": stretch, "percentiles": percentiles}
+        )
+
+    def to_rgba(
+        self,
+        cmap: Any = None,
+        *,
+        vmin: float | None = None,
+        vmax: float | None = None,
+        stretch: str = "linear",
+        percentiles: tuple[float, float] | None = None,
+        norm: Any = None,
+        alpha: Any = None,
+        bad: Any = None,
+    ) -> np.ndarray:
+        """Map the values to an ``(ny, nx, 4)`` RGBA array.
+
+        See :func:`~pynbodyext.plot.image.cmaps.to_rgba`; the default colour map is
+        the velocity map ``K_B_C_G_Y_R_W``.
+        """
+        return to_rgba(
+            self.data,
+            K_B_C_G_Y_R_W if cmap is None else cmap,
+            vmin=vmin,
+            vmax=vmax,
+            stretch=stretch,
+            percentiles=percentiles,
+            norm=norm,
+            alpha=alpha,
+            bad=bad,
+        )
+
+    def draw(
+        self,
+        ax: Any = None,
+        *,
+        colorbar: bool | str = False,
+        colorbar_kwargs: dict[str, Any] | None = None,
+        aspect: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Draw the image, picking the right artist for the bin spacing.
+
+        See :func:`~pynbodyext.plot.image.display.draw_image`.
+        """
+        return draw_image(self, ax=ax, colorbar=colorbar, colorbar_kwargs=colorbar_kwargs, aspect=aspect, **kwargs)
+
+    def imshow(
+        self,
+        ax: Any = None,
+        *,
+        colorbar: bool | str = False,
+        colorbar_kwargs: dict[str, Any] | None = None,
+        aspect: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Draw the image with ``imshow``; requires evenly spaced bins.
+
+        See :func:`~pynbodyext.plot.image.display.draw_imshow`.
+        """
+        return draw_imshow(self, ax=ax, colorbar=colorbar, colorbar_kwargs=colorbar_kwargs, aspect=aspect, **kwargs)
+
+    def pcolormesh(
+        self,
+        ax: Any = None,
+        *,
+        colorbar: bool | str = False,
+        colorbar_kwargs: dict[str, Any] | None = None,
+        aspect: Any = None,
+        shading: str = "flat",
+        **kwargs: Any,
+    ) -> Any:
+        """Draw the image as cells, honouring arbitrary bin edges.
+
+        See :func:`~pynbodyext.plot.image.display.draw_pcolormesh`.
+        """
+        return draw_pcolormesh(
+            self, ax=ax, colorbar=colorbar, colorbar_kwargs=colorbar_kwargs, aspect=aspect, shading=shading, **kwargs
+        )
+
+    def add_colorbar(self, mappable: Any = None, ax: Any = None, **kwargs: Any) -> Any:
+        """Dock a colour bar to the panel showing this image.
+
+        Shorthand for :func:`~pynbodyext.plot.image.display.add_colorbar`: with no
+        *mappable*, the artist drawn from this image in *ax* is used, so
+        ``image.imshow(); image.add_colorbar(loc="bottom")`` works — and so does
+        passing an image that has not been drawn yet.
+        """
+        return add_colorbar(self if mappable is None else mappable, ax=ax, **kwargs)
 
     def _derived(self, data: Any, op_name: str, params: dict[str, Any] | None = None, **overrides: Any) -> ImageData:
         """Return a copy carrying *data*, with *op_name* appended to :attr:`ops`.

@@ -230,9 +230,11 @@ restored = observed.psf.wiener(image.gaussian_psf(fwhm=3.0), balance=1e-6)
 # A velocity map: adaptive bins of equal mass, green on zero velocity
 velocity = image.ImageData.from_bins(bins2d, "vz.mean")
 mass = image.ImageData.from_bins(bins2d, "mass.sum")
-binned = velocity.adaptive_bin(mass, target_nbins=200, min_signal=1e6)
-binned.imshow(cmap="K_B_C_G_Y_R_W", symmetric=True)
+binned = velocity.adaptive.bin(mass, target_nbins=200, min_signal=1e6)
+binned.imshow(cmap="K_B_C_G_Y_R_W", symmetric=True, colorbar="bottom")
 binned.image.smooth.box(size=3)       # the painted map is an ImageData too
+# a colour bar can also be added afterwards, on the artist or on the map
+binned.add_colorbar(loc="left", size="4%", tick_label_size=8)
 
 # Gas density and dark-matter density in one figure, crossfaded along a line
 gas = image.ImageData.from_bins(bins2d, "mass.sum", units="1e10 Msol")
@@ -246,16 +248,18 @@ gas.imshow_compose(
 ```
 
 Families with several variants sit behind an accessor (`image.smooth.gaussian`,
-`image.psf.convolve`), single operations are plain methods (`normalize`,
-`to_rgba`, `draw`, `compose`, `adaptive_bin`), and the underlying free functions
-(`gaussian_smooth(data, ...)`, `compose_maps(...)`, …) remain available for plain
-arrays. The velocity colour map (black → blue → cyan → **green on zero** → yellow
+`image.psf.convolve`, `image.compose(other)`, `image.adaptive.bin`), single
+operations are plain methods (`normalize`, `to_rgba`, `draw`, `add_colorbar`), and
+the underlying free functions (`gaussian_smooth(data, ...)`, `compose_maps(...)`,
+…) remain available for plain arrays. A new family is a new module plus
+`@ImageData.register_ops("tessellation")`, so extension never means editing base
+classes. The velocity colour map (black → blue → cyan → **green on zero** → yellow
 → red → white, also known as `image.vel_cmap`) is registered with matplotlib, so
 `cmap="K_B_C_G_Y_R_W"` works; the masks behind the stitching are exposed on their
 own:
 
 ```python
-mask1, mask2 = image.create_map_mask((400, 400), line_angle=45, width=0.15)
+mask1, mask2 = gas.compose.masks(line_angle=45, width=0.15)
 blended = image.blend_images(rgb_gas, rgb_dm, mask1)
 ```
 

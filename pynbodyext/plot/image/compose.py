@@ -27,22 +27,16 @@ what the colour bars are built from.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 
+from ._arrays import value_limits
 from .cmaps import get_cmap, to_rgba
-from .postprocess import value_limits
+from .display import add_colorbar
+from .ops import ImageOps, register_ops
 
-__all__ = [
-    "ComposeMixin",
-    "MapStyle",
-    "blend_images",
-    "blend_stack",
-    "compose_maps",
-    "create_map_mask",
-    "imshow_compose",
-]
+__all__ = ["ComposeOps", "MapStyle", "blend_images", "blend_stack", "compose_maps", "create_map_mask", "imshow_compose"]
 
 
 @dataclass(frozen=True)
@@ -379,36 +373,25 @@ def imshow_compose(
     if colorbars:
         bars = (("left", styles[0], label1, first), ("right", styles[1], label2, second))
         for side, style, label, data in bars:
-            bar = ax.figure.colorbar(
+            add_colorbar(
                 ScalarMappable(norm=Normalize(*style.limits(data)), cmap=get_cmap(style.cmap)),
                 ax=ax,
-                location=side,
-                fraction=0.046,
-                pad=0.04,
+                loc=side,
+                label=label,
             )
-            if label is not None:
-                bar.set_label(label)
     return artist
 
 
-class ComposeMixin:
-    """Gives an image the ``create_mask``/``compose``/``imshow_compose`` methods.
+@dataclass(frozen=True)
+class ComposeOps(ImageOps):
+    """The stitching family of an image: ``image.compose(other, …)``.
 
-    The methods are thin wrappers over :func:`create_map_mask`, :func:`compose_maps`
-    and :func:`imshow_compose`; related free functions stay available for plain
-    arrays.
+    Calling the view stitches this image with another one;
+    :meth:`ComposeOps.masks` exposes the transition masks, and
+    :meth:`ComposeOps.imshow` draws the pair with one colour bar each.
     """
 
-    if TYPE_CHECKING:
-        data: np.ndarray
-
-    def create_mask(
-        self, line_angle: float = 45.0, width: float = 0.1, *, center: tuple[float, float] | None = None
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Split this image with two complementary soft masks; see :func:`create_map_mask`."""
-        return create_map_mask(self.data, line_angle=line_angle, width=width, center=center)
-
-    def compose(
+    def stitch(
         self,
         other: Any,
         *,
@@ -438,7 +421,16 @@ class ComposeMixin:
             self.data, _as_data(other), style1=style, style2=other_style, mask=mask, line_angle=line_angle, width=width
         )
 
-    def imshow_compose(self, other: Any, **kwargs: Any) -> Any:
+    #: ``image.compose(other, …)`` is the shorthand for :meth:`stitch`.
+    __call__ = stitch
+
+    def masks(
+        self, line_angle: float = 45.0, width: float = 0.1, *, center: tuple[float, float] | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Split this image with two complementary soft masks; see :func:`create_map_mask`."""
+        return create_map_mask(self.data, line_angle=line_angle, width=width, center=center)
+
+    def imshow(self, other: Any, **kwargs: Any) -> Any:
         """Draw this image stitched with *other*, with one colour bar each.
 
         Parameters
@@ -456,9 +448,11 @@ class ComposeMixin:
         matplotlib.image.AxesImage
             The artist.
         """
-        style = kwargs.pop("style", None)
-        other_style = kwargs.pop("other_style", None)
-        return imshow_compose(self.data, _as_data(other), style1=style, style2=other_style, **kwargs)
+        # ``style``/``other_style`` are this image's names for the pair; the free
+        # function's ``style1``/``style2`` are accepted as well.
+        style1 = kwargs.pop("style1", kwargs.pop("style", None))
+        style2 = kwargs.pop("style2", kwargs.pop("other_style", None))
+        return imshow_compose(self.data, _as_data(other), style1=style1, style2=style2, **kwargs)
 
 
 def _as_data(value: Any) -> np.ndarray:
@@ -466,3 +460,6 @@ def _as_data(value: Any) -> np.ndarray:
     from .data import ImageData  # local import: data.py composes this module
 
     return np.asarray(value.data if isinstance(value, ImageData) else value, dtype=float)
+
+
+register_ops("compose", ComposeOps)

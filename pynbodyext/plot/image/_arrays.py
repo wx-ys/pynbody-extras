@@ -24,6 +24,7 @@ __all__ = [
     "typical_width",
     "uniform_edges",
     "validity_mask",
+    "value_limits",
 ]
 
 #: Full width at half maximum of a Gaussian in units of its standard deviation.
@@ -195,3 +196,48 @@ def typical_width(edges: np.ndarray | None) -> float:
     if edges is None:
         return 1.0
     return float(np.median(np.diff(edges)))
+
+
+def value_limits(
+    data: Any, *, vmin: float | None = None, vmax: float | None = None, percentiles: tuple[float, float] | None = None
+) -> tuple[float, float]:
+    """The ``(vmin, vmax)`` an image of *data* would be drawn with.
+
+    Shared by :func:`~pynbodyext.plot.image.postprocess.normalize`, by the colour
+    bars and by :meth:`~pynbodyext.plot.image.ops.ImageOps.limits`, so every colour
+    scale in the package is derived by the same rules.
+
+    Parameters
+    ----------
+    data : array_like
+        Values to take the limits from; non-finite entries are ignored.
+    vmin, vmax : float, optional
+        Explicit limits; each falls back to the requested percentile, then to the
+        data range.
+    percentiles : (float, float), optional
+        Percentiles used for whichever of *vmin*/*vmax* is not given.
+
+    Returns
+    -------
+    tuple of float
+        ``(vmin, vmax)``.
+
+    Raises
+    ------
+    ValueError
+        If ``vmax`` is smaller than ``vmin``.
+    """
+    array = np.asarray(data, dtype=float)
+    finite = np.isfinite(array)
+    if percentiles is not None:
+        if vmin is None:
+            vmin = float(np.nanpercentile(array, percentiles[0])) if finite.any() else 0.0
+        if vmax is None:
+            vmax = float(np.nanpercentile(array, percentiles[1])) if finite.any() else 1.0
+    if vmin is None:
+        vmin = float(np.nanmin(array)) if finite.any() else 0.0
+    if vmax is None:
+        vmax = float(np.nanmax(array)) if finite.any() else 1.0
+    if vmax < vmin:
+        raise ValueError(f"vmax ({vmax}) must not be smaller than vmin ({vmin}).")
+    return float(vmin), float(vmax)

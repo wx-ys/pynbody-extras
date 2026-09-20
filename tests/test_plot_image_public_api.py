@@ -8,14 +8,18 @@ import sys
 import pytest
 
 EXPECTED_NAMES = {
+    "COLORBAR_LOCATIONS",
     "AdaptiveMap",
     "ImageData",
     "ImageOp",
+    "ImageOps",
     "K_B_C_G_Y_R_W",
     "K_B_C_G_Y_R_W_COLORS",
     "K_B_C_G_Y_R_W_POSITIONS",
     "MapStyle",
+    "OPERATIONS",
     "STRETCHES",
+    "add_colorbar",
     "adaptive_bin_map",
     "adaptive_map_from_bins",
     "blend_images",
@@ -35,6 +39,7 @@ EXPECTED_NAMES = {
     "normalize",
     "normalize_psf",
     "register_cmap",
+    "register_ops",
     "richardson_lucy",
     "to_rgba",
     "vel_cmap",

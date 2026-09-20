@@ -22,12 +22,12 @@ import numpy as np
 from scipy import signal
 
 from ._arrays import as_image, as_pair, masked_filter, resolve_sigma, validity_mask
+from .ops import ImageOps, register_ops
 
 if TYPE_CHECKING:
     from .data import ImageData
 
 __all__ = [
-    "PsfMixin",
     "PsfOps",
     "convolve_psf",
     "deconvolve_psf",
@@ -330,22 +330,13 @@ def deconvolve_psf(image: Any, psf: Any, *, method: str = "wiener", **kwargs: An
 
 
 @dataclass(frozen=True)
-class PsfOps:
+class PsfOps(ImageOps):
     """The observational family of an image: ``image.psf.convolve(fwhm=3)``.
 
     Each method returns a new :class:`~pynbodyext.plot.image.data.ImageData`.  As
     with smoothing, a Gaussian width is given in the units of the axes whenever
     the grid is evenly spaced, and in pixels otherwise.
     """
-
-    image: ImageData
-
-    def _pixel_scale(self) -> tuple[float, float] | None:
-        """Pixel size in axis units, or ``None`` when the grid has none."""
-        try:
-            return self.image.pixel_size
-        except ValueError:  # unevenly spaced bins: fall back to pixels
-            return None
 
     def convolve(
         self,
@@ -382,7 +373,7 @@ class PsfOps:
             method=method,
             mask=mask,
             normalize=normalize,
-            pixel_scale=self._pixel_scale(),
+            pixel_scale=self.kernel_scale(),
             **psf_kwargs,
         )
         return self.image._derived(
@@ -405,10 +396,4 @@ class PsfOps:
         return self.image._derived(restored, "deconvolve_psf", {"method": method, **kwargs})
 
 
-class PsfMixin:
-    """Gives an image its ``.psf`` accessor."""
-
-    @property
-    def psf(self) -> PsfOps:
-        """Observational methods of this image, e.g. ``image.psf.convolve(fwhm=3)``."""
-        return PsfOps(self)  # type: ignore[arg-type]
+register_ops("psf", PsfOps)

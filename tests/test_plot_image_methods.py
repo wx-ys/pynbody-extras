@@ -139,7 +139,7 @@ def test_adaptive_bin_returns_a_map_carrying_this_image_geometry() -> None:
     value = image((30, 30), extent=(0.0, 30.0, 0.0, 30.0), x_units="kpc", y_units="kpc", label="vz.mean", units="km/s")
     signal = value.with_data(np.linspace(1.0, 10.0, 900).reshape(30, 30), label="mass.sum")
 
-    binned = value.adaptive_bin(signal, target_nbins=6)
+    binned = value.adaptive.bin(signal, target_nbins=6)
 
     assert isinstance(binned, AdaptiveMap)
     assert isinstance(binned.image, ImageData)
@@ -160,7 +160,7 @@ def test_adaptive_bin_accepts_plain_arrays_and_statistics() -> None:
     value = image((20, 20))
     signal = np.ones((20, 20))
 
-    binned = value.adaptive_bin(signal, target_capacity=200.0, method="median")
+    binned = value.adaptive.bin(signal, target_capacity=200.0, method="median")
 
     assert binned.method == "median"
     assert binned.target_capacity == 200.0
@@ -211,7 +211,7 @@ def test_compose_and_masks_are_reachable_from_the_image() -> None:
     first = image((4, 4))
     second = first.with_data(np.ones((4, 4)))
 
-    masks = first.create_mask(line_angle=0.0, width=0.0)
+    masks = first.compose.masks(line_angle=0.0, width=0.0)
     composed = first.compose(second, style=MapStyle(cmap="gray"), other_style=MapStyle(cmap="viridis"))
 
     assert masks[0].shape == first.shape

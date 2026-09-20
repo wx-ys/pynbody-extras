@@ -102,6 +102,10 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   is class-centric — one `ImageData` composed from capability mixins, free
   functions underneath — and every image drawn anywhere in the package goes
   through it.
+- [ADR-0006](docs/adr/0006-image-capabilities-are-composed-views.md): the
+  capabilities are *views* reached as properties (`image.smooth.gaussian`), found
+  through a registry so a new family is a new module rather than a new base class,
+  and colour bars are docked to their panel by one helper.
 
 ## Image layer (`pynbodyext/plot/image/`)
 
@@ -122,17 +126,30 @@ object a caller normally holds.
   `(dy, dx)` needed to express a kernel width in physical units, and refuses when
   a direction has bins of unequal width. Display accordingly:
   `.imshow()` for evenly spaced bins, `.pcolormesh()` for arbitrary edges.
-  The class is assembled from one **capability mixin** per family, each defined
-  next to the free functions it wraps: `SmoothMixin` (`.smooth.gaussian/box/median/
-  downsample`), `PsfMixin` (`.psf.convolve/wiener/richardson_lucy/deconvolve`),
-  `ComposeMixin` (`create_mask`, `compose`, `imshow_compose`), `AdaptiveMixin`
-  (`adaptive_bin`) and `DisplayMixin` (`normalize`, `to_rgba`, `draw`, `imshow`,
-  `pcolormesh`). Families with several variants sit behind an accessor
-  (`image.smooth.gaussian(fwhm=2)`); single-call operations are plain methods, so
-  no operation has two spellings. Methods that produce an image return a new
+  `ImageData` is a single class (no capability base classes). Each family is a
+  **view** — `SmoothOps`, `PsfOps`, `ComposeOps`, `AdaptiveOps` — reached as a
+  property: `image.smooth.gaussian(fwhm=2)`, `image.psf.convolve(fwhm=3)`,
+  `image.compose(other)`, `image.adaptive.bin(signal, target_nbins=200)`.
+  Single-call operations stay methods of `ImageData` itself (`normalize`,
+  `to_rgba`, `draw`, `imshow`, `pcolormesh`, `add_colorbar`), so no operation has
+  two spellings.
+- **`ImageOps`** (`plot/image/ops.py`) — the shared parent of every view. It hands
+  a view the image's geometry and metadata (`data`, `shape`, `extent`, edges,
+  units, labels), plus `derive()` (return a new image with the operation recorded)
+  and `kernel_scale()` (pixel size, or `None` on uneven bins). **`register_ops`** /
+  `ImageData.register_ops("tessellation", TessellationOps)` adds a family through
+  the registry, so a new processing stage is a new module and a registration — no
+  base-class list to edit (`ImageData.operations()` lists what is registered).
+- Methods that produce an image return a new
   `ImageData` — geometry and units intact — with the call appended to
   **`ops`** (`tuple[ImageOp, ...]`, `ImageOp(name, params)`), which is what
   `repr(image)` summarises.
+- **Colour bars** are docked to their panel, not floated: `add_colorbar(artist |
+  image, loc=…)` (also `image.add_colorbar(…)`, and `colorbar=True|loc` +
+  `colorbar_kwargs` on `draw`/`imshow`/`pcolormesh`/`AdaptiveMap.imshow`) uses
+  `make_axes_locatable` with a shared divider per panel, so `size="5%"`,
+  `pad=0.05`, `label_pad` and `tick_label_size` are under the caller's control and
+  several bars (e.g. the two sides of `compose.imshow`) coexist.
 - **`BinNDResult.imshow`** (`core/calculate/bins/plot.py`) — a one-line bridge:
   it builds `ImageData.from_bins(self, query)` and calls `.draw()`. A bin grid is
   `(x, y)` and an image is `(row=y, column=x)`, so `from_bins` transposes; uneven

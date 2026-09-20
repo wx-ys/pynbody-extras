@@ -39,11 +39,12 @@ import numpy as np
 from pynbodyext.util.deps import POWERBIN_AVAILABLE
 
 from ._arrays import as_image, bin_centers, resolve_edges, typical_width
+from .ops import ImageOps, register_ops
 
 if TYPE_CHECKING:
     from .data import ImageData
 
-__all__ = ["AdaptiveMap", "AdaptiveMixin", "adaptive_bin_map", "adaptive_map_from_bins"]
+__all__ = ["AdaptiveMap", "AdaptiveOps", "adaptive_bin_map", "adaptive_map_from_bins"]
 
 _METHODS = ("mean", "median", "sum", "weighted")
 
@@ -208,7 +209,9 @@ class AdaptiveMap:
             Place zero in the middle of the colour range — the right choice for a
             velocity map.  Ignored if ``vmin``/``vmax`` are passed explicitly.
         **kwargs
-            Forwarded to ``matplotlib.axes.Axes.imshow``.
+            Forwarded to :meth:`ImageData.draw`, e.g. ``cmap``, ``colorbar``
+            (``True`` or a location such as ``"left"``/``"bottom"``),
+            ``colorbar_kwargs``.
 
         Returns
         -------
@@ -219,6 +222,20 @@ class AdaptiveMap:
             limit = float(np.nanmax(np.abs(self.value)))
             kwargs["vmin"], kwargs["vmax"] = -limit, limit
         return self.image.draw(ax=ax, **kwargs)
+
+    def add_colorbar(self, mappable: Any = None, ax: Any = None, **kwargs: Any) -> Any:
+        """Dock a colour bar describing the painted map to its panel.
+
+        Shorthand for :func:`pynbodyext.plot.image.display.add_colorbar` on
+        :attr:`image`; with no *mappable* the artist drawn from the painted map in
+        *ax* is used, so ``binned.imshow(); binned.add_colorbar()`` just works.
+
+        Returns
+        -------
+        matplotlib.colorbar.Colorbar
+            The colour bar.
+        """
+        return self.image.add_colorbar(mappable, ax=ax, **kwargs)
 
 
 def _aggregate(values: np.ndarray, bin_num: np.ndarray, weights: np.ndarray, n_bins: int, method: str) -> np.ndarray:
@@ -516,21 +533,11 @@ def adaptive_map_from_bins(
     )
 
 
-class AdaptiveMixin:
-    """Gives an image the ``adaptive_bin`` method."""
+@dataclass(frozen=True)
+class AdaptiveOps(ImageOps):
+    """The adaptive-binning family of an image: ``image.adaptive.bin(signal, …)``."""
 
-    if TYPE_CHECKING:
-        data: np.ndarray
-        x_edges: np.ndarray | None
-        y_edges: np.ndarray | None
-        x_units: Any
-        y_units: Any
-        x_label: str | None
-        y_label: str | None
-        label: str | None
-        units: Any
-
-    def adaptive_bin(
+    def bin(
         self,
         signal: Any,
         *,
@@ -566,7 +573,7 @@ class AdaptiveMixin:
         --------
         >>> velocity = ImageData.from_bins(bins2d, "vz.mean")  # doctest: +SKIP
         >>> mass = ImageData.from_bins(bins2d, "mass.sum")  # doctest: +SKIP
-        >>> binned = velocity.adaptive_bin(mass, target_nbins=200)  # doctest: +SKIP
+        >>> binned = velocity.adaptive.bin(mass, target_nbins=200)  # doctest: +SKIP
         >>> binned.imshow(cmap="K_B_C_G_Y_R_W", symmetric=True)  # doctest: +SKIP
         """
         return adaptive_bin_map(
@@ -600,3 +607,6 @@ def _as_map_data(value: Any) -> np.ndarray:
     if isinstance(value, ImageData):
         return np.asarray(value.data, dtype=float)
     return np.asarray(value, dtype=float)
+
+
+register_ops("adaptive", AdaptiveOps)
