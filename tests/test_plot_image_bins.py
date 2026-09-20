@@ -230,7 +230,7 @@ def test_the_binned_image_can_be_drawn_directly() -> None:
 
     bins = make_bins(make_sim())
 
-    artist = bins["mass.sum"].image.draw(colorbar=True)
+    artist = bins["mass.sum"].image.display.draw(colorbar=True)
 
     assert len(artist.figure.axes) == 2
     plt.close(artist.figure)

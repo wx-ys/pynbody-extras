@@ -30,7 +30,7 @@ def blob(shape: tuple[int, int] = (30, 30), **kwargs: object) -> ImageData:
 def test_contour_draws_the_requested_levels() -> None:
     fig, ax = plt.subplots()
     try:
-        artist = blob().contour(ax=ax, levels=[-2.0, 0.0, 2.0])
+        artist = blob().display.contour(ax=ax, levels=[-2.0, 0.0, 2.0])
 
         assert isinstance(artist, ContourSet)
         np.testing.assert_allclose(artist.levels, [-2.0, 0.0, 2.0])
@@ -43,7 +43,7 @@ def test_contour_accepts_a_level_count() -> None:
     """An integer is a hint, so matplotlib picks the 'nice' levels."""
     fig, ax = plt.subplots()
     try:
-        artist = blob().contour(ax=ax, levels=5)
+        artist = blob().display.contour(ax=ax, levels=5)
 
         assert artist.levels.size >= 3
     finally:
@@ -54,9 +54,9 @@ def test_contour_overlays_an_existing_image() -> None:
     source = blob()
     fig, ax = plt.subplots()
     try:
-        source.imshow(ax=ax, cmap="inferno")
+        source.display.imshow(ax=ax, cmap="inferno")
 
-        artist = source.contour(ax=ax, levels=[-2.0, 0.0, 2.0], colors="w", linewidths=0.8)
+        artist = source.display.contour(ax=ax, levels=[-2.0, 0.0, 2.0], colors="w", linewidths=0.8)
 
         assert len(ax.images) == 1  # the image is still there
         assert artist in ax.collections
@@ -68,7 +68,7 @@ def test_contour_overlays_an_existing_image() -> None:
 def test_filled_contours_use_contourf() -> None:
     fig, ax = plt.subplots()
     try:
-        artist = blob().contour(ax=ax, levels=[-2.0, 0.0, 2.0, 4.0], filled=True)
+        artist = blob().display.contour(ax=ax, levels=[-2.0, 0.0, 2.0, 4.0], filled=True)
 
         assert isinstance(artist, ContourSet)
         assert artist.filled is True
@@ -82,7 +82,7 @@ def test_contour_follows_the_bin_centres_of_an_uneven_grid() -> None:
 
     fig, ax = plt.subplots()
     try:
-        source.contour(ax=ax, levels=3)
+        source.display.contour(ax=ax, levels=3)
 
         xlim, ylim = ax.get_xlim(), ax.get_ylim()
         assert 0.5 <= xlim[0] and xlim[1] <= 8.0  # centres of the x bins
@@ -94,7 +94,7 @@ def test_contour_follows_the_bin_centres_of_an_uneven_grid() -> None:
 def test_contour_can_be_given_a_colour_bar() -> None:
     fig, ax = plt.subplots()
     try:
-        artist = blob().contour(ax=ax, levels=4)
+        artist = blob().display.contour(ax=ax, levels=4)
 
         bar = add_colorbar(artist, ax=ax)
 
@@ -106,7 +106,7 @@ def test_contour_can_be_given_a_colour_bar() -> None:
 def test_contour_can_request_its_own_colour_bar() -> None:
     fig, ax = plt.subplots()
     try:
-        blob().contour(ax=ax, levels=4, colorbar=True)
+        blob().display.contour(ax=ax, levels=4, colorbar=True)
 
         assert len(fig.axes) == 2
     finally:
@@ -120,7 +120,7 @@ def test_contour_tolerates_empty_bins() -> None:
 
     fig, ax = plt.subplots()
     try:
-        artist = source.with_data(data).contour(ax=ax, levels=3)
+        artist = source.with_data(data).display.contour(ax=ax, levels=3)
 
         assert isinstance(artist, ContourSet)
     finally:
@@ -137,8 +137,8 @@ def test_adaptive_map_can_contour_its_painted_map() -> None:
 
     fig, ax = plt.subplots()
     try:
-        binned.imshow(ax=ax)
-        artist = binned.contour(ax=ax, levels=3)
+        binned.display.imshow(ax=ax)
+        artist = binned.display.contour(ax=ax, levels=3)
 
         assert isinstance(artist, ContourSet)
         assert artist in ax.collections
@@ -155,7 +155,7 @@ def test_adaptive_map_contours_can_be_made_symmetric() -> None:
 
     fig, ax = plt.subplots()
     try:
-        artist = binned.contour(ax=ax, symmetric=True, count=3)
+        artist = binned.display.contour(ax=ax, symmetric=True, count=3)
 
         assert artist.levels.size == 7
         assert artist.levels[0] == pytest.approx(-artist.levels[-1])

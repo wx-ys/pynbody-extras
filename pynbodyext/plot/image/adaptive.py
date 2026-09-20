@@ -11,7 +11,7 @@ the value of its region::
     from pynbodyext.plot import image
 
     binned = image.adaptive_map_from_bins(bins2d, "vz.mean", "mass.sum", target_nbins=200)
-    binned.imshow(cmap="K_B_C_G_Y_R_W", symmetric=True)
+    binned.display.draw(cmap="K_B_C_G_Y_R_W", symmetric=True)
 
 The capacity is the signal itself (``mass.sum``), or ``(signal / noise)**2`` when
 a noise map is supplied.  Pixels that carry no signal — empty bins (``NaN``),
@@ -39,6 +39,7 @@ import numpy as np
 from pynbodyext.util.deps import POWERBIN_AVAILABLE
 
 from ._arrays import aligned_values, bin_centers, resolve_edges, shape_hint, typical_width
+from .display import DisplayOps
 from .ops import ImageDataView, ImageOps, register_ops
 
 if TYPE_CHECKING:
@@ -125,59 +126,10 @@ class AdaptiveMap(ImageDataView):
         """
         return self.image
 
-    def imshow(self, ax: Any = None, *, symmetric: bool = False, **kwargs: Any) -> Any:
-        """Draw :attr:`value` as an image, leaving unbinned pixels transparent.
-
-        Evenly spaced grids are drawn with ``imshow`` and unevenly spaced ones with
-        ``pcolormesh``, so the bins stay where they belong either way.
-
-        Parameters
-        ----------
-        ax : matplotlib.axes.Axes, optional
-            Axes to draw on; a new figure is created when omitted.
-        symmetric : bool, default: False
-            Place zero in the middle of the colour range — the right choice for a
-            velocity map.  Ignored if ``vmin``/``vmax`` are passed explicitly.
-        **kwargs
-            Forwarded to :meth:`ImageData.draw`, e.g. ``cmap``, ``colorbar``
-            (``True`` or a location such as ``"left"``/``"bottom"``),
-            ``colorbar_kwargs``.
-
-        Returns
-        -------
-        matplotlib.image.AxesImage or matplotlib.collections.QuadMesh
-            The artist.
-        """
-        if symmetric and "vmin" not in kwargs and "vmax" not in kwargs:
-            limit = float(np.nanmax(np.abs(self.value)))
-            kwargs["vmin"], kwargs["vmax"] = -limit, limit
-        return self.image.draw(ax=ax, **kwargs)
-
-    def contour(self, ax: Any = None, *, symmetric: bool = False, count: int = 6, **kwargs: Any) -> Any:
-        """Draw contours of the painted map; see :meth:`ImageData.contour`.
-
-        Parameters
-        ----------
-        ax : matplotlib.axes.Axes, optional
-            Axes to draw on; pass the same one as :meth:`imshow` to overlay.
-        symmetric : bool, default: False
-            Suggest levels symmetric about zero — the right choice for a velocity
-            map.  Ignored if ``levels`` is given explicitly.
-        count : int, default: 6
-            How many levels on each side of zero when *symmetric* is set.
-        **kwargs
-            Forwarded to :meth:`ImageData.contour`, e.g. ``levels``, ``filled``,
-            ``colors``, ``colorbar``.
-
-        Returns
-        -------
-        matplotlib.contour.ContourSet
-            The artist.
-        """
-        if symmetric and "levels" not in kwargs:
-            limit = float(np.nanmax(np.abs(self.value)))
-            kwargs["levels"] = np.linspace(-limit, limit, 2 * count + 1)
-        return self.image.contour(ax=ax, **kwargs)
+    @property
+    def display(self) -> DisplayOps:
+        """Display family of the painted map: ``binned.display.imshow(...)``."""
+        return DisplayOps(self.image)
 
 
 def _aggregate(values: np.ndarray, bin_num: np.ndarray, weights: np.ndarray, n_bins: int, method: str) -> np.ndarray:
@@ -516,7 +468,7 @@ class AdaptiveOps(ImageOps):
         >>> velocity = ImageData.from_bins(bins2d, "vz.mean")  # doctest: +SKIP
         >>> mass = ImageData.from_bins(bins2d, "mass.sum")  # doctest: +SKIP
         >>> binned = velocity.adaptive.bin(mass, target_nbins=200)  # doctest: +SKIP
-        >>> binned.imshow(cmap="K_B_C_G_Y_R_W", symmetric=True)  # doctest: +SKIP
+        >>> binned.display.draw(cmap="K_B_C_G_Y_R_W", symmetric=True)  # doctest: +SKIP
         """
         return adaptive_bin_map(
             self.data,

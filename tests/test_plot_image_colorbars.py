@@ -24,7 +24,7 @@ def image(shape: tuple[int, int] = (20, 20), **kwargs: object) -> ImageData:
 def test_add_colorbar_attaches_to_the_artist() -> None:
     fig, ax = plt.subplots()
     try:
-        artist = image().imshow(ax=ax)
+        artist = image().display.imshow(ax=ax)
 
         bar = add_colorbar(artist)
 
@@ -41,7 +41,7 @@ def test_add_colorbar_attaches_to_the_artist() -> None:
 def test_add_colorbar_supports_every_side(loc: str) -> None:
     fig, ax = plt.subplots()
     try:
-        artist = image().imshow(ax=ax)
+        artist = image().display.imshow(ax=ax)
 
         bar = add_colorbar(artist, ax=ax, loc=loc)
 
@@ -65,9 +65,9 @@ def test_add_colorbar_accepts_an_image_that_was_drawn() -> None:
     source = image(label="vz.mean", units="km/s")
     fig, ax = plt.subplots()
     try:
-        artist = source.imshow(ax=ax, vmin=-200.0, vmax=200.0)
+        artist = source.display.imshow(ax=ax, vmin=-200.0, vmax=200.0)
 
-        bar = source.add_colorbar(ax=ax)
+        bar = source.display.add_colorbar(ax=ax)
 
         assert bar.mappable is artist  # the drawn artist, so the scale matches exactly
         assert bar.ax.get_ylabel() == "vz.mean [km/s]"
@@ -98,8 +98,8 @@ def test_adaptive_map_can_add_a_colorbar_after_imshow() -> None:
 
     fig, ax = plt.subplots()
     try:
-        binned.imshow(ax=ax, symmetric=True)
-        bar = binned.add_colorbar(ax=ax)
+        binned.display.imshow(ax=ax, symmetric=True)
+        bar = binned.display.add_colorbar(ax=ax)
 
         assert bar.ax.get_ylabel() == "vz.mean"
         assert len(fig.axes) == 2
@@ -115,7 +115,7 @@ def test_adaptive_map_imshow_accepts_a_colorbar_request() -> None:
 
     fig, ax = plt.subplots()
     try:
-        binned.imshow(ax=ax, colorbar="bottom")
+        binned.display.imshow(ax=ax, colorbar="bottom")
 
         assert len(fig.axes) == 2
         assert fig.axes[1].get_xlabel() == "vz.mean"
@@ -126,7 +126,7 @@ def test_adaptive_map_imshow_accepts_a_colorbar_request() -> None:
 def test_drawing_accepts_a_colorbar_location_and_kwargs() -> None:
     fig, ax = plt.subplots()
     try:
-        image().imshow(ax=ax, colorbar="left", colorbar_kwargs={"size": "8%", "tick_label_size": 7})
+        image().display.imshow(ax=ax, colorbar="left", colorbar_kwargs={"size": "8%", "tick_label_size": 7})
 
         bar_ax = fig.axes[1]
         fig.canvas.draw()
@@ -143,7 +143,7 @@ def test_draw_passes_the_colorbar_options_through() -> None:
             np.zeros((4, 4)), x_edges=[0.0, 1.0, 3.0, 6.0, 10.0], y_edges=[0.0, 1.0, 2.0, 3.0, 4.0], label="vz.mean"
         )
 
-        uneven.draw(ax=ax, colorbar=True)
+        uneven.display.draw(ax=ax, colorbar=True)
 
         assert len(fig.axes) == 2
     finally:

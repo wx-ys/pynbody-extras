@@ -8,7 +8,7 @@ together and is the entry point for the whole image layer::
     from pynbodyext.plot import image
 
     velocity = image.ImageData.from_bins(bins2d, "vz.mean")
-    velocity.smooth.gaussian(fwhm=2.0).psf.convolve(fwhm=3.0).imshow(colorbar=True)
+    velocity.smooth.gaussian(fwhm=2.0).psf.convolve(fwhm=3.0).display.imshow(colorbar=True)
 
 How it is put together:
 
@@ -60,12 +60,11 @@ import numpy as np
 
 from ._arrays import bin_centers, edges_are_uniform, pixel_width, resolve_edges, shape_hint
 from .adaptive import AdaptiveOps
-from .cmaps import K_B_C_G_Y_R_W, to_rgba
 from .compose import ComposeOps
-from .display import _unit_text, add_colorbar, draw_contour, draw_image, draw_imshow, draw_pcolormesh
+from .display import DisplayOps, _unit_text
 from .noise import NoiseOps
 from .ops import OPERATIONS, ImageOp, ImageOps, register_ops
-from .postprocess import SmoothOps, normalize
+from .postprocess import SmoothOps
 from .psf import PsfOps
 
 __all__ = ["ImageData", "ImageOp", "OPERATIONS", "as_image", "register_ops"]
@@ -267,147 +266,14 @@ class ImageData:
         """Noise family: ``image.noise.gaussian(snr=20)`` / ``.poisson(exposure=…)``."""
         return NoiseOps(self)
 
+    @property
+    def display(self) -> DisplayOps:
+        """Display family: ``image.display.imshow(...)``, ``.contour(...)``, ``.to_rgba(...)``."""
+        return DisplayOps(self)
+
     # ------------------------------------------------------------------
-    # display
+    # derivation
     # ------------------------------------------------------------------
-
-    def normalize(
-        self,
-        *,
-        vmin: float | None = None,
-        vmax: float | None = None,
-        stretch: str = "linear",
-        percentiles: tuple[float, float] | None = None,
-        asinh_a: float = 10.0,
-    ) -> ImageData:
-        """Map the values to ``[0, 1]`` for display, keeping the geometry.
-
-        Unlike the free :func:`~pynbodyext.plot.image.postprocess.normalize`, this
-        returns an image, so it can be chained.
-        """
-        stretched = normalize(
-            self.data, vmin=vmin, vmax=vmax, stretch=stretch, percentiles=percentiles, asinh_a=asinh_a
-        )
-        return self._derived(
-            stretched, "normalize", {"vmin": vmin, "vmax": vmax, "stretch": stretch, "percentiles": percentiles}
-        )
-
-    def to_rgba(
-        self,
-        cmap: Any = None,
-        *,
-        vmin: float | None = None,
-        vmax: float | None = None,
-        stretch: str = "linear",
-        percentiles: tuple[float, float] | None = None,
-        norm: Any = None,
-        alpha: Any = None,
-        bad: Any = None,
-    ) -> np.ndarray:
-        """Map the values to an ``(ny, nx, 4)`` RGBA array.
-
-        See :func:`~pynbodyext.plot.image.cmaps.to_rgba`; the default colour map is
-        the velocity map ``K_B_C_G_Y_R_W``.
-        """
-        return to_rgba(
-            self.data,
-            K_B_C_G_Y_R_W if cmap is None else cmap,
-            vmin=vmin,
-            vmax=vmax,
-            stretch=stretch,
-            percentiles=percentiles,
-            norm=norm,
-            alpha=alpha,
-            bad=bad,
-        )
-
-    def draw(
-        self,
-        ax: Any = None,
-        *,
-        colorbar: bool | str = False,
-        colorbar_kwargs: dict[str, Any] | None = None,
-        aspect: Any = None,
-        **kwargs: Any,
-    ) -> Any:
-        """Draw the image, picking the right artist for the bin spacing.
-
-        See :func:`~pynbodyext.plot.image.display.draw_image`.
-        """
-        return draw_image(self, ax=ax, colorbar=colorbar, colorbar_kwargs=colorbar_kwargs, aspect=aspect, **kwargs)
-
-    def imshow(
-        self,
-        ax: Any = None,
-        *,
-        colorbar: bool | str = False,
-        colorbar_kwargs: dict[str, Any] | None = None,
-        aspect: Any = None,
-        **kwargs: Any,
-    ) -> Any:
-        """Draw the image with ``imshow``; requires evenly spaced bins.
-
-        See :func:`~pynbodyext.plot.image.display.draw_imshow`.
-        """
-        return draw_imshow(self, ax=ax, colorbar=colorbar, colorbar_kwargs=colorbar_kwargs, aspect=aspect, **kwargs)
-
-    def pcolormesh(
-        self,
-        ax: Any = None,
-        *,
-        colorbar: bool | str = False,
-        colorbar_kwargs: dict[str, Any] | None = None,
-        aspect: Any = None,
-        shading: str = "flat",
-        **kwargs: Any,
-    ) -> Any:
-        """Draw the image as cells, honouring arbitrary bin edges.
-
-        See :func:`~pynbodyext.plot.image.display.draw_pcolormesh`.
-        """
-        return draw_pcolormesh(
-            self, ax=ax, colorbar=colorbar, colorbar_kwargs=colorbar_kwargs, aspect=aspect, shading=shading, **kwargs
-        )
-
-    def add_colorbar(self, mappable: Any = None, ax: Any = None, **kwargs: Any) -> Any:
-        """Dock a colour bar to the panel showing this image.
-
-        Shorthand for :func:`~pynbodyext.plot.image.display.add_colorbar`: with no
-        *mappable*, the artist drawn from this image in *ax* is used, so
-        ``image.imshow(); image.add_colorbar(loc="bottom")`` works — and so does
-        passing an image that has not been drawn yet.
-        """
-        return add_colorbar(self if mappable is None else mappable, ax=ax, **kwargs)
-
-    def contour(
-        self,
-        ax: Any = None,
-        *,
-        levels: Any = 8,
-        filled: bool = False,
-        colorbar: bool | str = False,
-        colorbar_kwargs: dict[str, Any] | None = None,
-        aspect: Any = None,
-        **kwargs: Any,
-    ) -> Any:
-        """Draw contour lines (or ``filled=True`` bands) of the values.
-
-        Contours follow the image's own grid — the bin centres — so they land on
-        the right pixels for unevenly spaced bins too, and they overlay an existing
-        image when the same *ax* is passed.
-
-        See :func:`~pynbodyext.plot.image.display.draw_contour`.
-        """
-        return draw_contour(
-            self,
-            ax=ax,
-            levels=levels,
-            filled=filled,
-            colorbar=colorbar,
-            colorbar_kwargs=colorbar_kwargs,
-            aspect=aspect,
-            **kwargs,
-        )
 
     def _derived(self, data: Any, op_name: str, params: dict[str, Any] | None = None, **overrides: Any) -> ImageData:
         """Return a copy carrying *data*, with *op_name* appended to :attr:`ops`.

@@ -9,6 +9,7 @@ import pytest
 
 EXPECTED_NAMES = {
     "COLORBAR_LOCATIONS",
+    "DisplayOps",
     "AdaptiveMap",
     "ImageData",
     "ImageDataView",

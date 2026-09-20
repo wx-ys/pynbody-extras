@@ -121,4 +121,4 @@ class BinPlotMixin:
         if self.ndim != 2:
             raise ValueError("imshow requires exactly 2 bin axes.")
         kwargs.setdefault("aspect", "auto")
-        return ImageData.from_bins(self, field).draw(ax=ax, **kwargs)
+        return ImageData.from_bins(self, field).display.draw(ax=ax, **kwargs)

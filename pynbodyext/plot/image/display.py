@@ -8,17 +8,28 @@ bars, and the choice between ``imshow`` and ``pcolormesh``.
 from __future__ import annotations
 
 import weakref
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from ._arrays import edges_are_uniform, value_limits
 from .cmaps import get_cmap
+from .ops import ImageOps, register_ops
+from .postprocess import normalize
 
 if TYPE_CHECKING:
     from .data import ImageData
 
-__all__ = ["COLORBAR_LOCATIONS", "add_colorbar", "draw_contour", "draw_image", "draw_imshow", "draw_pcolormesh"]
+__all__ = [
+    "COLORBAR_LOCATIONS",
+    "DisplayOps",
+    "add_colorbar",
+    "draw_contour",
+    "draw_image",
+    "draw_imshow",
+    "draw_pcolormesh",
+]
 
 #: Unit spellings that mean "no units at all", so they never reach a figure label.
 _EMPTY_UNITS = {"", "1", "NoUnit()", "dimensionless", "unitless"}
@@ -412,3 +423,190 @@ def draw_contour(
     artist = method(image.x_centers, image.y_centers, image.data, levels, **kwargs)
     _finish(ax, image, artist, colorbar, aspect, colorbar_kwargs)
     return artist
+
+
+def _symmetric_limits(data: np.ndarray, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Add symmetric ``vmin``/``vmax`` unless the caller set them."""
+    if "vmin" in kwargs or "vmax" in kwargs:
+        return kwargs
+    limit = float(np.nanmax(np.abs(data))) if np.isfinite(data).any() else 0.0
+    return {**kwargs, "vmin": -limit, "vmax": limit}
+
+
+@dataclass(frozen=True)
+class DisplayOps(ImageOps):
+    """The display family of an image: ``image.display.imshow(...)``.
+
+    Everything that turns values into a figure lives here — the stretch
+    (:meth:`normalize`), the colours (:meth:`to_rgba`), the artists
+    (:meth:`imshow`, :meth:`pcolormesh`, :meth:`draw`, :meth:`contour`) and
+    :meth:`add_colorbar` — so "what does this image look like" is one namespace,
+    next to the families that change the values.
+    """
+
+    def normalize(
+        self,
+        *,
+        vmin: float | None = None,
+        vmax: float | None = None,
+        stretch: str = "linear",
+        percentiles: tuple[float, float] | None = None,
+        asinh_a: float = 10.0,
+    ) -> ImageData:
+        """Map the values to ``[0, 1]`` for display, keeping the geometry.
+
+        Unlike the free :func:`~pynbodyext.plot.image.postprocess.normalize`, this
+        returns an image, so it can be chained.
+        """
+        stretched = normalize(
+            self.data, vmin=vmin, vmax=vmax, stretch=stretch, percentiles=percentiles, asinh_a=asinh_a
+        )
+        return self.derive(
+            stretched, "normalize", {"vmin": vmin, "vmax": vmax, "stretch": stretch, "percentiles": percentiles}
+        )
+
+    def to_rgba(
+        self,
+        cmap: Any = None,
+        *,
+        vmin: float | None = None,
+        vmax: float | None = None,
+        stretch: str = "linear",
+        percentiles: tuple[float, float] | None = None,
+        norm: Any = None,
+        alpha: Any = None,
+        bad: Any = None,
+    ) -> np.ndarray:
+        """Map the values to an ``(ny, nx, 4)`` RGBA array.
+
+        See :func:`~pynbodyext.plot.image.cmaps.to_rgba`; the default colour map is
+        the velocity map ``K_B_C_G_Y_R_W``.
+        """
+        from .cmaps import K_B_C_G_Y_R_W, to_rgba
+
+        return to_rgba(
+            self.data,
+            K_B_C_G_Y_R_W if cmap is None else cmap,
+            vmin=vmin,
+            vmax=vmax,
+            stretch=stretch,
+            percentiles=percentiles,
+            norm=norm,
+            alpha=alpha,
+            bad=bad,
+        )
+
+    def draw(
+        self,
+        ax: Any = None,
+        *,
+        colorbar: bool | str = False,
+        colorbar_kwargs: dict[str, Any] | None = None,
+        aspect: Any = None,
+        symmetric: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Draw the image, picking the right artist for the bin spacing.
+
+        Parameters
+        ----------
+        symmetric : bool, default: False
+            Centre the colour scale on zero — the right choice for a velocity map.
+            Ignored when ``vmin``/``vmax`` are given.
+        **kwargs
+            As in :func:`draw_image`, e.g. ``cmap``, ``colorbar``.
+        """
+        kwargs = _symmetric_limits(self.data, kwargs) if symmetric else kwargs
+        return draw_image(
+            self.image, ax=ax, colorbar=colorbar, colorbar_kwargs=colorbar_kwargs, aspect=aspect, **kwargs
+        )
+
+    def imshow(
+        self,
+        ax: Any = None,
+        *,
+        colorbar: bool | str = False,
+        colorbar_kwargs: dict[str, Any] | None = None,
+        aspect: Any = None,
+        symmetric: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Draw the image with ``imshow``; requires evenly spaced bins."""
+        kwargs = _symmetric_limits(self.data, kwargs) if symmetric else kwargs
+        return draw_imshow(
+            self.image, ax=ax, colorbar=colorbar, colorbar_kwargs=colorbar_kwargs, aspect=aspect, **kwargs
+        )
+
+    def pcolormesh(
+        self,
+        ax: Any = None,
+        *,
+        colorbar: bool | str = False,
+        colorbar_kwargs: dict[str, Any] | None = None,
+        aspect: Any = None,
+        symmetric: bool = False,
+        shading: str = "flat",
+        **kwargs: Any,
+    ) -> Any:
+        """Draw the image as cells, honouring arbitrary bin edges."""
+        kwargs = _symmetric_limits(self.data, kwargs) if symmetric else kwargs
+        return draw_pcolormesh(
+            self.image,
+            ax=ax,
+            colorbar=colorbar,
+            colorbar_kwargs=colorbar_kwargs,
+            aspect=aspect,
+            shading=shading,
+            **kwargs,
+        )
+
+    def contour(
+        self,
+        ax: Any = None,
+        *,
+        levels: Any = 8,
+        filled: bool = False,
+        colorbar: bool | str = False,
+        colorbar_kwargs: dict[str, Any] | None = None,
+        aspect: Any = None,
+        symmetric: bool = False,
+        count: int = 6,
+        **kwargs: Any,
+    ) -> Any:
+        """Draw contour lines (or ``filled=True`` bands) on the image's own grid.
+
+        Parameters
+        ----------
+        symmetric : bool, default: False
+            With ``levels`` left as a count, place the levels symmetrically about
+            zero, *count* on each side — the right choice for a velocity map.
+        count : int, default: 6
+            How many levels on each side of zero when *symmetric* is set.
+        **kwargs
+            As in :func:`draw_contour`, e.g. ``colors``, ``linewidths``.
+        """
+        if symmetric and "levels" not in kwargs:
+            limit = float(np.nanmax(np.abs(self.data)))
+            levels = np.linspace(-limit, limit, 2 * count + 1)
+        return draw_contour(
+            self.image,
+            ax=ax,
+            levels=levels,
+            filled=filled,
+            colorbar=colorbar,
+            colorbar_kwargs=colorbar_kwargs,
+            aspect=aspect,
+            **kwargs,
+        )
+
+    def add_colorbar(self, mappable: Any = None, ax: Any = None, **kwargs: Any) -> Any:
+        """Dock a colour bar to the panel showing this image.
+
+        Shorthand for :func:`add_colorbar`: with no *mappable*, the artist drawn
+        from this image in *ax* is used, so ``img.display.imshow();
+        img.display.add_colorbar(loc="bottom")`` works.
+        """
+        return add_colorbar(self.image if mappable is None else mappable, ax=ax, **kwargs)
+
+
+register_ops("display", DisplayOps)

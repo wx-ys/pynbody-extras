@@ -294,7 +294,7 @@ def test_imshow_uses_the_stored_extent_and_axis_labels() -> None:
 
     fig, ax = plt.subplots()
     try:
-        artist = image.imshow(ax=ax)
+        artist = image.display.imshow(ax=ax)
         assert tuple(artist.get_extent()) == (0.0, 30.0, -5.0, 5.0)
         assert ax.get_xlabel() == "radius [kpc]"
         assert ax.get_ylabel() == "height [pc]"
@@ -308,7 +308,7 @@ def test_imshow_can_override_the_extent_and_create_axes() -> None:
 
     image = ImageData(np.zeros((4, 6)), extent=(0.0, 30.0, -5.0, 5.0))
 
-    artist = image.imshow(extent=(0.0, 1.0, 0.0, 1.0))
+    artist = image.display.imshow(extent=(0.0, 1.0, 0.0, 1.0))
     try:
         assert tuple(artist.get_extent()) == (0.0, 1.0, 0.0, 1.0)
     finally:
@@ -323,9 +323,9 @@ def test_colorbar_is_opt_in_and_uses_the_value_metadata() -> None:
 
     fig, ax = plt.subplots()
     try:
-        image.imshow(ax=ax)
+        image.display.imshow(ax=ax)
         assert len(fig.axes) == 1
-        image.imshow(ax=ax, colorbar=True)
+        image.display.imshow(ax=ax, colorbar=True)
         assert len(fig.axes) == 2
         assert fig.axes[1].get_ylabel() == "mass.sum [1e10 Msol]"
     finally:
@@ -336,7 +336,7 @@ def test_imshow_refuses_non_uniform_bins() -> None:
     image = ImageData(np.zeros((4, 4)), x_edges=[0.0, 1.0, 3.0, 6.0, 10.0], y_edges=[0.0, 1.0, 2.0, 3.0, 4.0])
 
     with pytest.raises(ValueError, match="pcolormesh"):
-        image.imshow()
+        image.display.imshow()
 
 
 def test_pcolormesh_draws_non_uniform_bins() -> None:
@@ -353,7 +353,7 @@ def test_pcolormesh_draws_non_uniform_bins() -> None:
 
     fig, ax = plt.subplots()
     try:
-        artist = image.pcolormesh(ax=ax)
+        artist = image.display.pcolormesh(ax=ax)
         assert isinstance(artist, QuadMesh)
         assert ax.get_xlim() == (0.0, 10.0)
         assert ax.get_ylim() == (0.0, 9.0)
@@ -370,7 +370,7 @@ def test_pcolormesh_also_works_for_uniform_bins() -> None:
 
     fig, ax = plt.subplots()
     try:
-        artist = image.pcolormesh(ax=ax)
+        artist = image.display.pcolormesh(ax=ax)
         assert isinstance(artist, QuadMesh)
         assert ax.get_xlim() == (0.0, 30.0)
     finally:

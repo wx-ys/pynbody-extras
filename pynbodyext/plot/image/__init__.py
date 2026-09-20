@@ -23,7 +23,7 @@ Each free function stays available for plain 2-D ``numpy`` arrays — nothing in
 this package requires a live simulation object — and :class:`ImageData` offers the
 same operations as methods, grouped by family::
 
-    image.ImageData.from_bins(bins2d, "vz.mean").smooth.gaussian(fwhm=2).imshow(colorbar=True)
+    image.ImageData.from_bins(bins2d, "vz.mean").smooth.gaussian(fwhm=2).display.imshow(colorbar=True)
 """
 
 from .adaptive import AdaptiveMap, adaptive_bin_map, adaptive_map_from_bins
@@ -40,7 +40,7 @@ from .cmaps import (
 )
 from .compose import MapStyle, blend_images, blend_stack, compose_maps, create_map_mask, imshow_compose
 from .data import OPERATIONS, ImageData, ImageOp, as_image, register_ops
-from .display import COLORBAR_LOCATIONS, add_colorbar
+from .display import COLORBAR_LOCATIONS, DisplayOps, add_colorbar
 from .noise import NoiseOps, add_noise, add_poisson_noise
 from .ops import ImageDataView, ImageOps
 from .postprocess import STRETCHES, box_smooth, downsample, gaussian_smooth, median_filter, normalize
@@ -48,6 +48,7 @@ from .psf import convolve_psf, deconvolve_psf, gaussian_psf, normalize_psf, rich
 
 __all__ = [
     "COLORBAR_LOCATIONS",
+    "DisplayOps",
     "AdaptiveMap",
     "ImageData",
     "ImageDataView",

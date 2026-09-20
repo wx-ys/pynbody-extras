@@ -112,8 +112,6 @@ class ImageDataView:
     The view holds the image as :attr:`image` and re-exposes what every view is
     asked for — values, shape, geometry, units, labels — so subclasses (capability
     views, :class:`AdaptiveMap`) declare only the attributes that are their own.
-    Forwards :meth:`add_colorbar` as well, since it always applies to the image
-    behind the view.
 
     Attributes are read-only: writing to a view is not how anything here is
     meant to work.
@@ -216,16 +214,6 @@ class ImageDataView:
     def units(self) -> Any:
         """Units of the values."""
         return self.image.units
-
-    def add_colorbar(self, mappable: Any = None, ax: Any = None, **kwargs: Any) -> Any:
-        """Dock a colour bar to the panel showing the image behind this view.
-
-        Shorthand for :func:`~pynbodyext.plot.image.display.add_colorbar`; with no
-        *mappable*, the artist drawn from the image in *ax* is used.
-        """
-        from .display import add_colorbar  # local import: keeps this module free of display
-
-        return add_colorbar(self.image if mappable is None else mappable, ax=ax, **kwargs)
 
 
 @dataclass(frozen=True)

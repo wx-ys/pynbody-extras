@@ -128,9 +128,9 @@ def test_a_view_can_add_the_colour_bar_of_its_image() -> None:
     source = image(label="vz.mean")
     fig, ax = plt.subplots()
     try:
-        artist = source.imshow(ax=ax)
+        artist = source.display.imshow(ax=ax)
 
-        bar = source.smooth.add_colorbar(ax=ax)
+        bar = source.display.add_colorbar(ax=ax)
 
         assert bar.mappable is artist
         assert bar.ax.get_ylabel() == "vz.mean [km/s]"

@@ -201,7 +201,7 @@ def test_adaptive_map_to_image_data_carries_the_geometry() -> None:
     assert (image.label, image.units) == ("vz.mean", "km/s")
 
 
-def test_adaptive_map_imshow_dispatches_on_uniformity() -> None:
+def test_adaptive_map_draw_dispatches_on_uniformity() -> None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.collections import QuadMesh
@@ -215,8 +215,11 @@ def test_adaptive_map_imshow_dispatches_on_uniformity() -> None:
 
     fig, ax = plt.subplots()
     try:
-        assert isinstance(even.imshow(ax=ax), AxesImage)
-        assert isinstance(stretched.imshow(ax=ax), QuadMesh)
+        # ``draw`` picks the artist; ``imshow`` stays strict about even bins.
+        assert isinstance(even.display.draw(ax=ax), AxesImage)
+        assert isinstance(stretched.display.draw(ax=ax), QuadMesh)
+        with pytest.raises(ValueError, match="pcolormesh"):
+            stretched.display.imshow(ax=ax)
     finally:
         plt.close(fig)
 
@@ -230,7 +233,7 @@ def test_adaptive_bin_map_imshow_draws_the_binned_image() -> None:
 
     fig, ax = plt.subplots()
     try:
-        artist = result.imshow(ax=ax)
+        artist = result.display.imshow(ax=ax)
         assert tuple(artist.get_extent()) == (0.0, 40.0, 0.0, 40.0)
         assert artist.get_array().shape == value.shape
     finally:

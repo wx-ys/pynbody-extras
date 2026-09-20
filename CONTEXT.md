@@ -113,6 +113,10 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
 - [ADR-0008](docs/adr/0008-image-noise-models.md): two explicit, seeded noise
   models — Gaussian (`sigma` or `snr`) and Poisson (`exposure`, `background`) —
   rather than hidden noise in the display path.
+- [ADR-0009](docs/adr/0009-display-is-a-family-too.md): `display` is a capability
+  family like the others (`image.display.imshow/contour/normalize/...`), so no
+  operation has a flat spelling and `ImageData` carries only what it *is*
+  (supersedes decision 4 of ADR-0006).
 
 ## Image layer (`pynbodyext/plot/image/`)
 
@@ -132,7 +136,8 @@ object a caller normally holds.
   carries the metadata through a processing chain; `.pixel_size` is the
   `(dy, dx)` needed to express a kernel width in physical units, and refuses when
   a direction has bins of unequal width. Display accordingly:
-  `.imshow()` for evenly spaced bins, `.pcolormesh()` for arbitrary edges.
+  `.display.imshow()` for evenly spaced bins, `.display.pcolormesh()` for arbitrary
+  edges, `.display.draw()` to let it pick.
   `ImageData` is a single class (no capability base classes). Each family is a
   **view** — `SmoothOps`, `PsfOps`, `ComposeOps`, `AdaptiveOps` — reached as a
   property: `image.smooth.gaussian(fwhm=2)`, `image.psf.convolve(fwhm=3)`,
@@ -159,13 +164,19 @@ object a caller normally holds.
   `ImageData` — geometry and units intact — with the call appended to
   **`ops`** (`tuple[ImageOp, ...]`, `ImageOp(name, params)`), which is what
   `repr(image)` summarises.
+- **Every capability is an accessor; `ImageData` itself carries only data.** The
+  six families are `smooth`, `psf`, `noise`, `compose`, `adaptive` and `display`,
+  and no operation has a flat spelling: `image.display.imshow(...)`,
+  `image.display.contour(...)`, `image.display.normalize(...)`. What stays on
+  `ImageData` is what it *is* — values, geometry, units, labels, `ops`,
+  `with_data`, `from_bins`/`from_bins_array`, `as_image` and the registry.
 - **Colour bars** are docked to their panel, not floated: `add_colorbar(artist |
-  image, loc=…)` (also `image.add_colorbar(…)`, and `colorbar=True|loc` +
-  `colorbar_kwargs` on `draw`/`imshow`/`pcolormesh`/`AdaptiveMap.imshow`) uses
+  image, loc=…)` (also `image.display.add_colorbar(…)`, and `colorbar=True|loc` +
+  `colorbar_kwargs` on `display.draw`/`imshow`/`pcolormesh`/`contour`) uses
   `make_axes_locatable` with a shared divider per panel, so `size="5%"`,
   `pad=0.05`, `label_pad` and `tick_label_size` are under the caller's control and
   several bars (e.g. the two sides of `compose.imshow`) coexist.
-- **Contours** are a display verb alongside `imshow`: `image.contour(ax=ax,
+- **Contours** are a display verb alongside `imshow`: `image.display.contour(ax=ax,
   levels=…, filled=…)` (and `AdaptiveMap.contour`) draws on the bin centres, so it
   is correct for uneven bins and overlays an existing image when passed the same
   axes. The artist is a `ContourSet`, which `add_colorbar` accepts directly.
@@ -180,13 +191,14 @@ object a caller normally holds.
   a composite): they accept an image-like input. The free functions underneath take
   arrays you have already oriented, which is the array-level contract.
 - **`BinNDResult.imshow`** (`core/calculate/bins/plot.py`) — a one-line bridge:
-  it builds `ImageData.from_bins(self, query)` and calls `.draw()`. A bin grid is
+  it builds `ImageData.from_bins(self, query)` and calls `.display.draw()`. A bin grid is
   `(x, y)` and an image is `(row=y, column=x)`, so `from_bins` transposes; uneven
   bins therefore come out as a `pcolormesh` rather than being forced onto a
   regular pixel grid. No image drawing is implemented in the calculator layer.
   The same bridge is reachable from the array itself: `bins2d["mass.sum"].image`
   (a `BinsArray` property) hands back the `ImageData`, so
-  `bins2d["mass.sum"].image.draw()` or `.contour(ax=ax)` need no further import.
+  `bins2d["mass.sum"].image.display.draw()` or `.display.contour(ax=ax)` need no
+  further import.
 - **Adaptive bin map** (`AdaptiveMap`, `plot/image/adaptive.py`) — a partition of
   a map into regions of comparable *capacity* made with PowerBin (centroidal
   power diagrams, the successor of Voronoi binning). The capacity is the
@@ -196,7 +208,7 @@ object a caller normally holds.
   unbinned pixels left non-finite. *Not* a smoothing operation: it never mixes
   pixels into an average they do not belong to.
   It carries the geometry of the grid it was binned *from* (`x_edges`/`y_edges`,
-  per-axis units and labels), and `.to_image_data()` hands that on; `.imshow()`
+  per-axis units and labels), and `.to_image_data()` hands that on; `.display.draw()`
   draws even grids with `imshow` and uneven ones with `pcolormesh`.
 - **Map mask** (`plot/image/compose.py`) — a pair of complementary soft masks in
   `[0, 1]` split by a line at `line_angle`, with a transition ramp whose width is

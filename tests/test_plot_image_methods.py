@@ -119,8 +119,8 @@ def test_psf_deconvolution_methods_return_images() -> None:
 def test_normalize_returns_an_image_but_to_rgba_returns_colours() -> None:
     source = image()
 
-    stretched = source.normalize(stretch="log")
-    coloured = source.to_rgba(cmap="viridis")
+    stretched = source.display.normalize(stretch="log")
+    coloured = source.display.to_rgba(cmap="viridis")
 
     assert isinstance(stretched, ImageData)
     np.testing.assert_allclose(stretched.data, normalize(source.data, stretch="log"))
@@ -172,7 +172,7 @@ def test_adaptive_bin_accepts_plain_arrays_and_statistics() -> None:
 
 
 def test_chaining_records_every_step_in_order() -> None:
-    chained = image().smooth.gaussian(fwhm=2.0).psf.convolve(fwhm=1.0).normalize(stretch="sqrt")
+    chained = image().smooth.gaussian(fwhm=2.0).psf.convolve(fwhm=1.0).display.normalize(stretch="sqrt")
 
     assert [op.name for op in chained.ops] == ["gaussian_smooth", "convolve_psf", "normalize"]
     assert "gaussian_smooth" in repr(chained)
@@ -185,7 +185,7 @@ def test_methods_do_not_touch_the_original() -> None:
 
     source.smooth.gaussian(fwhm=2.0)
     source.smooth.downsample(factor=2)
-    source.normalize()
+    source.display.normalize()
 
     np.testing.assert_array_equal(source.data, before)
     assert source.ops == ()
@@ -229,7 +229,7 @@ def test_draw_is_the_one_call_that_always_works() -> None:
 
     fig, ax = plt.subplots()
     try:
-        assert isinstance(even.draw(ax=ax), AxesImage)
-        assert isinstance(uneven.draw(ax=ax), QuadMesh)
+        assert isinstance(even.display.draw(ax=ax), AxesImage)
+        assert isinstance(uneven.display.draw(ax=ax), QuadMesh)
     finally:
         plt.close(fig)

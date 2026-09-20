@@ -222,11 +222,11 @@ bins2d.imshow("mass.sum", cmap="inferno", colorbar=True)
 density = image.ImageData.from_bins(bins2d, "mass.sum")
 smoothed = density.smooth.gaussian(fwhm=1.0)        # fwhm in the units of the axes
 observed = smoothed.psf.convolve(fwhm=3.0)          # what a telescope would see
-observed.imshow(cmap="inferno", colorbar=True)
+observed.display.imshow(cmap="inferno", colorbar=True)
 
 # ...and what the detector would do to it: seeded, maskable, recorded in .ops
 detected = observed.noise.poisson(exposure=0.05, background=2.0, rng=1)
-detected.imshow(cmap="inferno", colorbar=True)
+detected.display.imshow(cmap="inferno", colorbar=True)
 
 # Deconvolution goes the other way (and amplifies noise: it is a visualisation tool)
 restored = observed.psf.wiener(image.gaussian_psf(fwhm=3.0), balance=1e-6)
@@ -234,14 +234,14 @@ restored = observed.psf.wiener(image.gaussian_psf(fwhm=3.0), balance=1e-6)
 # A velocity map: adaptive bins of equal mass, green on zero velocity
 velocity = image.ImageData.from_bins(bins2d, "vz.mean")
 binned = velocity.adaptive.bin(bins2d["mass.sum"], target_nbins=200, min_signal=1e6)
-binned.imshow(cmap="K_B_C_G_Y_R_W", symmetric=True, colorbar="bottom")
+binned.display.imshow(cmap="K_B_C_G_Y_R_W", symmetric=True, colorbar="bottom")
 binned.image.smooth.box(size=3)       # the painted map is an ImageData too
 # a colour bar can also be added afterwards, on the artist or on the map
-binned.add_colorbar(loc="left", size="4%", tick_label_size=8)
+binned.display.add_colorbar(loc="left", size="4%", tick_label_size=8)
 
 # Contours are a display verb too: they follow the bins of the map they describe
-velocity.draw(ax=ax, cmap="inferno")
-velocity.contour(ax=ax, levels=[-200, -100, 0, 100, 200], colors="w", linewidths=0.6)
+velocity.display.draw(ax=ax, cmap="inferno")
+velocity.display.contour(ax=ax, levels=[-200, -100, 0, 100, 200], colors="w", linewidths=0.6)
 
 # Anything that takes a second map accepts a binned array directly: it carries its
 # own orientation, so no `.T` (a raw ndarray is taken as image-oriented)
@@ -258,11 +258,12 @@ gas.imshow_compose(
 )
 ```
 
-Families with several variants sit behind an accessor (`image.smooth.gaussian`,
-`image.psf.convolve`, `image.compose(other)`, `image.adaptive.bin`), single
-operations are plain methods (`normalize`, `to_rgba`, `draw`, `contour`, `add_colorbar`), and
-the underlying free functions (`gaussian_smooth(data, ...)`, `compose_maps(...)`,
-…) remain available for plain arrays. A new family is a new module plus
+Every capability is an accessor — `image.smooth.gaussian`, `image.psf.convolve`,
+`image.noise.poisson`, `image.compose(other)`, `image.adaptive.bin`,
+`image.display.imshow/contour/normalize/to_rgba` — and `ImageData` itself carries
+only what it *is* (values, geometry, units, labels, `ops`, `with_data`,
+`from_bins`). The underlying free functions (`gaussian_smooth(data, ...)`,
+`compose_maps(...)`, …) remain available for plain arrays. A new family is a new module plus
 `@ImageData.register_ops("tessellation")`, so extension never means editing base
 classes. The velocity colour map (black → blue → cyan → **green on zero** → yellow
 → red → white, also known as `image.vel_cmap`) is registered with matplotlib, so
