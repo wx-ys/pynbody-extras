@@ -192,6 +192,11 @@ object a caller normally holds.
   become geometric, the colour bar comes out logarithmic on every side, and asking
   for a scale a drawn artist does not have is an error rather than a mislabelled
   bar. `symmetric=True` (zero-centred) and `log=True` are mutually exclusive.
+  Matplotlib's *string* spellings are understood too — `norm="log"` behaves exactly
+  like `log=True` (it is resolved to a norm instance by `cmaps.as_norm`, so the
+  levels become geometric as well), and `norm="symlog"`, `"logit"`, `"asinh"` and
+  `"linear"` are accepted where this matplotlib has them; an unknown name is an
+  error rather than a silently linear scale.
   A `MapStyle` may carry a `norm` too (or a `stretch`, not both), and
   `MapStyle.norm_for(data)` — used by `compose.imshow` — returns a norm matching the
   stretch exactly (`FuncNorm` over the data range, per `stretch_functions`), so a

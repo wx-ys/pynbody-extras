@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from ._arrays import edges_are_uniform, value_limits
-from .cmaps import get_cmap
+from .cmaps import as_norm, get_cmap, is_log_norm
 from .ops import ImageOps, register_ops
 from .smooth import normalize
 
@@ -160,7 +160,7 @@ def add_colorbar(
         raise ValueError(f"loc must be one of {', '.join(COLORBAR_LOCATIONS)}, got {loc!r}.")
     artist, source = _as_mappable(mappable)
     if (norm is not None or log) and artist is not None:
-        requested_log = log or isinstance(norm, LogNorm)
+        requested_log = log or is_log_norm(norm)
         drawn_log = isinstance(getattr(artist, "norm", None), LogNorm)
         if requested_log != drawn_log:
             raise ValueError(
@@ -570,6 +570,7 @@ def resolve_norm(
     """
     from matplotlib.colors import LogNorm
 
+    norm = as_norm(norm)  # "log" and friends arrive as scale names, not instances
     if norm is not None and log:
         raise ValueError("Pass either 'norm' or log=True, not both: they describe the same scale twice.")
     if norm is None and not log:
@@ -584,13 +585,15 @@ def resolve_norm(
             limits = positive_limits(data)
         else:
             limits = positive_limits(data, vmin=low, vmax=high)
+        if norm.vmin is None or norm.vmax is None:  # colours and levels share one range
+            norm.vmin, norm.vmax = limits
         return norm, limits
     return norm, None
 
 
-def reject_log_and_symmetric(symmetric: bool, log: bool) -> None:
+def reject_log_and_symmetric(symmetric: bool, log: bool = False, norm: Any = None) -> None:
     """Refuse ``symmetric=True`` together with ``log=True``, which cannot both hold."""
-    if symmetric and log:
+    if symmetric and (log or is_log_norm(norm)):
         raise ValueError("symmetric=True centres the colour scale on zero, which log=True cannot do; pass one of them.")
 
 
@@ -678,7 +681,7 @@ class DisplayOps(ImageOps):
         **kwargs
             As in :func:`draw_image`, e.g. ``cmap``, ``colorbar``, ``log=True``.
         """
-        reject_log_and_symmetric(symmetric, bool(kwargs.get("log")))
+        reject_log_and_symmetric(symmetric, bool(kwargs.get("log")), kwargs.get("norm"))
         kwargs = _symmetric_limits(self.data, kwargs) if symmetric else kwargs
         return draw_image(
             self.image, ax=ax, colorbar=colorbar, colorbar_kwargs=colorbar_kwargs, aspect=aspect, **kwargs
@@ -700,7 +703,7 @@ class DisplayOps(ImageOps):
         a ``norm=``) for a map that spans decades, and ``symmetric=True`` for a
         velocity map.
         """
-        reject_log_and_symmetric(symmetric, bool(kwargs.get("log")))
+        reject_log_and_symmetric(symmetric, bool(kwargs.get("log")), kwargs.get("norm"))
         kwargs = _symmetric_limits(self.data, kwargs) if symmetric else kwargs
         return draw_imshow(
             self.image, ax=ax, colorbar=colorbar, colorbar_kwargs=colorbar_kwargs, aspect=aspect, **kwargs
@@ -722,7 +725,7 @@ class DisplayOps(ImageOps):
         Accepts the arguments of :func:`draw_pcolormesh`, in particular ``log=True``
         (or a ``norm=``) and ``symmetric=True``.
         """
-        reject_log_and_symmetric(symmetric, bool(kwargs.get("log")))
+        reject_log_and_symmetric(symmetric, bool(kwargs.get("log")), kwargs.get("norm"))
         kwargs = _symmetric_limits(self.data, kwargs) if symmetric else kwargs
         return draw_pcolormesh(
             self.image,
@@ -760,7 +763,7 @@ class DisplayOps(ImageOps):
             As in :func:`draw_contour`, e.g. ``colors``, ``linewidths``, and
             ``log=True`` (or a ``norm=``) to space the levels geometrically.
         """
-        reject_log_and_symmetric(symmetric, bool(kwargs.get("log")))
+        reject_log_and_symmetric(symmetric, bool(kwargs.get("log")), kwargs.get("norm"))
         if symmetric and "levels" not in kwargs:
             limit = float(np.nanmax(np.abs(self.data)))
             levels = np.linspace(-limit, limit, 2 * count + 1)

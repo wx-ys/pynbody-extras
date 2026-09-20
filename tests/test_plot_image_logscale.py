@@ -64,6 +64,31 @@ def test_contour_levels_follow_a_log_norm_too() -> None:
         plt.close(fig)
 
 
+def test_contour_understands_the_string_form_of_a_norm() -> None:
+    """``norm="log"`` is matplotlib's own spelling, so it must behave like log=True."""
+    source = density()
+    fig, ax = plt.subplots()
+    try:
+        from_string = source.display.contour(ax=ax, norm="log", levels=4)
+        from_flag = source.display.contour(ax=ax, log=True, levels=4)
+
+        np.testing.assert_allclose(from_string.levels, from_flag.levels)
+        assert np.all(np.diff(np.log10(from_string.levels)) > 0)
+        assert isinstance(from_string.norm, LogNorm)
+    finally:
+        plt.close(fig)
+
+
+def test_a_string_norm_is_refused_for_an_unknown_scale() -> None:
+    with pytest.raises(ValueError, match="Unknown colour scale"):
+        density().display.imshow(norm="gamma2")
+
+
+def test_symmetric_refuses_a_string_log_norm_too() -> None:
+    with pytest.raises(ValueError, match="symmetric"):
+        density().display.draw(symmetric=True, norm="log")
+
+
 def test_contour_levels_stay_linear_without_log() -> None:
     fig, ax = plt.subplots()
     try:
@@ -121,6 +146,32 @@ def test_imshow_can_use_a_log_norm() -> None:
         assert artist.norm.vmax == pytest.approx(1e2 + 1e-4, rel=1e-3)
     finally:
         plt.close(fig)
+
+
+def test_imshow_accepts_the_string_form_and_labels_it_logarithmically() -> None:
+    fig, ax = plt.subplots()
+    try:
+        artist = density().display.imshow(ax=ax, norm="log", colorbar=True)
+
+        assert isinstance(artist.norm, LogNorm)
+        assert artist.norm.vmin > 0 and artist.norm.vmax > artist.norm.vmin
+        assert fig.axes[1].get_yscale() == "log"
+    finally:
+        plt.close(fig)
+
+
+def test_to_rgba_and_map_style_accept_a_string_norm() -> None:
+    from pynbodyext.plot.image import MapStyle, to_rgba
+
+    values = np.array([[1e-3, 1e-1, 1e2]])
+
+    by_name = to_rgba(values, norm="log")
+    by_instance = to_rgba(values, norm=LogNorm(1e-3, 1e2))
+
+    np.testing.assert_allclose(by_name, by_instance)
+    style = MapStyle(cmap="inferno", norm="log")
+    np.testing.assert_allclose(style.to_rgba(values), to_rgba(values, "inferno", norm=LogNorm(1e-3, 1e2)))
+    assert isinstance(style.norm_for(values), LogNorm)
 
 
 def test_draw_and_pcolormesh_support_log_too() -> None:
@@ -199,6 +250,20 @@ def test_add_colorbar_can_be_logarithmic() -> None:
         assert isinstance(bar.mappable.norm, LogNorm)
         assert bar.ax.get_yscale() == "log"
         assert bar.ax.get_ylabel() == "mass.density [Msol kpc**-2]"
+    finally:
+        plt.close(fig)
+
+
+def test_add_colorbar_accepts_the_string_form() -> None:
+    source = density()
+    fig, ax = plt.subplots()
+    try:
+        ax.set_axis_off()
+
+        bar = add_colorbar(source, ax=ax, norm="log")
+
+        assert isinstance(bar.mappable.norm, LogNorm)
+        assert bar.ax.get_yscale() == "log"
     finally:
         plt.close(fig)
 

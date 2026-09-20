@@ -42,8 +42,10 @@ from .smooth import normalize, stretch_functions
 __all__ = [
     "SAURON_POSITIONS",
     "SAURON_RGB",
+    "as_norm",
     "cmap_from_colors",
     "get_cmap",
+    "is_log_norm",
     "norm_from_stretch",
     "register_cmap",
     "sauron_cmap",
@@ -52,6 +54,64 @@ __all__ = [
     "vel_cmap",
     "vel_cmap_r",
 ]
+
+#: Matplotlib scale names accepted where a norm is expected (``norm="log"`` and
+#: friends), mapped to the matching public norm class — the ones this matplotlib
+#: has.  Anything more exotic — a ``PowerNorm`` with a custom exponent, say — has to
+#: be passed as an instance.
+_NAMED_NORMS: dict[str, type[matplotlib.colors.Normalize]] = {
+    name: getattr(mcolors, class_name)
+    for name, class_name in (
+        ("linear", "Normalize"),
+        ("log", "LogNorm"),
+        ("symlog", "SymLogNorm"),
+        ("logit", "LogitNorm"),  # matplotlib >= 3.9
+        ("asinh", "AsinhNorm"),
+    )
+    if hasattr(mcolors, class_name)
+}
+
+
+def as_norm(norm: Any) -> Any:
+    """Resolve a norm that may be given as a matplotlib scale *name*.
+
+    Matplotlib lets ``norm=`` be a string (``"log"``, ``"symlog"``, ``"linear"``, …)
+    as well as a ``Normalize`` instance, and plotting code uses both.  This layer
+    needs an instance: it has to know whether the scale is logarithmic (to space
+    contour levels geometrically) and it has to apply the norm itself when mapping
+    values to colours.
+
+    Parameters
+    ----------
+    norm : str, matplotlib.colors.Normalize or None
+        The scale to resolve.
+
+    Returns
+    -------
+    matplotlib.colors.Normalize or None
+        The same instance when one was given, an equivalent instance for a known
+        name, and ``None`` unchanged.
+
+    Raises
+    ------
+    ValueError
+        If a string is not the name of a scale this layer knows.
+    """
+    if norm is None or not isinstance(norm, str):
+        return norm
+    try:
+        return _NAMED_NORMS[norm]()
+    except KeyError:
+        raise ValueError(
+            f"Unknown colour scale {norm!r}; pass one of {', '.join(_NAMED_NORMS)} "
+            "or a matplotlib.colors.Normalize instance."
+        ) from None
+
+
+def is_log_norm(norm: Any) -> bool:
+    """Whether *norm* asks for a logarithmic scale, as a name or an instance."""
+    return norm == "log" or isinstance(norm, mcolors.LogNorm)
+
 
 #: Positions of the SAURON control points, from the published table (``x/255``).
 #: The table is symmetric about ``0.5`` (green, the zero of the velocity field):
@@ -240,7 +300,7 @@ def to_rgba(
         raise ValueError(f"data must be a 2-D image, got shape {array.shape}.")
     colors = get_cmap(cmap)
     if norm is not None:
-        values = np.asarray(norm(array), dtype=float)
+        values = np.asarray(as_norm(norm)(array), dtype=float)
     else:
         values = normalize(array, vmin=vmin, vmax=vmax, stretch=stretch, percentiles=percentiles)
     if bad is not None:

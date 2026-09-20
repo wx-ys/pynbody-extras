@@ -32,7 +32,7 @@ from typing import Any
 import numpy as np
 
 from ._arrays import aligned_values, shape_hint, value_limits
-from .cmaps import get_cmap, norm_from_stretch, to_rgba
+from .cmaps import as_norm, get_cmap, norm_from_stretch, to_rgba
 from .display import add_colorbar
 from .ops import ImageOps
 from .smooth import STRETCHES
@@ -115,7 +115,7 @@ class MapStyle:
         back to a linear scale.
         """
         if self.norm is not None:
-            return self.norm
+            return as_norm(self.norm)
         vmin, vmax = self.limits(data)
         return norm_from_stretch(self.stretch, vmin=vmin, vmax=vmax)
 
