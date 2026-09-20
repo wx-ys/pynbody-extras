@@ -185,6 +185,17 @@ object a caller normally holds.
   `make_axes_locatable` with a shared divider per panel, so `size="5%"`,
   `pad=0.05`, `label_pad` and `tick_label_size` are under the caller's control and
   several bars (e.g. the two sides of `compose.imshow`) coexist.
+- **Scales are explicit and shared.** `display.draw`/`imshow`/`pcolormesh`/
+  `contour` and `add_colorbar` take `log=True` (or a `norm=`), so a map that spans
+  decades — a density, say — is drawn and labelled on one scale: `log=True` builds a
+  `LogNorm` over the positive values (or explicit `vmin`/`vmax`), contour levels
+  become geometric, the colour bar comes out logarithmic on every side, and asking
+  for a scale a drawn artist does not have is an error rather than a mislabelled
+  bar. `symmetric=True` (zero-centred) and `log=True` are mutually exclusive.
+  A `MapStyle` may carry a `norm` too (or a `stretch`, not both), and
+  `MapStyle.norm_for(data)` — used by `compose.imshow` — returns a norm matching the
+  stretch exactly (`FuncNorm` over the data range, per `stretch_functions`), so a
+  stretched map's colour bar no longer shows a linear scale.
 - **Contours** are a display verb alongside `imshow`: `image.display.contour(ax=ax,
   levels=…, filled=…)` (and `AdaptiveMap.contour`) draws on the bin centres, so it
   is correct for uneven bins and overlays an existing image when passed the same

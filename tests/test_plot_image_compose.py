@@ -15,6 +15,7 @@ from pynbodyext.plot.image.compose import (
     create_map_mask,
     imshow_compose,
 )
+from pynbodyext.plot.image.smooth import normalize
 
 
 def gradient(shape: tuple[int, int] = (20, 30)) -> np.ndarray:
@@ -269,6 +270,60 @@ def test_map_style_validates_the_stretch_at_construction() -> None:
 def test_map_style_validates_the_percentile_range() -> None:
     with pytest.raises(ValueError, match="percentiles"):
         MapStyle(percentiles=(99, 1))
+
+
+def test_map_style_can_carry_an_explicit_norm() -> None:
+    from matplotlib.colors import LogNorm
+
+    style = MapStyle(cmap="inferno", norm=LogNorm(1e-3, 1e2))
+    values = np.array([[1e-3, 1e-1, 1e2]])
+
+    rgba = style.to_rgba(values)
+
+    expected = to_rgba(values, "inferno", norm=LogNorm(1e-3, 1e2))
+    np.testing.assert_allclose(rgba, expected)
+    assert style.norm_for(values) is style.norm
+    with pytest.raises(ValueError, match="norm"):
+        MapStyle(norm=LogNorm(), stretch="log")  # one scale, not two
+
+
+def test_a_stretched_style_gets_a_truthful_colour_bar() -> None:
+    """``stretch="log"`` must not be labelled with a linear scale."""
+    from matplotlib.colors import FuncNorm
+
+    style = MapStyle(cmap="inferno", stretch="log")
+    values = np.array([[1e-3, 1.0, 1e2]])
+
+    norm = style.norm_for(values)
+
+    assert isinstance(norm, FuncNorm)
+    # the bar's mapping is exactly the stretch the colours were drawn with
+    vmin, vmax = style.limits(values)
+    np.testing.assert_allclose(norm(values), normalize(values, stretch="log", vmin=vmin, vmax=vmax))
+    assert isinstance(MapStyle(cmap="inferno").norm_for(values), matplotlib.colors.Normalize)
+
+
+def test_imshow_compose_uses_the_style_norm_for_its_colour_bars() -> None:
+    from matplotlib.colors import LogNorm
+
+    import matplotlib.pyplot as plt
+
+    first = gradient() + 1e-3
+    second = gradient() + 1e-3
+
+    fig, ax = plt.subplots()
+    try:
+        imshow_compose(
+            first,
+            second,
+            ax=ax,
+            style1=MapStyle(cmap="inferno", norm=LogNorm(1e-3, 1.0)),
+            style2=MapStyle(cmap="cividis", norm=LogNorm(1e-3, 1.0)),
+        )
+
+        assert all(bar.get_yscale() == "log" for bar in fig.axes[1:])
+    finally:
+        plt.close(fig)
 
 
 def test_image_data_can_compose_with_another_image() -> None:

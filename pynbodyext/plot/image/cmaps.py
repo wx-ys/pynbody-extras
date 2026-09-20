@@ -37,13 +37,14 @@ import matplotlib.colors as mcolors
 import numpy as np
 from matplotlib.colors import Colormap, LinearSegmentedColormap
 
-from .smooth import normalize
+from .smooth import normalize, stretch_functions
 
 __all__ = [
     "SAURON_POSITIONS",
     "SAURON_RGB",
     "cmap_from_colors",
     "get_cmap",
+    "norm_from_stretch",
     "register_cmap",
     "sauron_cmap",
     "sauron_cmap_r",
@@ -126,6 +127,49 @@ def register_cmap(cmap: Colormap, name: str | None = None, *, overwrite: bool = 
         if overwrite:
             raise
     return cmap
+
+
+def norm_from_stretch(
+    stretch: str = "linear", *, vmin: float, vmax: float, asinh_a: float = 10.0
+) -> matplotlib.colors.Normalize:
+    """A matplotlib norm whose mapping matches the *stretch* of :func:`to_rgba`.
+
+    Drawing a stretched image with the matching norm is what makes its colour bar
+    tell the truth: without it a ``stretch="log"`` image would be labelled by a
+    linear scale, and the ticks would sit where the colours are not.
+
+    Parameters
+    ----------
+    stretch : {"linear", "sqrt", "log", "asinh", "hist"}, default: "linear"
+        The display stretch, as in
+        :func:`~pynbodyext.plot.image.smooth.normalize`.
+    vmin, vmax : float
+        Limits the stretch was applied over.
+    asinh_a : float, default: 10.0
+        Softening parameter of the ``"asinh"`` stretch.
+
+    Returns
+    -------
+    matplotlib.colors.Normalize
+        A ``FuncNorm`` for the invertible stretches, and a plain ``Normalize`` for
+        ``"linear"`` and for ``"hist"`` — the latter equalises over the whole image,
+        so no per-value scale can represent it (stretch the image with
+        ``display.normalize`` first if the bar must match exactly).
+    """
+    functions = stretch_functions(stretch, asinh_a=asinh_a)
+    if functions is None or stretch == "linear":
+        return mcolors.Normalize(vmin=vmin, vmax=vmax)
+    forward, inverse = functions
+    endpoints = np.asarray(forward(np.array([0.0, 1.0])), dtype=float)
+    if not np.all(np.isfinite(endpoints)) or not np.all(np.isfinite(inverse(endpoints))):
+        return mcolors.Normalize(vmin=vmin, vmax=vmax)  # not representable on this range
+    # A ``FuncNorm`` transforms *values*, not positions, so the unit-interval stretch
+    # is wrapped into the data range; the norm then reproduces ``normalize`` exactly,
+    # including its clamping, which is what makes the colour bar truthful.
+    span = float(vmax) - float(vmin)
+    to_stretched = lambda value: forward((np.asarray(value, dtype=float) - vmin) / span)  # noqa: E731
+    from_stretched = lambda position: vmin + inverse(np.asarray(position, dtype=float)) * span  # noqa: E731
+    return mcolors.FuncNorm(functions=(to_stretched, from_stretched), vmin=vmin, vmax=vmax, clip=True)
 
 
 def get_cmap(cmap: Colormap | str | None = None) -> Colormap:

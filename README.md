@@ -216,6 +216,8 @@ bins2d = (Bin1D("x", vmin=-50, vmax=50, nbins=200, alias="x")
 # `BinNDResult.imshow` itself goes through ImageData: extent, axis units and
 # labels, and the choice between imshow and pcolormesh for uneven bins
 bins2d.imshow("mass.sum", cmap="inferno", colorbar=True)
+# density spans decades: draw and label it on a log scale
+bins2d.imshow("density", log=True, colorbar="bottom")
 
 # Or hold the map and chain: geometry and metadata survive every step, and the
 # calls are recorded in `.ops` (repr shows them)

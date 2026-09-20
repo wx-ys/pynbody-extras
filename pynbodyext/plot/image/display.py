@@ -83,6 +83,8 @@ def add_colorbar(
     tick_label_size: float = 10.0,
     label: str | None = None,
     cmap: Any = None,
+    norm: Any = None,
+    log: bool = False,
     vmin: float | None = None,
     vmax: float | None = None,
     **kwargs: Any,
@@ -120,6 +122,15 @@ def add_colorbar(
         ``units`` when the mappable is one of ours.
     cmap, vmin, vmax :
         Used only when *mappable* is an image that has not been drawn yet.
+    norm : matplotlib.colors.Normalize, optional
+        Colour scale for that bar, e.g. a ``LogNorm``; instead of ``log=True``.  A
+        drawn artist brings its own norm, so this applies only when the bar is built
+        from an image.
+    log : bool, default: False
+        Build a logarithmic bar over the positive part of the image (or *vmin* /
+        *vmax*).  It must agree with an artist passed in: a linear artist cannot be
+        relabelled logarithmically, and saying so is an error rather than a bar whose
+        ticks do not match the colours.
     **kwargs
         Forwarded to ``Figure.colorbar``.
 
@@ -143,11 +154,20 @@ def add_colorbar(
     """
     import matplotlib.pyplot as plt
     from matplotlib.cm import ScalarMappable
-    from matplotlib.colors import Normalize
+    from matplotlib.colors import LogNorm, Normalize
 
     if loc not in COLORBAR_LOCATIONS:
         raise ValueError(f"loc must be one of {', '.join(COLORBAR_LOCATIONS)}, got {loc!r}.")
     artist, source = _as_mappable(mappable)
+    if (norm is not None or log) and artist is not None:
+        requested_log = log or isinstance(norm, LogNorm)
+        drawn_log = isinstance(getattr(artist, "norm", None), LogNorm)
+        if requested_log != drawn_log:
+            raise ValueError(
+                f"This artist was drawn on a {'logarithmic' if drawn_log else 'linear'} colour scale, so its "
+                "colour bar cannot be labelled differently; pass norm=/log= where you draw "
+                "(image.display.imshow(log=True)), or pass the image instead of the artist."
+            )
     if label is None and artist is not None:
         label = _ARTIST_LABELS.get(artist)
     axes = ax if ax is not None else getattr(artist, "axes", None)
@@ -159,9 +179,13 @@ def add_colorbar(
     if artist is None:  # an image that has not been drawn yet
         if source is None:  # pragma: no cover - _as_mappable returns a mappable or an image
             raise TypeError("Nothing to describe with a colour bar.")
-        artist = _artist_in(axes, source) or ScalarMappable(
-            norm=Normalize(*value_limits(source.data, vmin=vmin, vmax=vmax)), cmap=get_cmap(cmap)
-        )
+        artist = _artist_in(axes, source)
+        if artist is None:
+            resolved, _ = resolve_norm(source.data, norm=norm, log=log, vmin=vmin, vmax=vmax)
+            artist = ScalarMappable(
+                norm=resolved if resolved is not None else Normalize(*value_limits(source.data, vmin=vmin, vmax=vmax)),
+                cmap=get_cmap(cmap),
+            )
 
     horizontal = loc in ("top", "bottom")
     cax = _divider_for(axes).append_axes(loc, size=size, pad=pad)
@@ -240,6 +264,10 @@ def draw_image(
     colorbar: bool | str = False,
     colorbar_kwargs: dict[str, Any] | None = None,
     aspect: Any = None,
+    norm: Any = None,
+    log: bool = False,
+    vmin: float | None = None,
+    vmax: float | None = None,
     **kwargs: Any,
 ) -> Any:
     """Draw *image*, picking the right artist for the bin spacing.
@@ -262,6 +290,13 @@ def draw_image(
         Forwarded to :func:`add_colorbar`, e.g. ``{"size": "8%", "pad": 0.1}``.
     aspect : optional
         Axes aspect, e.g. ``"auto"``; matplotlib's default when omitted.
+    norm : matplotlib.colors.Normalize, optional
+        Colour scale to draw with, e.g. a ``LogNorm``; instead of ``log=True``.
+    log : bool, default: False
+        Draw on a logarithmic colour scale over the positive part of the data — the
+        right choice for a map that spans decades, such as a density.
+    vmin, vmax : float, optional
+        Limits for the logarithmic scale, when *log* is set.
     **kwargs
         Forwarded to the chosen artist.
 
@@ -272,7 +307,10 @@ def draw_image(
     """
     uniform = edges_are_uniform(image.x_edges) and edges_are_uniform(image.y_edges)
     draw = draw_imshow if uniform else draw_pcolormesh
-    return draw(image, ax=ax, colorbar=colorbar, colorbar_kwargs=colorbar_kwargs, aspect=aspect, **kwargs)
+    resolved, _ = resolve_norm(image.data, norm=norm, log=log, vmin=vmin, vmax=vmax)
+    return draw(
+        image, ax=ax, colorbar=colorbar, colorbar_kwargs=colorbar_kwargs, aspect=aspect, norm=resolved, **kwargs
+    )
 
 
 def draw_imshow(
@@ -282,6 +320,10 @@ def draw_imshow(
     colorbar: bool | str = False,
     colorbar_kwargs: dict[str, Any] | None = None,
     aspect: Any = None,
+    norm: Any = None,
+    log: bool = False,
+    vmin: float | None = None,
+    vmax: float | None = None,
     **kwargs: Any,
 ) -> Any:
     """Draw *image* with ``imshow``, labelling it from its metadata.
@@ -301,6 +343,12 @@ def draw_imshow(
         Forwarded to :func:`add_colorbar`.
     aspect : optional
         Axes aspect, e.g. ``"auto"``.
+    norm : matplotlib.colors.Normalize, optional
+        Colour scale to draw with, e.g. a ``LogNorm``; instead of ``log=True``.
+    log : bool, default: False
+        Draw on a logarithmic colour scale over the positive part of the data.
+    vmin, vmax : float, optional
+        Limits for the logarithmic scale, when *log* is set.
     **kwargs
         Forwarded to ``matplotlib.axes.Axes.imshow``; ``extent`` defaults to the
         image's own and ``origin`` to ``"lower"``.
@@ -317,6 +365,9 @@ def draw_imshow(
     figsize = kwargs.pop("figsize", (5.0, 5.0))
     if ax is None:
         _, ax = plt.subplots(figsize=figsize)
+    resolved, _ = resolve_norm(image.data, norm=norm, log=log, vmin=vmin, vmax=vmax)
+    if resolved is not None:
+        kwargs.setdefault("norm", resolved)
     kwargs.setdefault("origin", "lower")
     kwargs.setdefault("extent", image.extent)
     artist = ax.imshow(image.data, **kwargs)
@@ -331,6 +382,10 @@ def draw_pcolormesh(
     colorbar: bool | str = False,
     colorbar_kwargs: dict[str, Any] | None = None,
     aspect: Any = None,
+    norm: Any = None,
+    log: bool = False,
+    vmin: float | None = None,
+    vmax: float | None = None,
     shading: str = "flat",
     **kwargs: Any,
 ) -> Any:
@@ -348,6 +403,12 @@ def draw_pcolormesh(
         Forwarded to :func:`add_colorbar`.
     aspect : optional
         Axes aspect, e.g. ``"auto"``.
+    norm : matplotlib.colors.Normalize, optional
+        Colour scale to draw with, e.g. a ``LogNorm``; instead of ``log=True``.
+    log : bool, default: False
+        Draw on a logarithmic colour scale over the positive part of the data.
+    vmin, vmax : float, optional
+        Limits for the logarithmic scale, when *log* is set.
     shading : str, default: "flat"
         Matplotlib shading mode; ``"flat"`` pairs the data with the given edges.
     **kwargs
@@ -363,6 +424,9 @@ def draw_pcolormesh(
     figsize = kwargs.pop("figsize", (5.0, 5.0))
     if ax is None:
         _, ax = plt.subplots(figsize=figsize)
+    resolved, _ = resolve_norm(image.data, norm=norm, log=log, vmin=vmin, vmax=vmax)
+    if resolved is not None:
+        kwargs.setdefault("norm", resolved)
     x_edges = image.x_edges if image.x_edges is not None else np.arange(image.shape[1] + 1, dtype=float)
     y_edges = image.y_edges if image.y_edges is not None else np.arange(image.shape[0] + 1, dtype=float)
     artist = ax.pcolormesh(x_edges, y_edges, image.data, shading=shading, **kwargs)
@@ -379,6 +443,10 @@ def draw_contour(
     colorbar: bool | str = False,
     colorbar_kwargs: dict[str, Any] | None = None,
     aspect: Any = None,
+    norm: Any = None,
+    log: bool = False,
+    vmin: float | None = None,
+    vmax: float | None = None,
     **kwargs: Any,
 ) -> Any:
     """Draw contour lines of *image*, on the grid the image actually samples.
@@ -396,7 +464,10 @@ def draw_contour(
         Axes to draw on; a new figure is created when omitted.
     levels : int or array_like, default: 8
         Number of levels, or the levels themselves — e.g. ``[-2, 0, 2]`` to mark
-        zero crossings.
+        zero crossings.  With a logarithmic scale an integer means that many
+        *intervals*, spaced geometrically between *vmin* and *vmax* (or across the
+        positive data range) — a linear set of levels would bunch all of them into
+        the brightest decade of a density map.
     filled : bool, default: False
         Fill the bands (``contourf``) instead of drawing lines (``contour``).
     colorbar : bool or str, default: False
@@ -405,6 +476,13 @@ def draw_contour(
         Forwarded to :func:`add_colorbar`.
     aspect : optional
         Axes aspect, e.g. ``"auto"``.
+    norm : matplotlib.colors.Normalize, optional
+        Colour scale for the lines or bands, e.g. a ``LogNorm``; instead of
+        ``log=True``.  A ``LogNorm`` here also makes the levels geometric.
+    log : bool, default: False
+        Space the levels geometrically, and colour them on a logarithmic scale.
+    vmin, vmax : float, optional
+        Limits of the logarithmic scale, when *log* is set.
     **kwargs
         Forwarded to ``matplotlib.axes.Axes.contour`` / ``contourf``, e.g.
         ``colors``, ``linewidths``, ``cmap``.
@@ -419,8 +497,16 @@ def draw_contour(
     figsize = kwargs.pop("figsize", (5.0, 5.0))
     if ax is None:
         _, ax = plt.subplots(figsize=figsize)
+    resolved, log_limits = resolve_norm(image.data, norm=norm, log=log, vmin=vmin, vmax=vmax)
+    if log_limits is not None and isinstance(levels, (int, np.integer)):
+        levels = np.geomspace(log_limits[0], log_limits[1], int(levels) + 1)
+    if resolved is not None:
+        kwargs.setdefault("norm", resolved)
     method = ax.contourf if filled else ax.contour
-    artist = method(image.x_centers, image.y_centers, image.data, levels, **kwargs)
+    values = np.asarray(image.data)
+    if log_limits is not None:  # a log contour cannot include the non-positive pixels
+        values = np.ma.masked_where(~(np.isfinite(values) & (values > 0.0)), values)
+    artist = method(image.x_centers, image.y_centers, values, levels, **kwargs)
     _finish(ax, image, artist, colorbar, aspect, colorbar_kwargs)
     return artist
 
@@ -431,6 +517,81 @@ def _symmetric_limits(data: np.ndarray, kwargs: dict[str, Any]) -> dict[str, Any
         return kwargs
     limit = float(np.nanmax(np.abs(data))) if np.isfinite(data).any() else 0.0
     return {**kwargs, "vmin": -limit, "vmax": limit}
+
+
+def positive_limits(data: Any, *, vmin: float | None = None, vmax: float | None = None) -> tuple[float, float]:
+    """The strictly positive range of *data*, for a logarithmic scale.
+
+    Parameters
+    ----------
+    data : array_like
+        Values to measure; non-positive and non-finite entries are ignored, since a
+        logarithmic scale cannot show them.
+    vmin, vmax : float, optional
+        Explicit limits, which must be positive and increasing.
+
+    Returns
+    -------
+    tuple of float
+        ``(vmin, vmax)``.
+
+    Raises
+    ------
+    ValueError
+        If no positive values exist, or the given limits are not positive.
+    """
+    array = np.asarray(data, dtype=float)
+    positive = np.isfinite(array) & (array > 0.0)
+    low = vmin if vmin is not None else (float(np.min(array[positive])) if positive.any() else None)
+    high = vmax if vmax is not None else (float(np.max(array[positive])) if positive.any() else None)
+    if low is None or high is None:
+        raise ValueError("A logarithmic scale needs positive values; this map has none (pass vmin=/vmax=).")
+    if low <= 0.0 or high <= low:
+        raise ValueError(f"A logarithmic scale needs 0 < vmin < vmax, got vmin={low}, vmax={high}.")
+    return float(low), float(high)
+
+
+def resolve_norm(
+    data: Any, *, norm: Any = None, log: bool = False, vmin: float | None = None, vmax: float | None = None
+) -> tuple[Any, tuple[float, float] | None]:
+    """Work out the norm to draw *data* with, and its limits when it is logarithmic.
+
+    ``norm=`` and ``log=True`` are two ways of saying the same thing and cannot be
+    combined.  ``log=True`` builds a ``LogNorm`` over the positive part of the data
+    (or over ``vmin``/``vmax`` when they are given); a ``LogNorm`` handed in through
+    ``norm=`` is recognised so that callers can compute geometric contour levels.
+
+    Returns
+    -------
+    tuple
+        ``(norm, limits)`` — the norm to pass to matplotlib (``None`` for its
+        default linear scale), and the ``(vmin, vmax)`` to space levels over when
+        the scale is logarithmic (``None`` otherwise).
+    """
+    from matplotlib.colors import LogNorm
+
+    if norm is not None and log:
+        raise ValueError("Pass either 'norm' or log=True, not both: they describe the same scale twice.")
+    if norm is None and not log:
+        return None, None
+    if norm is None:
+        limits = positive_limits(data, vmin=vmin, vmax=vmax)
+        return LogNorm(vmin=limits[0], vmax=limits[1]), limits
+    if isinstance(norm, LogNorm):
+        low = vmin if vmin is not None else norm.vmin
+        high = vmax if vmax is not None else norm.vmax
+        if low is None or high is None:
+            limits = positive_limits(data)
+        else:
+            limits = positive_limits(data, vmin=low, vmax=high)
+        return norm, limits
+    return norm, None
+
+
+def reject_log_and_symmetric(symmetric: bool, log: bool) -> None:
+    """Refuse ``symmetric=True`` together with ``log=True``, which cannot both hold."""
+    if symmetric and log:
+        raise ValueError("symmetric=True centres the colour scale on zero, which log=True cannot do; pass one of them.")
 
 
 @dataclass(frozen=True)
@@ -512,10 +673,12 @@ class DisplayOps(ImageOps):
         ----------
         symmetric : bool, default: False
             Centre the colour scale on zero — the right choice for a velocity map.
-            Ignored when ``vmin``/``vmax`` are given.
+            Ignored when ``vmin``/``vmax`` are given; cannot be combined with
+            ``log=True``.
         **kwargs
-            As in :func:`draw_image`, e.g. ``cmap``, ``colorbar``.
+            As in :func:`draw_image`, e.g. ``cmap``, ``colorbar``, ``log=True``.
         """
+        reject_log_and_symmetric(symmetric, bool(kwargs.get("log")))
         kwargs = _symmetric_limits(self.data, kwargs) if symmetric else kwargs
         return draw_image(
             self.image, ax=ax, colorbar=colorbar, colorbar_kwargs=colorbar_kwargs, aspect=aspect, **kwargs
@@ -531,7 +694,13 @@ class DisplayOps(ImageOps):
         symmetric: bool = False,
         **kwargs: Any,
     ) -> Any:
-        """Draw the image with ``imshow``; requires evenly spaced bins."""
+        """Draw the image with ``imshow``; requires evenly spaced bins.
+
+        Accepts the arguments of :func:`draw_imshow`, in particular ``log=True`` (or
+        a ``norm=``) for a map that spans decades, and ``symmetric=True`` for a
+        velocity map.
+        """
+        reject_log_and_symmetric(symmetric, bool(kwargs.get("log")))
         kwargs = _symmetric_limits(self.data, kwargs) if symmetric else kwargs
         return draw_imshow(
             self.image, ax=ax, colorbar=colorbar, colorbar_kwargs=colorbar_kwargs, aspect=aspect, **kwargs
@@ -548,7 +717,12 @@ class DisplayOps(ImageOps):
         shading: str = "flat",
         **kwargs: Any,
     ) -> Any:
-        """Draw the image as cells, honouring arbitrary bin edges."""
+        """Draw the image as cells, honouring arbitrary bin edges.
+
+        Accepts the arguments of :func:`draw_pcolormesh`, in particular ``log=True``
+        (or a ``norm=``) and ``symmetric=True``.
+        """
+        reject_log_and_symmetric(symmetric, bool(kwargs.get("log")))
         kwargs = _symmetric_limits(self.data, kwargs) if symmetric else kwargs
         return draw_pcolormesh(
             self.image,
@@ -583,8 +757,10 @@ class DisplayOps(ImageOps):
         count : int, default: 6
             How many levels on each side of zero when *symmetric* is set.
         **kwargs
-            As in :func:`draw_contour`, e.g. ``colors``, ``linewidths``.
+            As in :func:`draw_contour`, e.g. ``colors``, ``linewidths``, and
+            ``log=True`` (or a ``norm=``) to space the levels geometrically.
         """
+        reject_log_and_symmetric(symmetric, bool(kwargs.get("log")))
         if symmetric and "levels" not in kwargs:
             limit = float(np.nanmax(np.abs(self.data)))
             levels = np.linspace(-limit, limit, 2 * count + 1)

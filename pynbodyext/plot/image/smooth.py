@@ -37,6 +37,7 @@ __all__ = [
     "gaussian_smooth",
     "median_filter",
     "normalize",
+    "stretch_functions",
     "value_limits",
 ]
 
@@ -180,15 +181,57 @@ def _hist_stretch(unit: np.ndarray) -> np.ndarray:
 
 def _apply_stretch(unit: np.ndarray, stretch: str, asinh_a: float) -> np.ndarray:
     """Map values already clipped to [0, 1] through *stretch* (keeping [0, 1])."""
-    if stretch == "linear":
-        return unit
-    if stretch == "sqrt":
-        return np.sqrt(unit)
-    if stretch == "log":
-        return np.log1p(_LOG_GAIN * unit) / np.log1p(_LOG_GAIN)
-    if stretch == "hist":
+    functions = stretch_functions(stretch, asinh_a=asinh_a)
+    if functions is None:
         return _hist_stretch(unit)
-    return 0.5 * (1.0 + np.arcsinh(asinh_a * (2.0 * unit - 1.0)) / np.arcsinh(asinh_a))
+    return functions[0](unit)
+
+
+def stretch_functions(stretch: str, *, asinh_a: float = 10.0) -> tuple[Any, Any] | None:
+    """Forward and inverse of a display *stretch* on ``[0, 1]``.
+
+    A stretch is a monotone map from the unit interval to itself; returning its
+    inverse as well is what lets a colour bar be drawn with a ``FuncNorm`` that
+    places its ticks exactly where the colours were stretched to.  ``"hist"``
+    equalises over the whole image and so is not a per-value mapping — it returns
+    ``None`` (a caller then has to draw a plain linear bar, or stretch the image
+    first with :func:`normalize`).
+
+    Parameters
+    ----------
+    stretch : {"linear", "sqrt", "log", "asinh", "hist"}
+        The stretch, as in :func:`normalize`.
+    asinh_a : float, default: 10.0
+        Softening parameter of the ``"asinh"`` stretch.
+
+    Returns
+    -------
+    tuple of callables, or None
+        ``(forward, inverse)``, both accepting an array.
+
+    Examples
+    --------
+    >>> forward, inverse = stretch_functions("sqrt")
+    >>> forward(np.array([0.25])).tolist(), inverse(np.array([0.5])).tolist()
+    ([0.5], [0.25])
+    """
+    if stretch not in STRETCHES:
+        raise ValueError(f"Unknown stretch {stretch!r}; choose from {', '.join(STRETCHES)}.")
+    if stretch == "hist":
+        return None
+    if stretch == "linear":
+        return (lambda unit: unit), (lambda value: value)
+    if stretch == "sqrt":
+        return np.sqrt, np.square
+    if stretch == "log":
+        gain = _LOG_GAIN
+        denominator = np.log1p(gain)
+        return (lambda unit: np.log1p(gain * unit) / denominator, lambda value: np.expm1(value * denominator) / gain)
+    scale = np.arcsinh(asinh_a)
+    return (
+        lambda unit: 0.5 * (1.0 + np.arcsinh(asinh_a * (2.0 * unit - 1.0)) / scale),
+        lambda value: 0.5 * (1.0 + np.sinh(scale * (2.0 * value - 1.0)) / asinh_a),
+    )
 
 
 def normalize(

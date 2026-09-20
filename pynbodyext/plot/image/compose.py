@@ -32,7 +32,7 @@ from typing import Any
 import numpy as np
 
 from ._arrays import aligned_values, shape_hint, value_limits
-from .cmaps import get_cmap, to_rgba
+from .cmaps import get_cmap, norm_from_stretch, to_rgba
 from .display import add_colorbar
 from .ops import ImageOps
 from .smooth import STRETCHES
@@ -56,6 +56,10 @@ class MapStyle:
         Value limits; default to the data range, or to *percentiles*.
     stretch : {"linear", "sqrt", "log", "asinh", "hist"}, default: "linear"
         Display stretch, see :func:`~pynbodyext.plot.image.smooth.normalize`.
+    norm : matplotlib.colors.Normalize, optional
+        An explicit colour scale — a ``LogNorm`` for a map that spans decades, say.
+        Mutually exclusive with *stretch*: they describe the same scale, so give one
+        of them.
     percentiles : (float, float), optional
         Percentiles used for whichever limit is not given, e.g. ``(1, 99)``.
     bad : color, optional
@@ -72,12 +76,15 @@ class MapStyle:
     vmin: float | None = None
     vmax: float | None = None
     stretch: str = "linear"
+    norm: Any = None
     percentiles: tuple[float, float] | None = None
     bad: Any = None
 
     def __post_init__(self) -> None:
         if self.stretch not in STRETCHES:
             raise ValueError(f"Unknown stretch {self.stretch!r}; choose from {', '.join(STRETCHES)}.")
+        if self.norm is not None and self.stretch != "linear":
+            raise ValueError("Pass either norm= or stretch=, not both: they describe the same scale twice.")
         if self.percentiles is not None and self.percentiles[0] > self.percentiles[1]:
             raise ValueError(f"percentiles must be increasing, got {self.percentiles!r}.")
 
@@ -93,9 +100,24 @@ class MapStyle:
             vmin=self.vmin,
             vmax=self.vmax,
             stretch=self.stretch,
+            norm=self.norm,
             percentiles=self.percentiles,
             bad=self.bad,
         )
+
+    def norm_for(self, data: Any) -> Any:
+        """The norm a colour bar of this style should use over *data*.
+
+        Without this a stretched map would be labelled by a linear scale, putting the
+        ticks where the colours are not: ``stretch="log"`` returns a ``FuncNorm`` that
+        matches the stretch, an explicit ``norm`` is used as given, and ``"hist"``
+        (which equalises over the whole image and so has no per-value inverse) falls
+        back to a linear scale.
+        """
+        if self.norm is not None:
+            return self.norm
+        vmin, vmax = self.limits(data)
+        return norm_from_stretch(self.stretch, vmin=vmin, vmax=vmax)
 
 
 def as_map_style(style: MapStyle | str | dict[str, Any] | None) -> MapStyle:
@@ -367,7 +389,6 @@ def imshow_compose(
     """
     import matplotlib.pyplot as plt
     from matplotlib.cm import ScalarMappable
-    from matplotlib.colors import Normalize
 
     first = _values(data1)
     second = _values(data2)
@@ -381,10 +402,7 @@ def imshow_compose(
         bars = (("left", styles[0], label1, first), ("right", styles[1], label2, second))
         for side, style, label, data in bars:
             add_colorbar(
-                ScalarMappable(norm=Normalize(*style.limits(data)), cmap=get_cmap(style.cmap)),
-                ax=ax,
-                loc=side,
-                label=label,
+                ScalarMappable(norm=style.norm_for(data), cmap=get_cmap(style.cmap)), ax=ax, loc=side, label=label
             )
     return artist
 
