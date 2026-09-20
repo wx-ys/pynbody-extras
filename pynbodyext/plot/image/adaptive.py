@@ -19,6 +19,11 @@ masked pixels, or everything below ``min_signal`` — are left out of the binnin
 and stay transparent in the figure, so the result is exactly the "high-signal"
 map: the faint outskirts are not painted with noise.
 
+The tessellation itself is built in grid-cell space rather than in the units of
+the axes, so it stays meaningful when the two axes are not commensurable (``kpc``
+against ``K``) or when the bins are unevenly spaced: a region that looks compact
+in the figure is compact, whatever the units say.
+
 PowerBin is an optional dependency: install it with ``pip install
 pynbodyext[image]``.
 """
@@ -33,7 +38,7 @@ import numpy as np
 
 from pynbodyext.util.deps import POWERBIN_AVAILABLE
 
-from ._arrays import as_image
+from ._arrays import as_image, bin_centers, checked_edges, edges_are_uniform, resolve_edges, typical_width
 from .data import ImageData
 
 __all__ = ["AdaptiveMap", "adaptive_bin_map", "adaptive_map_from_bins"]
@@ -55,9 +60,11 @@ class AdaptiveMap:
     bin_value, bin_capacity, bin_count, bin_signal : numpy.ndarray
         Per-bin value, capacity, pixel count and total signal.
     xybin : numpy.ndarray
-        ``(n_bins, 2)`` centres of the bins, in the coordinates of ``extent``.
+        ``(n_bins, 2)`` centres of the bins, in the units of the two axes.
     rbin : numpy.ndarray
-        Effective radius of each bin, in the same coordinates.
+        Effective radius of each bin.  The tessellation is built in cell space, so
+        this is a cell count scaled by the typical bin width: exact for evenly
+        spaced axes, indicative when the two axes have very different scales.
     mask : numpy.ndarray of bool
         Pixels that were binned.
     target_capacity : float
@@ -66,8 +73,12 @@ class AdaptiveMap:
         How the per-bin value was aggregated.
     rms_frac : float
         Percent scatter of the achieved bin capacities (from PowerBin).
-    extent : tuple of 4 floats, optional
-        ``(xmin, xmax, ymin, ymax)`` of the input map.
+    x_edges, y_edges : numpy.ndarray
+        Bin edges of the input grid; they need not be evenly spaced.
+    x_units, y_units : object, optional
+        Units of each axis, which may differ.
+    x_label, y_label : str, optional
+        Names of the two axes.
     label, units : str, object, optional
         Description and units of ``value``, for labelling a figure.
     """
@@ -84,9 +95,50 @@ class AdaptiveMap:
     target_capacity: float
     method: str
     rms_frac: float
-    extent: tuple[float, float, float, float] | None = None
+    x_edges: np.ndarray | None = None
+    y_edges: np.ndarray | None = None
+    x_units: Any = None
+    y_units: Any = None
+    x_label: str | None = None
+    y_label: str | None = None
     label: str | None = None
     units: Any = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "x_edges", checked_edges(self.x_edges, "x_edges", self.value.shape[1]))
+        object.__setattr__(self, "y_edges", checked_edges(self.y_edges, "y_edges", self.value.shape[0]))
+
+    @property
+    def extent(self) -> tuple[float, float, float, float] | None:
+        """``(xmin, xmax, ymin, ymax)`` of the input map, when it has a grid."""
+        if self.x_edges is None or self.y_edges is None:
+            return None
+        return (float(self.x_edges[0]), float(self.x_edges[-1]), float(self.y_edges[0]), float(self.y_edges[-1]))
+
+    @property
+    def x_centers(self) -> np.ndarray:
+        """Centre of every column of the input grid, in the units of the x axis."""
+        return bin_centers(self.x_edges, self.value.shape[1])
+
+    @property
+    def y_centers(self) -> np.ndarray:
+        """Centre of every row of the input grid, in the units of the y axis."""
+        return bin_centers(self.y_edges, self.value.shape[0])
+
+    @property
+    def x_uniform(self) -> bool:
+        """Whether the input columns are evenly spaced."""
+        return edges_are_uniform(self.x_edges)
+
+    @property
+    def y_uniform(self) -> bool:
+        """Whether the input rows are evenly spaced."""
+        return edges_are_uniform(self.y_edges)
+
+    @property
+    def uniform(self) -> bool:
+        """Whether the whole input grid is evenly spaced."""
+        return self.x_uniform and self.y_uniform
 
     @property
     def n_bins(self) -> int:
@@ -98,8 +150,29 @@ class AdaptiveMap:
         """Mask of bins that hold a single pixel (their value is not an average)."""
         return self.bin_count <= 1
 
+    def to_image_data(self) -> ImageData:
+        """Return the painted map as an :class:`~pynbodyext.plot.image.data.ImageData`.
+
+        The result carries the geometry of the input grid, so it can be drawn or
+        processed like any other image.
+        """
+        return ImageData(
+            self.value,
+            x_edges=self.x_edges,
+            y_edges=self.y_edges,
+            x_units=self.x_units,
+            y_units=self.y_units,
+            x_label=self.x_label,
+            y_label=self.y_label,
+            label=self.label,
+            units=self.units,
+        )
+
     def imshow(self, ax: Any = None, *, symmetric: bool = False, **kwargs: Any) -> Any:
         """Draw :attr:`value` as an image, leaving unbinned pixels transparent.
+
+        Evenly spaced grids are drawn with ``imshow`` and unevenly spaced ones with
+        ``pcolormesh``, so the bins stay where they belong either way.
 
         Parameters
         ----------
@@ -113,21 +186,16 @@ class AdaptiveMap:
 
         Returns
         -------
-        matplotlib.image.AxesImage
+        matplotlib.image.AxesImage or matplotlib.collections.QuadMesh
             The artist.
         """
-        import matplotlib.pyplot as plt
-
-        if ax is None:
-            _, ax = plt.subplots(figsize=kwargs.pop("figsize", (5.0, 5.0)))
+        image = self.to_image_data()
         if symmetric and "vmin" not in kwargs and "vmax" not in kwargs:
             limit = float(np.nanmax(np.abs(self.value)))
             kwargs["vmin"], kwargs["vmax"] = -limit, limit
-        extent = kwargs.pop("extent", self.extent)
-        artist = ax.imshow(self.value, origin="lower", extent=extent, **kwargs)
-        if self.label is not None and not ax.get_ylabel():
-            ax.set_ylabel(self.label if self.units is None else f"{self.label} [{self.units}]")
-        return artist
+        if image.uniform:
+            return image.imshow(ax=ax, **kwargs)
+        return image.pcolormesh(ax=ax, **kwargs)
 
 
 def _aggregate(values: np.ndarray, bin_num: np.ndarray, weights: np.ndarray, n_bins: int, method: str) -> np.ndarray:
@@ -183,22 +251,23 @@ def _resolve_target(
     return capacity
 
 
-def _pixel_coordinates(
-    shape: tuple[int, int], extent: tuple[float, float, float, float] | None, pixelsize: float | None
-) -> tuple[np.ndarray, np.ndarray, float]:
-    """Centre of every pixel, in physical coordinates when *extent* is given.
+def _cell_coordinates(shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
+    """Centre of every grid cell, in cell units: ``0.5, 1.5, ...``.
 
-    Returns the x and y coordinates of all pixels plus the pixel size PowerBin
-    should use internally.
+    The power diagram is built in cell space rather than in the units of the
+    axes, because the two axes need not be commensurable (``kpc`` against ``K``):
+    in cell space a bin that looks round in the figure is round, whatever units
+    the axes carry.
     """
     rows, cols = np.indices(shape, dtype=float)
-    if extent is None:
-        return cols + 0.5, rows + 0.5, 1.0 if pixelsize is None else float(pixelsize)
-    xmin, xmax, ymin, ymax = (float(bound) for bound in extent)
-    step_x = (xmax - xmin) / shape[1]
-    step_y = (ymax - ymin) / shape[0]
-    size = float(np.mean([abs(step_x), abs(step_y)])) if pixelsize is None else float(pixelsize)
-    return xmin + (cols + 0.5) * step_x, ymin + (rows + 0.5) * step_y, size
+    return cols + 0.5, rows + 0.5
+
+
+def _to_axis_units(cell_positions: np.ndarray, edges: np.ndarray | None, count: int) -> np.ndarray:
+    """Map positions given in cell units onto the axis the bin edges describe."""
+    if edges is None:
+        return np.asarray(cell_positions, dtype=float)
+    return np.interp(cell_positions, bin_centers(None, count), bin_centers(edges, count))
 
 
 def adaptive_bin_map(
@@ -213,7 +282,12 @@ def adaptive_bin_map(
     min_signal: float | None = None,
     method: str = "mean",
     extent: tuple[float, float, float, float] | None = None,
-    pixelsize: float | None = None,
+    x_edges: Any = None,
+    y_edges: Any = None,
+    x_units: Any = None,
+    y_units: Any = None,
+    x_label: str | None = None,
+    y_label: str | None = None,
     regul: bool = True,
     maxiter: int = 50,
     verbose: int = 0,
@@ -246,11 +320,16 @@ def adaptive_bin_map(
         How the pixels of a bin are reduced to the bin value; ``"weighted"``
         weights pixels by their capacity.
     extent : (float, float, float, float), optional
-        ``(xmin, xmax, ymin, ymax)`` of the map.  When given, ``xybin``/``rbin``
-        are in these physical coordinates instead of pixels.
-    pixelsize : float, optional
-        Pixel size used internally for numerical stability; estimated from
-        *extent* when that is given, else 1.
+        ``(xmin, xmax, ymin, ymax)`` of an evenly spaced map.  When given,
+        ``xybin``/``rbin`` are in these coordinates instead of pixels.
+    x_edges, y_edges : array_like, optional
+        Bin edges of the map, for a grid that is not evenly spaced (logarithmic,
+        quantile, or explicit edges).  Give both or neither; takes precedence
+        over *extent*.
+    x_units, y_units : object, optional
+        Units of the two axes, which may differ.
+    x_label, y_label : str, optional
+        Names of the two axes.
     regul : bool, default: True
         Let PowerBin regularise the bin shapes (off means accretion only).
     maxiter : int, default: 50
@@ -314,7 +393,8 @@ def adaptive_bin_map(
         has_noise=noise is not None,
     )
 
-    x_coords, y_coords, pixel_size = _pixel_coordinates(values.shape, extent, pixelsize)
+    grid_x, grid_y = resolve_edges(values.shape, extent=extent, x_edges=x_edges, y_edges=y_edges)
+    x_coords, y_coords = _cell_coordinates(values.shape)
     coordinates = np.column_stack([x_coords[valid], y_coords[valid]])
     with warnings.catch_warnings():
         # PowerBin reports the scatter of its bin capacities; with a single bin
@@ -323,10 +403,17 @@ def adaptive_bin_map(
         warnings.filterwarnings("ignore", message="Degrees of freedom <= 0", category=RuntimeWarning)
         warnings.filterwarnings("ignore", message="invalid value encountered in scalar divide", category=RuntimeWarning)
         binned = PowerBin(
-            coordinates, capacity[valid], target, pixelsize=pixel_size, verbose=verbose, regul=regul, maxiter=maxiter
+            coordinates, capacity[valid], target, pixelsize=1.0, verbose=verbose, regul=regul, maxiter=maxiter
         )
     n_bins = int(binned.rbin.size)
     bin_num = np.asarray(binned.bin_num, dtype=int)
+    cell_width = 0.5 * (typical_width(grid_x) + typical_width(grid_y))
+    xybin = np.column_stack(
+        [
+            _to_axis_units(binned.xybin[:, 0], grid_x, values.shape[1]),
+            _to_axis_units(binned.xybin[:, 1], grid_y, values.shape[0]),
+        ]
+    )
 
     painted_bins = np.full(values.shape, -1, dtype=int)
     painted_bins[valid] = bin_num
@@ -338,13 +425,18 @@ def adaptive_bin_map(
         bin_capacity=np.asarray(binned.bin_capacity, dtype=float),
         bin_count=np.bincount(bin_num, minlength=n_bins),
         bin_signal=np.bincount(bin_num, weights=signals[valid], minlength=n_bins),
-        xybin=np.asarray(binned.xybin, dtype=float),
-        rbin=np.asarray(binned.rbin, dtype=float),
+        xybin=xybin,
+        rbin=np.asarray(binned.rbin, dtype=float) * cell_width,
         mask=valid,
         target_capacity=target,
         method=method,
         rms_frac=float(binned.rms_frac),
-        extent=None if extent is None else (float(extent[0]), float(extent[1]), float(extent[2]), float(extent[3])),
+        x_edges=grid_x,
+        y_edges=grid_y,
+        x_units=x_units,
+        y_units=y_units,
+        x_label=x_label,
+        y_label=y_label,
         label=label,
         units=units,
     )
@@ -377,7 +469,12 @@ def adaptive_map_from_bins(
     >>> binned = adaptive_map_from_bins(bins2d, "vz.mean", "mass.sum", target_nbins=200)  # doctest: +SKIP
     """
     value_image = ImageData.from_bins(bins, value)  # rejects anything but a 2-D result
-    kwargs.setdefault("extent", value_image.extent)
+    kwargs.setdefault("x_edges", value_image.x_edges)
+    kwargs.setdefault("y_edges", value_image.y_edges)
+    kwargs.setdefault("x_units", value_image.x_units)
+    kwargs.setdefault("y_units", value_image.y_units)
+    kwargs.setdefault("x_label", value_image.x_label)
+    kwargs.setdefault("y_label", value_image.y_label)
     kwargs.setdefault("label", value_image.label)
     kwargs.setdefault("units", value_image.units)
     if noise is not None:

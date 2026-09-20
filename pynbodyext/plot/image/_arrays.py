@@ -1,4 +1,4 @@
-"""Array helpers shared by the image-processing modules.
+"""Array and grid helpers shared by the image-processing modules.
 
 Private to :mod:`pynbodyext.plot.image`: the public surface lives in the
 modules that use these helpers.
@@ -10,7 +10,21 @@ from typing import Any
 
 import numpy as np
 
-__all__ = ["FWHM_PER_SIGMA", "as_image", "as_pair", "masked_filter", "resolve_sigma", "validity_mask"]
+__all__ = [
+    "FWHM_PER_SIGMA",
+    "as_image",
+    "as_pair",
+    "bin_centers",
+    "checked_edges",
+    "edges_are_uniform",
+    "masked_filter",
+    "pixel_width",
+    "resolve_edges",
+    "resolve_sigma",
+    "typical_width",
+    "uniform_edges",
+    "validity_mask",
+]
 
 #: Full width at half maximum of a Gaussian in units of its standard deviation.
 FWHM_PER_SIGMA = 2.0 * np.sqrt(2.0 * np.log(2.0))
@@ -79,3 +93,105 @@ def masked_filter(data: np.ndarray, valid: np.ndarray, apply: Any) -> np.ndarray
     averaged = np.full(data.shape, np.nan)
     np.divide(numerator, denominator, out=averaged, where=denominator > 0.0)
     return np.where(valid, averaged, np.nan)
+
+
+# ---------------------------------------------------------------------------
+# bin grid geometry
+# ---------------------------------------------------------------------------
+
+
+def checked_edges(edges: Any, name: str, count: int) -> np.ndarray | None:
+    """Validate one array of bin edges against *count* bins, and freeze it.
+
+    Returns ``None`` when *edges* is ``None``, i.e. when the direction is simply
+    indexed by pixels.
+
+    Raises
+    ------
+    ValueError
+        If the edges do not number ``count + 1``, are not finite, or do not
+        increase monotonically.
+    """
+    if edges is None:
+        return None
+    array = np.array(edges, dtype=float)  # copy, so freezing never touches the caller's array
+    if array.shape != (count + 1,):
+        raise ValueError(f"{name} must hold {count + 1} edges for {count} pixels, got shape {array.shape}.")
+    if not np.all(np.isfinite(array)):
+        raise ValueError(f"{name} must be finite, got {array}.")
+    if np.any(np.diff(array) <= 0.0):
+        raise ValueError(f"{name} must increase monotonically, got {array}.")
+    array.setflags(write=False)
+    return array
+
+
+def uniform_edges(bounds: tuple[float, float], count: int) -> np.ndarray:
+    """Evenly spaced edges spanning *bounds* in *count* steps."""
+    return np.linspace(float(bounds[0]), float(bounds[1]), count + 1)
+
+
+def resolve_edges(
+    shape: tuple[int, int], *, extent: Any = None, x_edges: Any = None, y_edges: Any = None
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Bin edges of both directions, from explicit edges and/or an extent.
+
+    An ``extent`` of ``(xmin, xmax, ymin, ymax)`` is shorthand for evenly spaced
+    bins and is expanded into edges; explicit edges may be unevenly spaced and
+    take precedence.  Giving an extent *and* edges checks that the two agree, so a
+    copy of a grid (``dataclasses.replace``) round-trips.
+
+    Raises
+    ------
+    ValueError
+        If only one direction has edges, or an extent contradicts given edges.
+    """
+    resolved_x = checked_edges(x_edges, "x_edges", shape[1])
+    resolved_y = checked_edges(y_edges, "y_edges", shape[0])
+    if (resolved_x is None) != (resolved_y is None):
+        raise ValueError("Give both x_edges and y_edges, or neither.")
+    if resolved_x is None or resolved_y is None:
+        if extent is None:
+            return None, None
+        if len(extent) != 4:
+            raise ValueError(f"extent must be (xmin, xmax, ymin, ymax), got {extent!r}.")
+        xmin, xmax, ymin, ymax = (float(bound) for bound in extent)
+        return uniform_edges((xmin, xmax), shape[1]), uniform_edges((ymin, ymax), shape[0])
+    if extent is not None:
+        span = (float(resolved_x[0]), float(resolved_x[-1]), float(resolved_y[0]), float(resolved_y[-1]))
+        if len(extent) != 4:
+            raise ValueError(f"extent must be (xmin, xmax, ymin, ymax), got {extent!r}.")
+        requested = tuple(float(bound) for bound in extent)
+        if not np.allclose(requested, span):
+            raise ValueError(f"extent {requested} contradicts the bin edges, which span {span}.")
+    return resolved_x, resolved_y
+
+
+def bin_centers(edges: np.ndarray | None, count: int) -> np.ndarray:
+    """Centres of *count* bins: midpoints of the edges, or pixel centres without edges."""
+    if edges is None:
+        return np.arange(count, dtype=float) + 0.5
+    return 0.5 * (edges[:-1] + edges[1:])
+
+
+def edges_are_uniform(edges: np.ndarray | None) -> bool:
+    """Whether an edge array is evenly spaced (a missing one means pixel indices)."""
+    if edges is None:
+        return True
+    widths = np.diff(edges)
+    return bool(np.allclose(widths, widths[0]))
+
+
+def pixel_width(edges: np.ndarray | None, count: int) -> float:
+    """Width of one bin along a direction, requiring evenly spaced edges."""
+    if edges is None:
+        return 1.0
+    if not edges_are_uniform(edges):
+        raise ValueError("This direction has bins that are not uniformly spaced, so it has no single pixel size.")
+    return float(edges[1] - edges[0])
+
+
+def typical_width(edges: np.ndarray | None) -> float:
+    """A representative bin width, for an algorithm that needs one number."""
+    if edges is None:
+        return 1.0
+    return float(np.median(np.diff(edges)))

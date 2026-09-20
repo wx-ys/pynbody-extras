@@ -216,6 +216,10 @@ bins2d = (Bin1D("x", vmin=-50, vmax=50, nbins=200, alias="x")
 density = image.ImageData.from_bins(bins2d, "mass.sum")
 density.imshow(cmap="inferno")
 
+# Axes keep their own units and labels; uneven bins stay where they belong
+velocity_map = image.ImageData.from_bins(bins2d, "vz.mean")   # e.g. kpc and kpc
+velocity_map.pcolormesh(cmap="coolwarm", colorbar=True)       # works for log/quantile bins too
+
 # Smooth it: empty bins are NaN and do not smear over their neighbours.
 # fwhm is in the units of the extent (kpc here), via pixel_scale.
 smoothed = density.with_data(image.gaussian_smooth(density.data, fwhm=1.0, pixel_scale=density.pixel_size))

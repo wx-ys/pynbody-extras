@@ -134,6 +134,93 @@ def test_adaptive_bin_map_uses_physical_coordinates_from_extent() -> None:
     assert extent[2] <= result.xybin[:, 1].min() and result.xybin[:, 1].max() <= extent[3]
 
 
+def test_adaptive_bin_map_accepts_bin_edges_that_are_not_evenly_spaced() -> None:
+    value, signal = blob_map((30, 30))
+    x_edges = np.geomspace(1.0, 100.0, 31)  # logarithmic bins along x
+    y_edges = np.linspace(-10.0, 10.0, 31)
+
+    result = adaptive_bin_map(value, signal, target_nbins=4, x_edges=x_edges, y_edges=y_edges, verbose=0)
+
+    np.testing.assert_allclose(result.x_edges, x_edges)
+    np.testing.assert_allclose(result.y_edges, y_edges)
+    np.testing.assert_allclose(result.x_centers, 0.5 * (x_edges[:-1] + x_edges[1:]))
+    assert not result.x_uniform
+    assert result.y_uniform
+    assert result.extent == (1.0, 100.0, -10.0, 10.0)
+
+
+def test_adaptive_bin_map_bins_in_cell_space_not_axis_units() -> None:
+    """Regression: with axes four decades apart, binning in axis units made
+    PowerBin produce non-finite bin centres, which its KDTree then rejected."""
+    shape = (40, 40)
+    rows, cols = np.indices(shape, dtype=float)
+    radius = np.hypot(cols - shape[1] / 2, rows - shape[0] / 2)
+    value = 3.0 * cols - 2.0 * rows
+    signal = 10.0 * np.exp(-((radius / 10.0) ** 2)) + 0.001  # four decades of dynamic range
+
+    result = adaptive_bin_map(
+        value,
+        signal,
+        target_nbins=30,
+        x_edges=np.linspace(0.0, 0.5, shape[1] + 1),  # Å-like scale
+        y_edges=np.linspace(0.0, 5000.0, shape[0] + 1),  # K-like scale
+        verbose=0,
+    )
+
+    assert np.isfinite(result.xybin).all()
+    assert result.n_bins == pytest.approx(30, abs=5)
+    # The tessellation is built in cell space, so the centres come back inside
+    # each axis' own range instead of being dragged apart by the units.
+    assert 0.0 <= result.xybin[:, 0].min() and result.xybin[:, 0].max() <= 0.5
+    assert 0.0 <= result.xybin[:, 1].min() and result.xybin[:, 1].max() <= 5000.0
+
+
+def test_adaptive_map_to_image_data_carries_the_geometry() -> None:
+    value, signal = blob_map()
+    result = adaptive_bin_map(
+        value,
+        signal,
+        target_nbins=5,
+        extent=(0.0, 20.0, 0.0, 20.0),
+        x_units="kpc",
+        y_units="kpc",
+        x_label="x",
+        y_label="y",
+        label="vz.mean",
+        units="km/s",
+        verbose=0,
+    )
+
+    image = result.to_image_data()
+
+    np.testing.assert_array_equal(image.data, result.value)
+    np.testing.assert_allclose(image.x_edges, result.x_edges)
+    assert image.extent == result.extent
+    assert (image.x_units, image.y_units) == ("kpc", "kpc")
+    assert (image.x_label, image.y_label) == ("x", "y")
+    assert (image.label, image.units) == ("vz.mean", "km/s")
+
+
+def test_adaptive_map_imshow_dispatches_on_uniformity() -> None:
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import QuadMesh
+    from matplotlib.image import AxesImage
+
+    value, signal = blob_map((30, 30))
+    even = adaptive_bin_map(value, signal, target_nbins=4, extent=(0.0, 30.0, 0.0, 30.0), verbose=0)
+    stretched = adaptive_bin_map(
+        value, signal, target_nbins=4, x_edges=np.geomspace(1.0, 100.0, 31), y_edges=np.arange(31.0), verbose=0
+    )
+
+    fig, ax = plt.subplots()
+    try:
+        assert isinstance(even.imshow(ax=ax), AxesImage)
+        assert isinstance(stretched.imshow(ax=ax), QuadMesh)
+    finally:
+        plt.close(fig)
+
+
 def test_adaptive_bin_map_imshow_draws_the_binned_image() -> None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -158,13 +245,14 @@ def test_adaptive_map_from_bins_reads_a_binned_result() -> None:
     rng = np.random.default_rng(0)
     n = 300
     sim = pynbody.new(dm=n)
-    sim["x"] = rng.uniform(0.0, 10.0, n)
+    sim["r"] = rng.uniform(1.0, 50.0, n)
     sim["y"] = rng.uniform(0.0, 10.0, n)
     sim["vz"] = rng.normal(0.0, 50.0, n)
     sim["mass"] = rng.uniform(0.5, 2.0, n)
 
     bins = (
-        Bin1D("x", vmin=0.0, vmax=10.0, nbins=20, alias="x") @ Bin1D("y", vmin=0.0, vmax=10.0, nbins=20, alias="y")
+        Bin1D("r", vmin=1.0, vmax=50.0, nbins=20, alias="X", mode="log", units="kpc")
+        @ Bin1D("y", vmin=0.0, vmax=10.0, nbins=20, alias="Y", units="kpc")
     )(sim)
 
     result = adaptive_map_from_bins(bins, "vz.mean", "mass.sum", target_nbins=8, verbose=0)
@@ -173,3 +261,6 @@ def test_adaptive_map_from_bins_reads_a_binned_result() -> None:
     assert result.label == "vz.mean"
     assert result.extent == tuple(bins.axes.extent)
     assert result.mask.sum() > 100  # the populated part of the grid was binned
+    np.testing.assert_allclose(result.x_edges, np.asarray(bins.axes[0].edges))
+    assert (result.x_label, result.y_label) == ("r", "y")
+    assert (result.x_units, result.y_units) == ("kpc", "kpc")

@@ -105,11 +105,17 @@ The vocabulary for turning a 2-D map into a figure. Code lives in
 `pynbodyext/plot/image/`; the unit of work is a plain `numpy` 2-D array.
 
 - **`ImageData`** (`plot/image/data.py`) — a 2-D array plus the metadata needed
-  to display and measure it: `extent` (`(xmin, xmax, ymin, ymax)`),
-  `units`, `label`, axis names. `ImageData.from_bins(bins2d, query)` reads one
-  query of a 2-D `BinNDResult`; `.with_data(...)` carries the metadata through a
-  processing chain; `.pixel_size` is the `(dy, dx)` needed to express a kernel
-  width in physical units.
+  to display and measure it. Geometry is per axis: `x_edges`/`y_edges` are the
+  bin edges (unevenly spaced allowed — logarithmic, quantile, or explicit) and
+  `extent` (`(xmin, xmax, ymin, ymax)`) is shorthand for evenly spaced bins.
+  Metadata is per axis too: `x_units`/`y_units` may differ and `x_label`/`y_label`
+  name the axes, while `label`/`units` describe the values (and go on the colour
+  bar). `ImageData.from_bins(bins2d, query)` reads one query of a 2-D
+  `BinNDResult` together with its grid, units and axis names; `.with_data(...)`
+  carries the metadata through a processing chain; `.pixel_size` is the
+  `(dy, dx)` needed to express a kernel width in physical units, and refuses when
+  a direction has bins of unequal width. Display accordingly:
+  `.imshow()` for evenly spaced bins, `.pcolormesh()` for arbitrary edges.
 - **Adaptive bin map** (`AdaptiveMap`, `plot/image/adaptive.py`) — a partition of
   a map into regions of comparable *capacity* made with PowerBin (centroidal
   power diagrams, the successor of Voronoi binning). The capacity is the
@@ -118,6 +124,9 @@ The vocabulary for turning a 2-D map into a figure. Code lives in
   regions, and `.value` paints the region values back at full resolution with
   unbinned pixels left non-finite. *Not* a smoothing operation: it never mixes
   pixels into an average they do not belong to.
+  It carries the geometry of the grid it was binned *from* (`x_edges`/`y_edges`,
+  per-axis units and labels), and `.to_image_data()` hands that on; `.imshow()`
+  draws even grids with `imshow` and uneven ones with `pcolormesh`.
 - **Map mask** (`plot/image/compose.py`) — a pair of complementary soft masks in
   `[0, 1]` split by a line at `line_angle`, with a transition ramp whose width is
   a fraction of the image diagonal (`width`, so the look is resolution
