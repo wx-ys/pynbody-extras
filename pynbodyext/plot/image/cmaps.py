@@ -1,12 +1,22 @@
 """Colour maps and colour helpers for image display.
 
 The headline entry is :data:`velocity_cmap` — black → blue → cyan → green →
-yellow → red → white — the classic kinematic colour map, built with green on
-zero velocity (``0.50``), cyan/yellow on the shoulders and black/white at the
-extremes so that the sign of a velocity is readable at a glance.  It is
+yellow → red → white — the map used for velocity fields of observed galaxies,
+built with green on zero (``0.50``), cyan/yellow on the shoulders and black/white
+at the extremes so that the sign of the velocity is readable at a glance.  It is
 registered with matplotlib, so ``cmap="velocity"`` also works::
 
     ax.imshow(velocity_map, cmap="velocity", vmin=-200, vmax=200)
+
+**Where the colours come from.**  This is a hand-built, fully saturated rendering
+of the **SAURON colormap** (Michele Cappellari & Eric Emsellem, Leiden, 2001), the
+colour scheme of the SAURON and ATLAS³D integral-field kinematics; its reference
+implementation ships with Cappellari's ``plotbin``, which registers it as
+``sauron``/``sauron_r``.  Ours follows the same sequence and the same green zero
+point but uses pure stops and white (rather than light grey) at the positive end:
+the two agree within ~0.1 per channel over most of the range, differing most in the
+cyan shoulder (near 0.4) and at the two ends.  Use ``plotbin``'s ``sauron`` if you
+need the exact published colours.
 
 Note that a 256-entry look-up table samples the declared colour stops
 approximately: :data:`VELOCITY_POSITIONS` are exact in the continuous
