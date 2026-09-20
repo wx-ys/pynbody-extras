@@ -94,7 +94,7 @@ def test_adaptive_map_can_add_a_colorbar_after_imshow() -> None:
     rng = np.random.default_rng(1)
     value = ImageData(rng.normal(0.0, 100.0, (30, 30)), extent=(0.0, 30.0, 0.0, 30.0), label="vz.mean")
     signal = ImageData(rng.uniform(1.0, 10.0, (30, 30)), extent=(0.0, 30.0, 0.0, 30.0))
-    binned = value.postprocess.adaptive.bin(signal, target_nbins=5)
+    binned = value.process.adaptive.bin(signal, target_nbins=5)
 
     fig, ax = plt.subplots()
     try:
@@ -111,7 +111,7 @@ def test_adaptive_map_imshow_accepts_a_colorbar_request() -> None:
     pytest.importorskip("powerbin")
     value = image((20, 20))
     signal = ImageData(np.ones((20, 20)), extent=(0.0, 20.0, 0.0, 20.0))
-    binned = value.postprocess.adaptive.bin(signal, target_nbins=4)
+    binned = value.process.adaptive.bin(signal, target_nbins=4)
 
     fig, ax = plt.subplots()
     try:

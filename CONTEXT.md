@@ -116,9 +116,9 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
 - [ADR-0009](docs/adr/0009-display-is-a-family-too.md): `display` is a capability
   family like the others, so no operation has a flat spelling and `ImageData`
   carries only what it *is* (supersedes decision 4 of ADR-0006).
-- [ADR-0010](docs/adr/0010-two-entry-points-display-and-postprocess.md): an image
+- [ADR-0010](docs/adr/0010-two-entry-points-display-and-process.md): an image
   has two entry points — `image.display.*` for showing it and
-  `image.postprocess.*` for working on it — with the families nested inside the
+  `image.process.*` for working on it — with the families nested inside the
   second.
 
 ## Image layer (`pynbodyext/plot/image/`)
@@ -143,9 +143,9 @@ object a caller normally holds.
   edges, `.display.draw()` to let it pick.
   `ImageData` is a single class (no capability base classes). Each family is a
   **view** — `SmoothOps`, `PsfOps`, `ComposeOps`, `AdaptiveOps` — reached as a
-  property of `image.postprocess`: `image.postprocess.smooth.gaussian(fwhm=2)`,
-  `image.postprocess.psf.convolve(fwhm=3)`, `image.postprocess.noise.poisson(...)`,
-  `image.postprocess.compose(other)`, `image.postprocess.adaptive.bin(signal)`.
+  property of `image.process`: `image.process.smooth.gaussian(fwhm=2)`,
+  `image.process.psf.convolve(fwhm=3)`, `image.process.noise.poisson(...)`,
+  `image.process.compose(other)`, `image.process.adaptive.bin(signal)`.
   Display is the other entry point: `image.display.normalize/to_rgba/draw/imshow/
   pcolormesh/contour/add_colorbar`. Every operation has exactly one spelling.
 - **`ImageDataView`** (`plot/image/ops.py`) — "an `ImageData` seen from one angle":
@@ -167,11 +167,11 @@ object a caller normally holds.
   `ImageData` — geometry and units intact — with the call appended to
   **`ops`** (`tuple[ImageOp, ...]`, `ImageOp(name, params)`), which is what
   `repr(image)` summarises.
-- **Two entry points: `display` and `postprocess`.** `PostprocessOps` (in
+- **Two entry points: `display` and `process`.** `ProcessOps` (in
   `ops.py`, the module that also holds the views and the registry) exposes the five
   families that change or measure the values; `DisplayOps` exposes the seven
   operations that show them. So `dir(image)` is short and unambiguous —
-  `image.postprocess.smooth.gaussian(...)` versus `image.display.imshow(...)` — and
+  `image.process.smooth.gaussian(...)` versus `image.display.imshow(...)` — and
   `ImageData` itself carries only what it *is*: values, geometry, units, labels,
   `ops`, `with_data`, `from_bins`/`from_bins_array`/`as_image`, the registry, and
   those two properties.

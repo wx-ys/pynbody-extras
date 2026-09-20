@@ -16,7 +16,7 @@ import numpy as np
 from ._arrays import edges_are_uniform, value_limits
 from .cmaps import get_cmap
 from .ops import ImageOps, register_ops
-from .postprocess import normalize
+from .smooth import normalize
 
 if TYPE_CHECKING:
     from .data import ImageData
@@ -455,7 +455,7 @@ class DisplayOps(ImageOps):
     ) -> ImageData:
         """Map the values to ``[0, 1]`` for display, keeping the geometry.
 
-        Unlike the free :func:`~pynbodyext.plot.image.postprocess.normalize`, this
+        Unlike the free :func:`~pynbodyext.plot.image.smooth.normalize`, this
         returns an image, so it can be chained.
         """
         stretched = normalize(

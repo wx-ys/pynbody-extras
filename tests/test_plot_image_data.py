@@ -269,7 +269,7 @@ def test_from_bins_rejects_axes_with_gaps() -> None:
 
 
 def test_from_bins_composes_with_the_smoothers() -> None:
-    from pynbodyext.plot.image.postprocess import gaussian_smooth
+    from pynbodyext.plot.image.smooth import gaussian_smooth
 
     image = ImageData.from_bins(make_bins(make_sim()), "mass.sum")
 

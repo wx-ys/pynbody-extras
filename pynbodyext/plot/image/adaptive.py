@@ -429,7 +429,7 @@ def adaptive_map_from_bins(
 
 @dataclass(frozen=True)
 class AdaptiveOps(ImageOps):
-    """The adaptive-binning family of an image: ``image.postprocess.adaptive.bin(signal, …)``."""
+    """The adaptive-binning family of an image: ``image.process.adaptive.bin(signal, …)``."""
 
     def bin(
         self,

@@ -41,10 +41,10 @@ if TYPE_CHECKING:
     from .compose import ComposeOps
     from .data import ImageData
     from .noise import NoiseOps
-    from .postprocess import SmoothOps
     from .psf import PsfOps
+    from .smooth import SmoothOps
 
-__all__ = ["OPERATIONS", "ImageDataView", "ImageOp", "ImageOps", "PostprocessOps", "register_ops"]
+__all__ = ["OPERATIONS", "ImageDataView", "ImageOp", "ImageOps", "ProcessOps", "register_ops"]
 
 #: Registered views, keyed by the attribute they answer to.
 OPERATIONS: dict[str, type[ImageDataView]] = {}
@@ -90,7 +90,7 @@ def register_ops(name: str, view: type[ImageDataView] | None = None, *, overwrit
 
     Usable as a decorator (``@ImageData.register_ops("name")``) or as a call.
     A capability family registers an :class:`ImageOps` subclass; a container of
-    families (like :class:`PostprocessOps`) registers an :class:`ImageDataView`.
+    families (like :class:`ProcessOps`) registers an :class:`ImageDataView`.
 
     Raises
     ------
@@ -257,56 +257,56 @@ class ImageOps(ImageDataView):
 
 
 @dataclass(frozen=True)
-class PostprocessOps(ImageDataView):
-    """Everything that changes or measures the values: ``image.postprocess.*``.
+class ProcessOps(ImageDataView):
+    """Everything that changes or measures the values: ``image.process.*``.
 
     An image has two entry points: :mod:`~pynbodyext.plot.image.display` for showing
     it, and this one for working on it.  The families stay separate inside —
     ``smooth``, ``psf``, ``noise``, ``compose``, ``adaptive`` — so the kind of
     processing is visible in the call, while the top level stays two buckets wide::
 
-        image.postprocess.smooth.gaussian(fwhm=2)
-        image.postprocess.psf.convolve(fwhm=3)
-        image.postprocess.noise.poisson(exposure=0.1)
-        image.postprocess.compose(other)
-        image.postprocess.adaptive.bin(signal, target_nbins=200)
+        image.process.smooth.gaussian(fwhm=2)
+        image.process.psf.convolve(fwhm=3)
+        image.process.noise.poisson(exposure=0.1)
+        image.process.compose(other)
+        image.process.adaptive.bin(signal, target_nbins=200)
         image.display.imshow(colorbar=True)
     """
 
     @property
     def smooth(self) -> SmoothOps:
-        """Smoothing family: ``image.postprocess.smooth.gaussian(fwhm=2)``."""
-        from .postprocess import SmoothOps  # local import: the family imports this module
+        """Smoothing family: ``image.process.smooth.gaussian(fwhm=2)``."""
+        from .smooth import SmoothOps  # local import: the family imports this module
 
         return SmoothOps(self.image)
 
     @property
     def psf(self) -> PsfOps:
-        """Observational family: ``image.postprocess.psf.convolve(fwhm=3)``."""
+        """Observational family: ``image.process.psf.convolve(fwhm=3)``."""
         from .psf import PsfOps
 
         return PsfOps(self.image)
 
     @property
     def noise(self) -> NoiseOps:
-        """Noise family: ``image.postprocess.noise.gaussian(snr=20)``."""
+        """Noise family: ``image.process.noise.gaussian(snr=20)``."""
         from .noise import NoiseOps
 
         return NoiseOps(self.image)
 
     @property
     def compose(self) -> ComposeOps:
-        """Stitching family: ``image.postprocess.compose(other)``."""
+        """Stitching family: ``image.process.compose(other)``."""
         from .compose import ComposeOps
 
         return ComposeOps(self.image)
 
     @property
     def adaptive(self) -> AdaptiveOps:
-        """Adaptive binning: ``image.postprocess.adaptive.bin(signal)``."""
+        """Adaptive binning: ``image.process.adaptive.bin(signal)``."""
         from .adaptive import AdaptiveOps
 
         return AdaptiveOps(self.image)
 
 
-register_ops("postprocess", PostprocessOps)
+register_ops("process", ProcessOps)

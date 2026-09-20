@@ -234,7 +234,7 @@ def value_limits(
 ) -> tuple[float, float]:
     """The ``(vmin, vmax)`` an image of *data* would be drawn with.
 
-    Shared by :func:`~pynbodyext.plot.image.postprocess.normalize`, by the colour
+    Shared by :func:`~pynbodyext.plot.image.smooth.normalize`, by the colour
     bars and by :meth:`~pynbodyext.plot.image.ops.ImageOps.limits`, so every colour
     scale in the package is derived by the same rules.
 

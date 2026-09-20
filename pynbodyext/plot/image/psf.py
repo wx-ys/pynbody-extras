@@ -9,7 +9,7 @@ Two directions are supported, both on plain 2-D arrays:
   one to use when comparing to data; the inverse is a visualisation tool.
 
 Non-finite pixels (empty bins, masked regions) are handled the same way as in
-:mod:`~pynbodyext.plot.image.postprocess`: they neither contribute to nor receive
+:mod:`~pynbodyext.plot.image.smooth`: they neither contribute to nor receive
 signal, and stay non-finite in the result.
 """
 
@@ -331,7 +331,7 @@ def deconvolve_psf(image: Any, psf: Any, *, method: str = "wiener", **kwargs: An
 
 @dataclass(frozen=True)
 class PsfOps(ImageOps):
-    """The observational family of an image: ``image.postprocess.psf.convolve(fwhm=3)``.
+    """The observational family of an image: ``image.process.psf.convolve(fwhm=3)``.
 
     Each method returns a new :class:`~pynbodyext.plot.image.data.ImageData`.  As
     with smoothing, a Gaussian width is given in the units of the axes whenever

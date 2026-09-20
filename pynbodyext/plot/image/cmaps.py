@@ -22,7 +22,7 @@ import matplotlib.colors as mcolors
 import numpy as np
 from matplotlib.colors import Colormap, LinearSegmentedColormap
 
-from .postprocess import normalize
+from .smooth import normalize
 
 __all__ = [
     "K_B_C_G_Y_R_W",
@@ -136,7 +136,7 @@ def to_rgba(
     cmap : str or Colormap, optional
         Colour map; defaults to :data:`K_B_C_G_Y_R_W`.
     vmin, vmax, stretch, percentiles :
-        Passed to :func:`~pynbodyext.plot.image.postprocess.normalize` to map the
+        Passed to :func:`~pynbodyext.plot.image.smooth.normalize` to map the
         values onto ``[0, 1]``.
     norm : matplotlib.colors.Normalize, optional
         A ready-made norm, used instead of ``vmin``/``vmax``/``stretch``.

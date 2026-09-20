@@ -14,8 +14,8 @@ Both leave non-finite pixels alone and honour a ``mask`` (``True`` = observed), 
 both accept anything the rest of the layer accepts as a map — a plain array, an
 :class:`~pynbodyext.plot.image.data.ImageData`, or a binned array::
 
-    image.postprocess.noise.gaussian(snr=20, rng=0)
-    image.postprocess.noise.poisson(exposure=0.5, background=2.0, rng=1)
+    image.process.noise.gaussian(snr=20, rng=0)
+    image.process.noise.poisson(exposure=0.5, background=2.0, rng=1)
 """
 
 from __future__ import annotations
@@ -138,7 +138,7 @@ def add_poisson_noise(
 
 @dataclass(frozen=True)
 class NoiseOps(ImageOps):
-    """The noise family of an image: ``image.postprocess.noise.gaussian(snr=20)``."""
+    """The noise family of an image: ``image.process.noise.gaussian(snr=20)``."""
 
     def gaussian(self, *, sigma: Any = None, snr: Any = None, mask: Any = None, rng: Any = None) -> ImageData:
         """Add Gaussian noise; see :func:`add_noise`."""

@@ -21,7 +21,7 @@ EXPECTED_NAMES = {
     "MapStyle",
     "NoiseOps",
     "OPERATIONS",
-    "PostprocessOps",
+    "ProcessOps",
     "STRETCHES",
     "add_colorbar",
     "add_noise",
@@ -71,9 +71,9 @@ def test_the_plot_package_exposes_the_image_namespace() -> None:
 
 
 def test_the_submodules_are_reachable() -> None:
-    from pynbodyext.plot.image import adaptive, cmaps, compose, data, postprocess, psf
+    from pynbodyext.plot.image import adaptive, cmaps, compose, data, smooth, psf
 
-    for module in (adaptive, cmaps, compose, data, postprocess, psf):
+    for module in (adaptive, cmaps, compose, data, smooth, psf):
         assert module.__name__.startswith("pynbodyext.plot.image.")
 
 

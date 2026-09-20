@@ -136,8 +136,8 @@ def test_adaptive_bin_accepts_a_binned_array_without_transposing() -> None:
     bins = make_bins(make_sim())
     velocity = ImageData.from_bins(bins, "vz.mean")
 
-    from_query = velocity.postprocess.adaptive.bin(bins["mass.sum"], target_nbins=6)
-    from_image = velocity.postprocess.adaptive.bin(ImageData.from_bins(bins, "mass.sum"), target_nbins=6)
+    from_query = velocity.process.adaptive.bin(bins["mass.sum"], target_nbins=6)
+    from_image = velocity.process.adaptive.bin(ImageData.from_bins(bins, "mass.sum"), target_nbins=6)
 
     np.testing.assert_allclose(from_query.value, from_image.value, equal_nan=True)
     np.testing.assert_allclose(from_query.bin_capacity, from_image.bin_capacity)
@@ -151,7 +151,7 @@ def test_a_raw_binned_grid_is_rejected_with_an_orientation_hint() -> None:
     velocity = ImageData.from_bins(bins, "vz.mean")
 
     with pytest.raises(ValueError, match="transpos"):
-        velocity.postprocess.adaptive.bin(np.asarray(bins["mass.sum"]), target_nbins=6)
+        velocity.process.adaptive.bin(np.asarray(bins["mass.sum"]), target_nbins=6)
 
 
 def test_free_adaptive_binning_also_accepts_binned_arrays() -> None:
@@ -172,8 +172,8 @@ def test_compose_accepts_a_binned_array_for_the_other_map() -> None:
     bins = make_bins(make_sim())
     velocity = ImageData.from_bins(bins, "vz.mean")
 
-    composed = velocity.postprocess.compose(bins["mass.sum"])
-    expected = velocity.postprocess.compose(ImageData.from_bins(bins, "mass.sum"))
+    composed = velocity.process.compose(bins["mass.sum"])
+    expected = velocity.process.compose(ImageData.from_bins(bins, "mass.sum"))
 
     np.testing.assert_allclose(composed, expected)
 
@@ -192,7 +192,7 @@ def test_masks_can_be_taken_from_an_image() -> None:
     velocity = ImageData.from_bins(bins, "vz.mean")
     mask = ImageData.from_bins(bins, "mass.sum").data > 0.0  # already image-oriented
 
-    blurred = velocity.postprocess.psf.convolve(fwhm=2.0, mask=mask)
+    blurred = velocity.process.psf.convolve(fwhm=2.0, mask=mask)
 
     assert blurred.shape == velocity.shape
     assert bool(np.isfinite(blurred.data).any())
@@ -205,7 +205,7 @@ def test_a_mask_cut_from_a_binned_array_gets_the_orientation_hint() -> None:
     mask = bins["mass.sum"] > 0.0  # a plain (x, y) array by now
 
     with pytest.raises(ValueError, match="transpos"):
-        velocity.postprocess.smooth.box(size=3, mask=mask)
+        velocity.process.smooth.box(size=3, mask=mask)
 
 
 # ---------------------------------------------------------------------------

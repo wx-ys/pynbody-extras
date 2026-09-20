@@ -15,11 +15,11 @@ How it is put together:
 - :class:`ImageData` is a single class: it owns the values, the geometry, the
   metadata, the provenance (``.ops``) and the display methods, and it *composes*
   the capability families instead of inheriting them.  Each family is a small view
-  object — :class:`~pynbodyext.plot.image.postprocess.SmoothOps`,
+  object — :class:`~pynbodyext.plot.image.smooth.SmoothOps`,
   :class:`~pynbodyext.plot.image.psf.PsfOps`,
   :class:`~pynbodyext.plot.image.compose.ComposeOps`,
   :class:`~pynbodyext.plot.image.adaptive.AdaptiveOps` — reached through
-  ``image.postprocess`` (``.smooth.gaussian(fwhm=2)``, ``.psf.convolve(...)``,
+  ``image.process`` (``.smooth.gaussian(fwhm=2)``, ``.psf.convolve(...)``,
   ``.noise.poisson(...)``, ``.compose(other)``, ``.adaptive.bin(signal)``).
 - Every view derives from :class:`~pynbodyext.plot.image.ops.ImageOps`, which
   hands it the image's geometry, :meth:`~pynbodyext.plot.image.ops.ImageOps.derive`
@@ -60,7 +60,7 @@ import numpy as np
 
 from ._arrays import bin_centers, edges_are_uniform, pixel_width, resolve_edges, shape_hint
 from .display import DisplayOps, _unit_text
-from .ops import OPERATIONS, ImageDataView, ImageOp, ImageOps, PostprocessOps, register_ops
+from .ops import OPERATIONS, ImageDataView, ImageOp, ImageOps, ProcessOps, register_ops
 
 __all__ = ["ImageData", "ImageOp", "OPERATIONS", "as_image", "register_ops"]
 
@@ -237,9 +237,9 @@ class ImageData:
     # ------------------------------------------------------------------
 
     @property
-    def postprocess(self) -> PostprocessOps:
-        """Everything that changes the values: ``image.postprocess.smooth.gaussian(…)``."""
-        return PostprocessOps(self)
+    def process(self) -> ProcessOps:
+        """Everything that changes the values: ``image.process.smooth.gaussian(…)``."""
+        return ProcessOps(self)
 
     @property
     def display(self) -> DisplayOps:

@@ -1,4 +1,4 @@
-"""Tests for ``pynbodyext.plot.image.postprocess``.
+"""Tests for ``pynbodyext.plot.image.smooth``.
 
 Covers NaN-aware smoothing, unit-aware kernel sizes, display stretches, and
 block downsampling.
@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from pynbodyext.plot.image.postprocess import box_smooth, downsample, gaussian_smooth, median_filter, normalize
+from pynbodyext.plot.image.smooth import box_smooth, downsample, gaussian_smooth, median_filter, normalize
 
 
 def impulse(shape: tuple[int, int] = (15, 15), value: float = 1.0) -> np.ndarray:

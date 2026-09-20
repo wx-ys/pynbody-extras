@@ -277,11 +277,11 @@ def test_image_data_can_compose_with_another_image() -> None:
     first = ImageData(gradient(), extent=(0, 30, 0, 20), label="gas")
     second = ImageData(gradient()[:, ::-1], extent=(0, 30, 0, 20), label="dm")
 
-    composed = first.postprocess.compose(second, style=MapStyle(cmap="inferno"), other_style=MapStyle(cmap="cividis"))
+    composed = first.process.compose(second, style=MapStyle(cmap="inferno"), other_style=MapStyle(cmap="cividis"))
 
     assert composed.shape == (20, 30, 4)
     np.testing.assert_allclose(composed, compose_maps(first.data, second.data, style1="inferno", style2="cividis"))
-    masks = first.postprocess.compose.masks(line_angle=0.0, width=0.0)
+    masks = first.process.compose.masks(line_angle=0.0, width=0.0)
     assert masks[0].shape == first.shape
 
 
@@ -289,7 +289,7 @@ def test_image_data_compose_rejects_a_mismatched_other_map() -> None:
     from pynbodyext.plot.image import ImageData
 
     with pytest.raises(ValueError, match="shape"):
-        ImageData(np.zeros((4, 4))).postprocess.compose(np.zeros((5, 5)))
+        ImageData(np.zeros((4, 4))).process.compose(np.zeros((5, 5)))
 
 
 def test_imshow_compose_draws_the_image_and_two_colorbars() -> None:

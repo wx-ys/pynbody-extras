@@ -9,7 +9,7 @@ tessellation) into publication-ready figures:
 - :mod:`.data` holds :class:`ImageData` — the array, its geometry and metadata,
   and the provenance of the operations applied to it.  It also bridges
   :class:`BinNDResult` queries, which is what ``BinNDResult.imshow`` uses.
-- :mod:`.postprocess` smooths, resamples and stretches images, keeping empty
+- :mod:`.process` smooths, resamples and stretches images, keeping empty
   bins (``NaN``) out of the averages.
 - :mod:`.psf` applies an observational point-spread function, and inverts one.
 - :mod:`.adaptive` adaptively bins a noisy map by signal (PowerBin) so that each
@@ -42,9 +42,9 @@ from .compose import MapStyle, blend_images, blend_stack, compose_maps, create_m
 from .data import OPERATIONS, ImageData, ImageOp, as_image, register_ops
 from .display import COLORBAR_LOCATIONS, DisplayOps, add_colorbar
 from .noise import NoiseOps, add_noise, add_poisson_noise
-from .ops import ImageDataView, ImageOps, PostprocessOps
-from .postprocess import STRETCHES, box_smooth, downsample, gaussian_smooth, median_filter, normalize
+from .ops import ImageDataView, ImageOps, ProcessOps
 from .psf import convolve_psf, deconvolve_psf, gaussian_psf, normalize_psf, richardson_lucy, wiener_deconvolve
+from .smooth import STRETCHES, box_smooth, downsample, gaussian_smooth, median_filter, normalize
 
 __all__ = [
     "COLORBAR_LOCATIONS",
@@ -60,7 +60,7 @@ __all__ = [
     "MapStyle",
     "NoiseOps",
     "OPERATIONS",
-    "PostprocessOps",
+    "ProcessOps",
     "STRETCHES",
     "add_colorbar",
     "add_noise",

@@ -35,7 +35,7 @@ from ._arrays import aligned_values, shape_hint, value_limits
 from .cmaps import get_cmap, to_rgba
 from .display import add_colorbar
 from .ops import ImageOps
-from .postprocess import STRETCHES
+from .smooth import STRETCHES
 
 __all__ = ["ComposeOps", "MapStyle", "blend_images", "blend_stack", "compose_maps", "create_map_mask", "imshow_compose"]
 
@@ -55,7 +55,7 @@ class MapStyle:
     vmin, vmax : float, optional
         Value limits; default to the data range, or to *percentiles*.
     stretch : {"linear", "sqrt", "log", "asinh", "hist"}, default: "linear"
-        Display stretch, see :func:`~pynbodyext.plot.image.postprocess.normalize`.
+        Display stretch, see :func:`~pynbodyext.plot.image.smooth.normalize`.
     percentiles : (float, float), optional
         Percentiles used for whichever limit is not given, e.g. ``(1, 99)``.
     bad : color, optional
@@ -391,7 +391,7 @@ def imshow_compose(
 
 @dataclass(frozen=True)
 class ComposeOps(ImageOps):
-    """The stitching family of an image: ``image.postprocess.compose(other, …)``.
+    """The stitching family of an image: ``image.process.compose(other, …)``.
 
     Calling the view stitches this image with another one;
     :meth:`ComposeOps.masks` exposes the transition masks, and
@@ -428,7 +428,7 @@ class ComposeOps(ImageOps):
             self.data, _values(other), style1=style, style2=other_style, mask=mask, line_angle=line_angle, width=width
         )
 
-    #: ``image.postprocess.compose(other, …)`` is the shorthand for :meth:`stitch`.
+    #: ``image.process.compose(other, …)`` is the shorthand for :meth:`stitch`.
     __call__ = stitch
 
     def masks(
@@ -466,7 +466,7 @@ def _values(value: Any) -> np.ndarray:
     """Values of anything image-like — an ImageData, a binned array, or an array.
 
     Binned arrays are transposed into image orientation on the way (see
-    :func:`~pynbodyext.plot.image.data.as_image`), so ``image.postprocess.compose(bins.s[q])``
+    :func:`~pynbodyext.plot.image.data.as_image`), so ``image.process.compose(bins.s[q])``
     lines up instead of silently turning the map on its side.
     """
     return aligned_values(value)

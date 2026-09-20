@@ -12,7 +12,7 @@ import pytest
 
 from pynbodyext.plot.image import AdaptiveMap, ImageData, ImageOp, MapStyle, gaussian_smooth, median_filter
 from pynbodyext.plot.image.psf import convolve_psf, gaussian_psf
-from pynbodyext.plot.image.postprocess import box_smooth, downsample, normalize
+from pynbodyext.plot.image.smooth import box_smooth, downsample, normalize
 
 
 def image(shape: tuple[int, int] = (8, 8), **kwargs: object) -> ImageData:
@@ -31,7 +31,7 @@ def image(shape: tuple[int, int] = (8, 8), **kwargs: object) -> ImageData:
 def test_smooth_gaussian_matches_the_free_function() -> None:
     source = image()
 
-    via_method = source.postprocess.smooth.gaussian(fwhm=2.0)
+    via_method = source.process.smooth.gaussian(fwhm=2.0)
 
     np.testing.assert_allclose(via_method.data, gaussian_smooth(source.data, fwhm=2.0, pixel_scale=source.pixel_size))
 
@@ -39,7 +39,7 @@ def test_smooth_gaussian_matches_the_free_function() -> None:
 def test_smooth_methods_keep_the_geometry_and_metadata() -> None:
     source = image(x_units="kpc", y_units="kpc", units="km/s")
 
-    for smoothed in (source.postprocess.smooth.gaussian(fwhm=2.0), source.postprocess.smooth.box(size=3), source.postprocess.smooth.median(size=3)):
+    for smoothed in (source.process.smooth.gaussian(fwhm=2.0), source.process.smooth.box(size=3), source.process.smooth.median(size=3)):
         assert smoothed.shape == source.shape
         assert smoothed.extent == source.extent
         assert smoothed.label == "vz.mean"
@@ -48,7 +48,7 @@ def test_smooth_methods_keep_the_geometry_and_metadata() -> None:
 
 
 def test_smooth_methods_record_what_they_did() -> None:
-    smoothed = image().postprocess.smooth.gaussian(fwhm=2.0)
+    smoothed = image().process.smooth.gaussian(fwhm=2.0)
 
     assert [op.name for op in smoothed.ops] == ["gaussian_smooth"]
     assert smoothed.ops[0].params["fwhm"] == 2.0
@@ -57,14 +57,14 @@ def test_smooth_methods_record_what_they_did() -> None:
 def test_box_and_median_methods_match_their_functions() -> None:
     source = image()
 
-    np.testing.assert_allclose(source.postprocess.smooth.box(size=3).data, box_smooth(source.data, 3))
-    np.testing.assert_allclose(source.postprocess.smooth.median(size=3).data, median_filter(source.data, 3))
+    np.testing.assert_allclose(source.process.smooth.box(size=3).data, box_smooth(source.data, 3))
+    np.testing.assert_allclose(source.process.smooth.median(size=3).data, median_filter(source.data, 3))
 
 
 def test_downsample_shrinks_the_image_and_its_edges() -> None:
     source = image((8, 8), extent=(0.0, 8.0, 0.0, 8.0))
 
-    reduced = source.postprocess.smooth.downsample(factor=2)
+    reduced = source.process.smooth.downsample(factor=2)
 
     assert reduced.shape == (4, 4)
     np.testing.assert_allclose(reduced.data, downsample(source.data, 2))
@@ -77,7 +77,7 @@ def test_downsample_shrinks_the_image_and_its_edges() -> None:
 def test_kernel_widths_are_in_axis_units_on_a_uniform_grid() -> None:
     source = image((4, 4), extent=(0.0, 8.0, 0.0, 8.0))  # pixel_size == 2
 
-    unit_based = source.postprocess.smooth.gaussian(fwhm=4.0)
+    unit_based = source.process.smooth.gaussian(fwhm=4.0)
 
     np.testing.assert_allclose(unit_based.data, gaussian_smooth(source.data, fwhm=4.0, pixel_scale=(2.0, 2.0)))
     assert not np.allclose(unit_based.data, gaussian_smooth(source.data, fwhm=4.0))
@@ -91,7 +91,7 @@ def test_kernel_widths_are_in_axis_units_on_a_uniform_grid() -> None:
 def test_psf_convolve_matches_the_free_function() -> None:
     source = image()
 
-    via_method = source.postprocess.psf.convolve(fwhm=2.0)
+    via_method = source.process.psf.convolve(fwhm=2.0)
 
     np.testing.assert_allclose(via_method.data, convolve_psf(source.data, fwhm=2.0, pixel_scale=source.pixel_size))
     assert [op.name for op in via_method.ops] == ["convolve_psf"]
@@ -99,12 +99,12 @@ def test_psf_convolve_matches_the_free_function() -> None:
 
 def test_psf_deconvolution_methods_return_images() -> None:
     kernel = gaussian_psf(fwhm=2.0, size=5)
-    blurred = image().postprocess.psf.convolve(kernel)
+    blurred = image().process.psf.convolve(kernel)
 
     for restored in (
-        blurred.postprocess.psf.deconvolve(kernel),
-        blurred.postprocess.psf.wiener(kernel),
-        blurred.postprocess.psf.richardson_lucy(kernel, iterations=3),
+        blurred.process.psf.deconvolve(kernel),
+        blurred.process.psf.wiener(kernel),
+        blurred.process.psf.richardson_lucy(kernel, iterations=3),
     ):
         assert restored.shape == blurred.shape
         assert restored.extent == blurred.extent
@@ -139,7 +139,7 @@ def test_adaptive_bin_returns_a_map_carrying_this_image_geometry() -> None:
     value = image((30, 30), extent=(0.0, 30.0, 0.0, 30.0), x_units="kpc", y_units="kpc", label="vz.mean", units="km/s")
     signal = value.with_data(np.linspace(1.0, 10.0, 900).reshape(30, 30), label="mass.sum")
 
-    binned = value.postprocess.adaptive.bin(signal, target_nbins=6)
+    binned = value.process.adaptive.bin(signal, target_nbins=6)
 
     assert isinstance(binned, AdaptiveMap)
     assert isinstance(binned.image, ImageData)
@@ -152,7 +152,7 @@ def test_adaptive_bin_returns_a_map_carrying_this_image_geometry() -> None:
     assert binned.mask.any()
     # The painted map is an ordinary image, so it keeps the machinery.
     assert binned.to_image_data() is binned.image
-    assert binned.image.postprocess.smooth.box(size=3).shape == binned.image.shape
+    assert binned.image.process.smooth.box(size=3).shape == binned.image.shape
 
 
 def test_adaptive_bin_accepts_plain_arrays_and_statistics() -> None:
@@ -160,7 +160,7 @@ def test_adaptive_bin_accepts_plain_arrays_and_statistics() -> None:
     value = image((20, 20))
     signal = np.ones((20, 20))
 
-    binned = value.postprocess.adaptive.bin(signal, target_capacity=200.0, method="median")
+    binned = value.process.adaptive.bin(signal, target_capacity=200.0, method="median")
 
     assert binned.method == "median"
     assert binned.target_capacity == 200.0
@@ -174,8 +174,8 @@ def test_adaptive_bin_accepts_plain_arrays_and_statistics() -> None:
 def test_chaining_records_every_step_in_order() -> None:
     chained = (
         image()
-        .postprocess.smooth.gaussian(fwhm=2.0)
-        .postprocess.psf.convolve(fwhm=1.0)
+        .process.smooth.gaussian(fwhm=2.0)
+        .process.psf.convolve(fwhm=1.0)
         .display.normalize(stretch="sqrt")
     )
 
@@ -188,8 +188,8 @@ def test_methods_do_not_touch_the_original() -> None:
     source = image()
     before = source.data.copy()
 
-    source.postprocess.smooth.gaussian(fwhm=2.0)
-    source.postprocess.smooth.downsample(factor=2)
+    source.process.smooth.gaussian(fwhm=2.0)
+    source.process.smooth.downsample(factor=2)
     source.display.normalize()
 
     np.testing.assert_array_equal(source.data, before)
@@ -197,7 +197,7 @@ def test_methods_do_not_touch_the_original() -> None:
 
 
 def test_with_data_keeps_the_provenance_but_plain_construction_does_not() -> None:
-    smoothed = image().postprocess.smooth.gaussian(fwhm=2.0)
+    smoothed = image().process.smooth.gaussian(fwhm=2.0)
 
     replaced = smoothed.with_data(np.zeros(smoothed.shape))
     fresh = ImageData(np.zeros(smoothed.shape))
@@ -216,8 +216,8 @@ def test_compose_and_masks_are_reachable_from_the_image() -> None:
     first = image((4, 4))
     second = first.with_data(np.ones((4, 4)))
 
-    masks = first.postprocess.compose.masks(line_angle=0.0, width=0.0)
-    composed = first.postprocess.compose(second, style=MapStyle(cmap="gray"), other_style=MapStyle(cmap="viridis"))
+    masks = first.process.compose.masks(line_angle=0.0, width=0.0)
+    composed = first.process.compose(second, style=MapStyle(cmap="gray"), other_style=MapStyle(cmap="viridis"))
 
     assert masks[0].shape == first.shape
     assert composed.shape == (*first.shape, 4)
