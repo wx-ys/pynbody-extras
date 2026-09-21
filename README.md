@@ -1,87 +1,59 @@
 # pynbodyext: Extensions and Utilities for pynbody
 
-`pynbodyext` provides a set of extensions and utilities based on [pynbody](https://github.com/pynbody/pynbody) library.
+`pynbodyext` extends [pynbody](https://github.com/pynbody/pynbody) with composable
+calculators, binned profiles and ready-to-publish 2-D maps.
 
 **Note: This project is under active development. Feedback and contributions are welcome!**
 
 
 ## Installation
 
-Clone the repository and install in editable (-e) mode:
-
 ```bash
 git clone https://github.com/wx-ys/pynbody-extras.git
 cd pynbody-extras
-pip install -e .
+pip install -e .          # extras: [image] adaptive binning, [store] SQL result store
 ```
 
 ---
 
 ## Quick Start
 
+The examples assume `sim` is a loaded `pynbody` snapshot.
 
+### Calculators
 
-The examples below assume `sim` is an already loaded `pynbody` snapshot.
-
-### Reusable calculators
-
-Calculators are composable analysis objects. You can build them once and apply
-them to many simulations.
+Properties, filters and transforms are lazily composed objects: build the graph
+once, evaluate it on as many snapshots as you like.
 
 ```python
 import numpy as np
 
-from pynbodyext.filters import FamilyFilter
-from pynbodyext.properties import ParamContain, ParamSum
-
-# Half-mass radius of stars
-re = ParamContain("r", 0.5, "mass").filter(FamilyFilter("star"))
-
-# Total stellar mass
-stellar_mass = ParamSum("mass").filter(FamilyFilter("star"))
-
-# Derived quantity built from calculators
-stellar_density = stellar_mass / (4 * np.pi * re**2)
-
-# Direct call returns the public value
-value = stellar_density(sim)
-print(value)
-```
-
-A calculator behaves like a lazily defined analysis graph. Arithmetic between
-calculators creates a new calculator rather than immediately evaluating anything.
-
-
-### Filters and transforms
-
-Filters select particles. Transforms temporarily modify the active frame before
-evaluation.
-
-```python
 from pynbodyext.filters import FamilyFilter, Sphere
-from pynbodyext.properties import ParamContain
+from pynbodyext.properties import ParamContain, ParamSum
 from pynbodyext.transforms import ShiftPosTo, WrapBox
 
-re = (ParamContain("r",0.5,"mass")
-    .filter(
-    Sphere("30 kpc") & FamilyFilter("star")
-    # combine filters with logical operators (e.g., &, |, ~
-    # the star particles within a sphere of radius 30 kpc
-    ).transform(
-        WrapBox(
-        ).then(
-        ShiftPosTo("ssc")
-        )
-        # apply a sequence of transforms to the simulation before computing the property:
-        # means deal with the periodic boundary condition by wrapping particles into the box, 
-        # and then shift the positions to the center
-    )
+# half-mass radius of the stars inside 30 kpc, in a wrapped, centre-shifted frame
+re = ParamContain(0.5).filter(Sphere("30 kpc") & FamilyFilter("star")).transform(
+    WrapBox().then(ShiftPosTo("ssc"))
 )
-# see the structure of the pipeline:
-print(re.dependency_tree)
+
+re(sim)                              # evaluate: the half-mass radius
+stellar_mass = ParamSum("mass").filter(FamilyFilter("star"))
+stellar_mass / (4 * np.pi * re**2)   # arithmetic builds a new calculator, evaluated on call
 ```
+
+Calling a calculator returns its value; `run(...)` returns the whole execution —
+tree, timings, warnings:
+
+```python
+res = re.run(sim, progress="node", perf_memory=True)   # value + tree, timings, warnings
+print(res.value, res.report_summary())
 ```
-ParamContain("r", 0.5, "mass")<prop>
+
+`re.dependency_tree` prints the graph itself, without running it:
+
+```
+ParamContain(0.5, "r", "mass")<prop>
 ├─ TransformChain<trans>
 │  ├─ WrapBox(None, "minirange")<trans>
 │  └─ ShiftPosTo("ssc")<trans>
@@ -91,200 +63,71 @@ ParamContain("r", 0.5, "mass")<prop>
    └─ FamilyFilter("star")<filt>
 ```
 
+One calculator can be reused inside another: `0.5 * re` above is a
+calculator-valued input, resolved automatically at runtime, so you never order the
+computation by hand.
 
-### Run with diagnostics
+### Profiles
 
-Use ``run(...)`` when you want the full execution result instead of just the final
-public value.
-
-```python
-# apply the pipeline to a simulation, with progress logging and memory performance tracking:
-res = re.run(sim, progress="node",perf_memory=True)
-
-print(res.value)
-SimArray(3.41225841, 'kpc')
-
-# You can also use the `pipeline_report` method to get a detailed report of the execution:
-print(res.pipeline_report())
-```
-Example progress output:
-```python
-pynext.progress: run start ParamContain
-pynext.progress: ├─ [n1] ParamContain <property> start
-...
-pynext.progress: │  │  │  ├─ [n5] CenPos <property> ok 411.45 ms
-pynext.progress: │  │  ├─ [n4] ShiftPosTo <transform> ok 427.60 ms
-pynext.progress: │  ├─ [n2] TransformChain <transform> ok 532.92 ms
-...
-pynext.progress: ├─ [n1] ParamContain <property> ok 816.12 ms
-pynext.progress: run end ParamContain status=ok total=820.62 ms nodes=9 warnings=0 errors=0
-```
-
-
-If you only want the final public value, call the calculator directly:
-
-```python
-value = re(sim)
-```
-
-#### A Larger Example
-The calculator system supports dynamic dependencies between nodes, so one
-calculator can be reused inside another.
-
-```python
-from pynbodyext.filters import FamilyFilter, Sphere
-from pynbodyext.properties import AngMomVec, KappaRot, ParamContain
-from pynbodyext.transforms import AlignVec, ShiftPosTo, ShiftVelTo, WrapBox
-
-# define half-mass radius for star particles within 30 kpc
-re = ParamContain("r").filter(Sphere("30 kpc") & FamilyFilter("star"))
-
-krot = KappaRot().filter(
-    # we calculate the kappa_rot for star particles within 30 kpc
-    Sphere("30 kpc") & FamilyFilter("star")
-    ).transform(
-        # the simulation is first wrapped into the box, 
-        # then shifted to the center, 
-        # then shift the velocities 
-        # to mean velocity of star particles within 0.5*re,
-        # and finally align the z-axis 
-        # to the angular momentum vector of star particles within 2*re.
-        WrapBox(
-        ).then(
-        ShiftPosTo("ssc")
-        ).then(
-        ShiftVelTo("com").filter(Sphere(0.5*re) & FamilyFilter("star"))
-        ).then(
-        AlignVec(
-            AngMomVec().filter(Sphere(2 * re) & FamilyFilter("star"))
-            )
-        )
-    )
-
-```
-Here ``0.5 * re`` and ``2 * re`` are calculator-valued inputs. They are resolved
-automatically at runtime, so you do not need to manually order the computation.
-
-
-
----
-
-### Profiles (1-D and 2-D binned results)
-
-Profiles come from the binning nodes in `pynbodyext.core.calculate`: declare one
-axis per dimension — its property, bounds, binning `mode` (`"linear"`, `"log"`,
-`"equaln"`) and units — run it on a snapshot, and query the per-bin statistics by
-name (`"<field>.<stat>"`, with `count` for the number of particles per bin).
+`Bin1D` (and `BinND` for two axes) bins a snapshot's particles and answers per-bin
+statistics by name — `"<field>.<stat>"`, or `count` for particles per bin.
 
 ```python
 from pynbodyext.core.calculate import Bin1D
-from pynbodyext.filters import FamilyFilter, Sphere
 
-# A radial profile: 20 equal-number bins out to 30 kpc
-r = Bin1D("r", vmin="0 kpc", vmax="30 kpc", nbins=20, mode="equaln", units="kpc")
+r = Bin1D("r", vmin="0 kpc", vmax="30 kpc", nbins=20, mode="equaln")
 profile = r(sim)
 
-profile["count"]       # particles per bin
-profile["mass.sum"]    # total mass per bin
-profile["vz.mean"]     # mean vz per bin
-profile["vz.p16"]      # 16th percentile of vz per bin
-profile["vz.disp"]     # velocity dispersion per bin
+profile["count"]        # particles per bin
+profile["mass.sum"]     # total mass          profile["vz.mean"]   # mean vz
+profile["vz.disp"]      # dispersion          profile["vz.p16"]    # 16th percentile
 profile["mass.sum"].plot()
-
-# Sub-profiles: the result carries the family sub-results, and re-binning a
-# filtered snapshot gives a profile restricted to those particles
-profile.star                       # the same bins, star particles only
-stars = r(sim[Sphere("30 kpc") & FamilyFilter("star")])
+profile.star            # the same bins, star particles only
 ```
 
-Two axes (``Bin1D(...) @ Bin1D(...)``) give the 2-D maps the
-[image layer](#image-post-processing-and-visualization) below draws — the axis
-`alias` names them (`x`, `y`).
-
----
+`mode` is `"linear"`, `"log"` or `"equaln"` (or pass explicit `edges`), and
+re-binning a filtered snapshot profiles just that subset:
+`r(sim[Sphere("30 kpc") & FamilyFilter("star")])`.
 
 ### Image post-processing and visualization
 
-`pynbodyext.plot.image` turns the 2-D arrays produced by the calculator layer
-(`BinND`, and later SPH renders or tessellations) into publication-ready figures.
-Every operation is a free function over a plain 2-D array, and the same operations
-are methods of `ImageData`, which carries the geometry, the units and the record
-of what was done to it.
+Two axes make a map; `bins2d["query"].image` is the `ImageData` for one of them —
+the values plus their bin edges, units and labels. `image.display.*` shows it,
+`image.process.*` works on it.
 
 ```python
+from pynbodyext.core.calculate import Bin1D
 from pynbodyext.plot import image
 
-# 2-D binning: 200x200 pixels of projected z-velocity and mass
-bins2d = (Bin1D("x", vmin=-50, vmax=50, nbins=200, alias="x")
-        @ Bin1D("y", vmin=-50, vmax=50, nbins=200, alias="y"))(sim)
+bins2d = (Bin1D("x", vmin="-50 kpc", vmax="50 kpc", nbins=128, alias="x")
+          @ Bin1D("y", vmin="-50 kpc", vmax="50 kpc", nbins=128, alias="y"))(sim)
 
-# `BinNDResult.imshow` itself goes through ImageData: extent, axis units and
-# labels, and the choice between imshow and pcolormesh for uneven bins
-bins2d.imshow("mass.sum", cmap="inferno", colorbar=True)
-# density spans decades: draw and label it on a log scale
-bins2d.imshow("density", log=True, colorbar="bottom")
+bins2d.imshow("mass.sum", cmap="inferno", colorbar=True)     # the one-liner
 
-# Or hold the map and chain: geometry and metadata survive every step, and the
-# calls are recorded in `.ops` (repr shows them)
-density = image.ImageData.from_bins(bins2d, "mass.sum")
-smoothed = density.process.smooth.gaussian(fwhm=1.0)        # fwhm in the units of the axes
-observed = smoothed.process.psf.convolve(fwhm=3.0)          # what a telescope would see
-observed.display.imshow(cmap="inferno", colorbar=True)
+mass = bins2d["mass.sum"].image
+mass.display.imshow(log=True, colorbar="bottom")             # decades -> log scale
+smoothed = mass.process.smooth.gaussian(fwhm=1.0)            # NaN-aware, fwhm in axis units
+observed = smoothed.process.psf.convolve(fwhm=3.0)           # what a telescope would see
+detected = observed.process.noise.poisson(exposure=0.05, rng=1)       # seeded, maskable
+restored = observed.process.psf.wiener(image.gaussian_psf(fwhm=3.0))  # and back again
 
-# ...and what the detector would do to it: seeded, maskable, recorded in .ops
-detected = observed.process.noise.poisson(exposure=0.05, background=2.0, rng=1)
-detected.display.imshow(cmap="inferno", colorbar=True)
-
-# Deconvolution goes the other way (and amplifies noise: it is a visualisation tool)
-restored = observed.process.psf.wiener(image.gaussian_psf(fwhm=3.0), balance=1e-6)
-
-# A velocity map: adaptive bins of equal mass, green on zero velocity
-velocity = image.ImageData.from_bins(bins2d, "vz.mean")
-binned = velocity.process.adaptive.bin(bins2d["mass.sum"], target_nbins=200, min_signal=1e6)
+velocity = bins2d["vz.mean"].image                           # a velocity map
+binned = velocity.process.adaptive.bin(bins2d["mass.sum"], target_nbins=200)
 binned.display.imshow(cmap="sauron", symmetric=True, colorbar="bottom")
-binned.image.process.smooth.box(size=3)       # the painted map is an ImageData too
-# a colour bar can also be added afterwards, on the artist or on the map
-binned.display.add_colorbar(loc="left", size="4%", tick_label_size=8)
+velocity.display.contour(levels=[-100, 0, 100], colors="w")  # on the same axes
 
-# Contours are a display verb too: they follow the bins of the map they describe
-velocity.display.draw(ax=ax, cmap="inferno")
-velocity.display.contour(ax=ax, levels=[-200, -100, 0, 100, 200], colors="w", linewidths=0.6)
-
-# Anything that takes a second map accepts a binned array directly: it carries its
-# own orientation, so no `.T` (a raw ndarray is taken as image-oriented)
-mass = image.as_image(bins2d["mass.sum"])   # (x, y) -> (row=y, column=x)
-
-# Gas density and dark-matter density in one figure, crossfaded along a line
-gas = image.ImageData.from_bins(bins2d, "mass.sum", units="1e10 Msol")
-dm = image.ImageData.from_bins(bins2d, "dm_mass.sum", units="1e10 Msol")
-gas.imshow_compose(
-    dm,
-    style1=image.MapStyle(cmap="inferno", stretch="log"),
-    style2=image.MapStyle(cmap="cividis"),
-    label1="gas", label2="dark matter",
+gas, dm = bins2d.gas["mass.sum"].image, bins2d.dm["mass.sum"].image   # two maps, one figure
+gas.process.compose.imshow(
+    dm, style=image.MapStyle(cmap="inferno", stretch="log"), other_style=image.MapStyle(cmap="cividis")
 )
 ```
 
-An image has two entry points: `image.display.*` for showing it and
-`image.process.*` for working on it (`smooth.gaussian`, `psf.convolve`,
-`noise.poisson`, `compose(other)`, `adaptive.bin`) — and `ImageData` itself carries
-only what it *is* (values, geometry, units, labels, `ops`, `with_data`,
-`from_bins`). The underlying free functions (`gaussian_smooth(data, ...)`,
-`compose_maps(...)`, …) remain available for plain arrays. A new family is a new module plus
-`@ImageData.register_ops("tessellation")`, so extension never means editing base
-classes. The SAURON colour map (`image.sauron_cmap`, black → blue → cyan →
-**green on zero** → yellow → red → light grey — Cappellari & Emsellem's map for
-SAURON/ATLAS³D velocity fields, reproduced from its published table) is registered
-under its own name, so `cmap="sauron"` (and `"sauron_r"`) work; the masks
-behind the stitching are exposed on their own:
-
-```python
-mask1, mask2 = gas.process.compose.masks(line_angle=45, width=0.15)
-blended = image.blend_images(rgb_gas, rgb_dm, mask1)
-```
-
-Adaptive binning needs the optional dependency `powerbin`
-(`pip install pynbodyext[image]`); everything else only needs `numpy`, `scipy`
-and `matplotlib`, which pynbody already brings.
+Every step returns a new `ImageData` with the operation recorded in `.ops` (so
+`repr` shows the chain), and the free functions (`gaussian_smooth`,
+`compose_maps`, …) stay available for plain arrays. `cmap="sauron"` is the
+Cappellari & Emsellem SAURON/ATLAS³D velocity map (green on zero); the masks
+behind the stitching are exposed too (`mask1, mask2 = gas.process.compose.masks()`).
+Adaptive binning needs the optional `powerbin` (`pip install pynbodyext[image]`);
+everything else only needs `numpy`, `scipy` and `matplotlib`.
 
 ---
