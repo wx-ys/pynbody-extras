@@ -1,7 +1,7 @@
 """Some type utilities for pynbodyext"""
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, TypeVar, Union, runtime_checkable
+from typing import Any, Protocol, TypeAlias, TypeVar, runtime_checkable
 
 # Protocol need python version >3.8
 import numpy as np
@@ -18,11 +18,6 @@ except ImportError:
     from typing import Self
 
     from typing_extensions import TypeVarTuple, Unpack  # type: ignore
-
-if TYPE_CHECKING:
-    from pynbodyext.profiles.bins import BinsSet
-    from pynbodyext.profiles.proarray import ProfileArray
-    from pynbodyext.profiles.profile import ProfileBase
 
 __all__ = ["Self", "TypeVarTuple", "Unpack"]
 
@@ -82,43 +77,6 @@ class SignatureProvider(Protocol):
     """
 
     def signature(self) -> object: ...
-
-
-__all__ += [
-    "BinByFunc",
-    "BinsAreaFunc",
-    "BinsAlgorithmFunc",
-    "RegistBinByString",
-    "RegistBinAreaString",
-    "RegistBinAlgorithmString",
-]
-# ------------------Profile---------------------------------
-BinByFunc: TypeAlias = Callable[[SimSnap], SimNpArray]
-"""Callable extracting a 1D array from a simulation."""
-
-BinsAreaFunc: TypeAlias = Callable[["BinsSet", SimNpArray], SimNpArray]
-"""Callable computing per-bin area or volume given bin edges."""
-
-BinsAlgorithmFunc: TypeAlias = Callable[["BinsSet", SimNpArray], SimNpArray]
-"""Callable constructing bin edges from raw data (returns length nbins+1)."""
-
-RegistBinByString: TypeAlias = str | Literal["r", "rxy"]
-"""A type alias representing valid strings for binning by."""
-
-RegistBinAreaString: TypeAlias = str | Literal["length", "annulus", "cylindrical_shell", "spherical_shell"]
-"""A type alias representing valid strings for binning area."""
-
-RegistBinAlgorithmString: TypeAlias = str | Literal["lin", "log", "equaln"]
-"""A type alias representing valid strings for binning algorithms."""
-
-
-SimNpPrArray: TypeAlias = Union[SimNpArray, "ProfileArray"]
-"""A type alias representing simulation arrays, numpy arrays, or profile arrays."""
-
-SimNpPrArrayFunc: TypeAlias = SimCallable[SimNpPrArray]
-
-ProfileType = TypeVar("ProfileType", bound="ProfileBase")
-SimNpPrArrayPrFunc: TypeAlias = Callable[[ProfileType], SimNpPrArray]
 
 
 __all__ += ["has_signature", "get_signature_safe"]

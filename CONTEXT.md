@@ -124,6 +124,11 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   Emsellem's SAURON map, reproduced from its published table bit-for-bit and
   registered under its own name, `"sauron"` (`"sauron_r"`), with the source
   credited in the code.
+- [ADR-0012](docs/adr/0012-drop-the-profiles-and-chunk-modules.md): the legacy
+  `profiles` and `chunk` packages are gone — `core/calculate/bins` (`Bin1D`/
+  `BinND`) is the one binning implementation, so profile building has a single
+  statistics vocabulary (`"mass.sum"`, `"vz.disp"`, …) and the chunked-array
+  experiment (dask, the `chunk` extra) is no longer carried.
 
 ## Image layer (`pynbodyext/plot/image/`)
 

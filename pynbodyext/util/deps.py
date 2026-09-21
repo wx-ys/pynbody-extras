@@ -1,7 +1,7 @@
 from importlib.metadata import version
 from importlib.util import find_spec
 
-__all__ = ["GRAVITY_NATIVE_AVAILABLE", "DASK_AVAILABLE", "POWERBIN_AVAILABLE", "module_available", "PYNBODY_VERSION"]
+__all__ = ["GRAVITY_NATIVE_AVAILABLE", "POWERBIN_AVAILABLE", "module_available", "PYNBODY_VERSION"]
 
 
 def module_available(name: str) -> bool:
@@ -10,8 +10,6 @@ def module_available(name: str) -> bool:
 
 
 GRAVITY_NATIVE_AVAILABLE: bool = module_available("pynbodyext._native")
-
-DASK_AVAILABLE: bool = module_available("dask")
 
 # Adaptive image binning (`pynbodyext.plot.image.adaptive`).
 POWERBIN_AVAILABLE: bool = module_available("powerbin")

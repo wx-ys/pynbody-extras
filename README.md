@@ -169,32 +169,37 @@ automatically at runtime, so you do not need to manually order the computation.
 
 ---
 
-### Using the Generalized Profile Builder
+### Profiles (1-D and 2-D binned results)
 
-You can easily build radial profiles and extract sub-profiles using filters:
+Profiles come from the binning nodes in `pynbodyext.core.calculate`: declare one
+axis per dimension — its property, bounds, binning `mode` (`"linear"`, `"log"`,
+`"equaln"`) and units — run it on a snapshot, and query the per-bin statistics by
+name (`"<field>.<stat>"`, with `count` for the number of particles per bin).
 
 ```python
-from pynbodyext.filters import Sphere
-from pynbodyext.profiles import RadialProfileBuilder
+from pynbodyext.core.calculate import Bin1D
+from pynbodyext.filters import FamilyFilter, Sphere
 
-# Create a radial profile builder for 3D data, weighted by mass, with equal-number bins:
-radial_pr = RadialProfileBuilder(ndim=3, weight="mass", bins_type="equaln")
+# A radial profile: 20 equal-number bins out to 30 kpc
+r = Bin1D("r", vmin="0 kpc", vmax="30 kpc", nbins=20, mode="equaln", units="kpc")
+profile = r(sim)
 
-# Generate the profile for your simulation:
-pr = radial_pr(sim)
+profile["count"]       # particles per bin
+profile["mass.sum"]    # total mass per bin
+profile["vz.mean"]     # mean vz per bin
+profile["vz.p16"]      # 16th percentile of vz per bin
+profile["vz.disp"]     # velocity dispersion per bin
+profile["mass.sum"].plot()
 
-# Extract sub-profiles using filters:
-subpr = pr.s  # or equivalently, pr[FamilyFilter("star")]
-# 'subpr' has the same interface as 'pr'
-
-# Access profile statistics:
-subpr["z"]         # ProfileArray: mean z profile
-subpr["z"]["abs"]  # ProfileArray: mean absolute z profile
-subpr["z"]["p16"]  # ProfileArray: 16th percentile z profile
-
-# Restrict particles to a sphere of radius 30 kpc:
-subpr[Sphere("30 kpc")]  # Returns a new sub-profile
+# Sub-profiles: the result carries the family sub-results, and re-binning a
+# filtered snapshot gives a profile restricted to those particles
+profile.star                       # the same bins, star particles only
+stars = r(sim[Sphere("30 kpc") & FamilyFilter("star")])
 ```
+
+Two axes (``Bin1D(...) @ Bin1D(...)``) give the 2-D maps the
+[image layer](#image-post-processing-and-visualization) below draws — the axis
+`alias` names them (`x`, `y`).
 
 ---
 
