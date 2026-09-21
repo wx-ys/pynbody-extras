@@ -69,25 +69,32 @@ computation by hand.
 
 ### Profiles
 
-`Bin1D` (and `BinND` for two axes) bins a snapshot's particles and answers per-bin
-statistics by name — `"<field>.<stat>"`, or `count` for particles per bin.
+`Bin1D` (and `BinND`, for a second axis) bins a snapshot's particles; the result
+answers per-bin queries by name. A query reads
+`"<field>.<transform>.<stat>@<weight>"`, where everything but the field is
+optional — so `"vz.abs.mean@mass"` is *the mass-weighted mean of |vz| per bin*.
 
 ```python
 from pynbodyext.core.calculate import Bin1D
+from pynbodyext.filters import FamilyFilter, Sphere
 
+# 20 equal-number bins in radius, out to 30 kpc (`mode` is "linear", "log" or
+# "equaln"; `edges=`, `lows=`/`highs=` take explicit bins instead)
 r = Bin1D("r", vmin="0 kpc", vmax="30 kpc", nbins=20, mode="equaln")
 profile = r(sim)
 
-profile["count"]        # particles per bin
-profile["mass.sum"]     # total mass          profile["vz.mean"]   # mean vz
-profile["vz.disp"]      # dispersion          profile["vz.p16"]    # 16th percentile
+profile["count"]              # particles per bin
+profile["vz.mean"]            # the `mean` of the `vz` array
+profile["vz.abs.mean@mass"]   # transform |vz|, then the mass-weighted mean
 profile["mass.sum"].plot()
-profile.star            # the same bins, star particles only
+
+profile.star                  # the same bins, star particles only
+r(sim[Sphere("30 kpc") & FamilyFilter("star")])   # re-bin a filtered snapshot
 ```
 
-`mode` is `"linear"`, `"log"` or `"equaln"` (or pass explicit `edges`), and
-re-binning a filtered snapshot profiles just that subset:
-`r(sim[Sphere("30 kpc") & FamilyFilter("star")])`.
+The statistics are `sum`, `mean`, `median`, `rms`, `disp` and percentiles
+(`pXX`); the transforms `abs`, `log`, `log10`, `sqrt`, `square`; `count` needs no
+field; and `@<field>` may be any array the snapshot carries.
 
 ### Image post-processing and visualization
 
@@ -102,10 +109,9 @@ from pynbodyext.plot import image
 bins2d = (Bin1D("x", vmin="-50 kpc", vmax="50 kpc", nbins=128, alias="x")
           @ Bin1D("y", vmin="-50 kpc", vmax="50 kpc", nbins=128, alias="y"))(sim)
 
-bins2d.imshow("mass.sum", cmap="inferno", colorbar=True)     # the one-liner
+bins2d.imshow("mass.sum", log=True, colorbar=True)           # the one-liner: binned array -> drawn map
 
 mass = bins2d["mass.sum"].image
-mass.display.imshow(log=True, colorbar="bottom")             # decades -> log scale
 smoothed = mass.process.smooth.gaussian(fwhm=1.0)            # NaN-aware, fwhm in axis units
 observed = smoothed.process.psf.convolve(fwhm=3.0)           # what a telescope would see
 detected = observed.process.noise.poisson(exposure=0.05, rng=1)       # seeded, maskable
