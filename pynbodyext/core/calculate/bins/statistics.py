@@ -402,7 +402,9 @@ class Percentile(BinStatisticBase):
         cdf -= cdf[0]
         total = float(cdf[-1])
         if total == 0.0:
-            return float("nan")
+            # The weights put everything on the first value (or on none of them):
+            # a one-point distribution's percentile is that point, not a NaN.
+            return float(a_sorted[0]) if w_sorted[0] != 0.0 else float("nan")
         cdf /= total
         return float(np.interp(self.percentile / 100.0, cdf, a_sorted))
 

@@ -136,8 +136,10 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   bins (anything else raises), `count` is the kernel-integrated particle number,
   both dimensions render with pynbody (2-D projected, 3-D `to_3d_grid`), the
   unequal y/z resolution that trips pynbody's z-pixel bug warns rather than
-  returning something different, and the weighted quantiles wait for a
-  neighbour-list engine.
+  returning something different, the mean-likes are kernel sums while
+  `median`/`pXX` are weighted quantiles over the 64 nearest particles per cell
+  (same statistics objects, so the definitions cannot drift), and the C++ KD-tree
+  underneath comes from scipy/pynbody rather than a new extension.
 
 ## Image layer (`pynbodyext/plot/image/`)
 

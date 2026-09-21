@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import numpy as np
+
 
 def test_model_derives_shape_and_root() -> None:
     from pynbodyext.core.calculate.bins.model import BinResultModel
@@ -50,3 +52,15 @@ def test_query_cache_typed_keys_and_invalidation() -> None:
     assert cleared == 1
     assert names == ["mass.sum.density"]
     assert cache.num_cached == 0
+
+
+def test_a_weighted_percentile_of_one_particle_is_that_particle() -> None:
+    """A one-point distribution's percentile is the point, not a NaN."""
+    from pynbodyext.core.calculate.bins.statistics import Median, Percentile
+
+    values = np.array([42.0])
+    weights = np.array([0.25])
+
+    assert Percentile("p16", 16.0)(values, weights) == 42.0
+    assert Median("median")(values, weights) == 42.0
+    assert np.isnan(Percentile("p16", 16.0)(values, np.zeros(1)))

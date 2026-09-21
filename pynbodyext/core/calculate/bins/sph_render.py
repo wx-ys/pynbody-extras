@@ -46,9 +46,18 @@ With those in mind:
 - ``transform``s act on the *particle* values before smoothing, so
   ``"vz.abs.mean@mass"`` is the mass-weighted mean of ``|vz|``.
 
-What a strict query cannot do, this cannot do either without a different engine:
-``median`` and the percentiles ``pXX`` are not implemented yet (they need the
-per-cell neighbour lists rather than a pair of kernel sums).
+Two engines share that query, because not every statistic is a sum:
+
+- **the kernel sums** — ``count``, ``sum`` and the mean-likes (``mean``, ``rms``,
+  ``disp``) — accumulate over the whole kernel support, which is what pynbody's
+  renderer does;
+- **the quantiles** — ``median`` and the percentiles ``pXX`` — take a weighted
+  quantile over the :attr:`SphRender.neighbours` particles nearest each cell
+  centre, since a quantile is not linear in the weights and so cannot be a kernel
+  sum.  They reuse the *same* statistic objects the strict query uses, so a
+  quantile means the same thing in both: ``"vz.abs.p16@mass"`` is the
+  mass-weighted 16th percentile of ``|vz|``, and ``"vz.median"`` is the weighted
+  median, which need not equal ``"vz.mean"``.
 
 Requirements
 ------------
@@ -83,7 +92,17 @@ from typing import TYPE_CHECKING, Any, cast
 import numpy as np
 
 from .query import _wrap
-from .statistics import RMS, Dispersion, Mean, Sum, apply_pipeline, parse_pipeline_key
+from .statistics import (
+    RMS,
+    BinStatisticBase,
+    Dispersion,
+    Mean,
+    Median,
+    Percentile,
+    Sum,
+    apply_pipeline,
+    parse_pipeline_key,
+)
 
 if TYPE_CHECKING:
     from pynbody.sph.kernels import KernelBase
@@ -98,6 +117,14 @@ _SPATIAL = ("x", "y", "z")
 
 #: Statistics built from one or two kernel sums (no neighbour lists needed).
 _SUM_STATISTICS = (Sum, Mean, RMS, Dispersion)
+
+#: Statistics that need the per-cell neighbour lists: a weighted quantile.
+_QUANTILE_STATISTICS = (Median, Percentile)
+
+#: Particles per cell the quantile engine looks at, by default — pynbody's own
+#: ``KDTree.nn`` default, and about what a 64-neighbour SPH kernel reaches, so a
+#: normal snapshot's kernel support is covered in full.
+_NEIGHBOURS = 64
 
 
 class SphRender:
@@ -120,6 +147,12 @@ class SphRender:
     wrap : bool, default: True
         Whether to repeat particles across a periodic ``boxsize``, as pynbody's
         renderer does.  Turning it off restricts the render to the box.
+    neighbours : int, default: 64
+        How many particles the *quantile* statistics (``median``, ``pXX``) look at
+        per cell, nearest first.  The kernel sums (``count``, ``sum``, ``mean``,
+        ``rms``, ``disp``) do not use this: they reach exactly as far as the
+        kernel does.  Raise it for a snapshot whose kernel support holds more
+        particles than this, or lower it to trade accuracy for speed.
 
     Examples
     --------
@@ -134,11 +167,15 @@ class SphRender:
         kernel: str | KernelBase | None = None,
         smooth_floor: float = 0.0,
         wrap: bool = True,
+        neighbours: int = _NEIGHBOURS,
     ) -> None:
         self._result = result
         self._kernel_spec = kernel
         self._smooth_floor = float(smooth_floor)
         self._wrap = bool(wrap)
+        if neighbours < 1:
+            raise ValueError(f"neighbours must be at least 1, got {neighbours!r}.")
+        self._neighbours = int(neighbours)
         self._renders: dict[str, BinsArray] = {}
         self._plan: dict[str, Any] | None = None
 
@@ -183,11 +220,11 @@ class SphRender:
             weights = None
         else:
             field, transforms, statistic, weight = parsed
-            if not isinstance(statistic, _SUM_STATISTICS):
+            if not isinstance(statistic, _SUM_STATISTICS + _QUANTILE_STATISTICS):
                 raise NotImplementedError(
-                    f"sph_render does not support {statistic.key!r} yet: a kernel-weighted quantile needs "
-                    "the per-cell neighbour lists rather than a pair of kernel sums. "
-                    "Use 'sum', 'mean', 'rms' or 'disp'."
+                    f"sph_render does not support the {statistic.key!r} statistic: it is neither a ratio "
+                    "of kernel sums nor a weighted quantile. Use 'sum', 'mean', 'rms', 'disp', 'median' "
+                    "or 'pXX'."
                 )
             raw = sim[field]
             units = getattr(raw, "units", None)
@@ -201,7 +238,10 @@ class SphRender:
         return result
 
     def _statistic(self, statistic: Any, values: np.ndarray, weights: np.ndarray | None) -> np.ndarray:
-        """One kernel sum for ``sum``/``count``, a ratio of two for the rest."""
+        """One kernel sum for ``sum``/``count``, a ratio of two for the mean-likes."""
+        if isinstance(statistic, _QUANTILE_STATISTICS):
+            plan = self._layout()
+            return self._to_axis_order(self._quantile(statistic, values, weights, plan), plan)
         weight = np.ones_like(values) if weights is None else weights
         if isinstance(statistic, Sum):
             return self._render(values * weight)
@@ -218,6 +258,59 @@ class SphRender:
                 square = self._render(values * values * weight) / total
                 return np.sqrt(np.clip(square - mean * mean, 0.0, None))
         raise TypeError(f"{statistic!r} has no kernel-weighted form.")
+
+    def _quantile(
+        self, statistic: BinStatisticBase, values: np.ndarray, weights: np.ndarray | None, plan: dict[str, Any]
+    ) -> np.ndarray:
+        """A kernel-weighted quantile per cell, over that cell's nearest particles.
+
+        A quantile is not a ratio of kernel sums, so it needs the neighbours of
+        each cell rather than an accumulation: the particles nearest the cell
+        centre are found with a KD-tree (``scipy``'s, which handles a periodic
+        ``boxsize`` the same way pynbody's does), weighted with the same kernel and
+        the same ``@weight`` as the kernel sums, and handed to the very statistic
+        object the strict query uses — so ``median`` and ``p16`` keep their
+        definition, and ``"vz.abs.p16@mass"`` is the mass-weighted 16th percentile
+        of ``|vz|``.
+
+        Only the :attr:`neighbours` particles nearest each cell are considered, so
+        a quantile costs ``cells × neighbours`` rather than the whole kernel
+        support; raise ``neighbours`` when that is not enough.
+        """
+        from scipy.spatial import cKDTree
+
+        present = plan["present"]
+        coordinates = {"x": 0, "y": 1, "z": 2}
+        points = plan["position"][:, [coordinates[prop] for prop in present]]
+        boxsize = None if plan["boxsize"] is None else [plan["boxsize"]] * len(present)
+        tree = plan.get("tree")
+        if tree is None:
+            tree = plan["tree"] = cKDTree(points, boxsize=boxsize)
+
+        shape = tuple(plan["axes"][prop].nbins for prop in present)
+        grid = np.meshgrid(*[_cell_centres(plan["axes"][prop]) for prop in present], indexing="ij")
+        centres = np.stack([axis.ravel() for axis in grid], axis=-1)
+        distance, neighbour = tree.query(centres, k=self._neighbours)
+        # ``k=1`` comes back one-dimensional, and a k larger than the particle
+        # count pads with infinities; neither has a neighbour to weight.
+        distance = np.reshape(distance, (len(centres), self._neighbours))
+        neighbour = np.reshape(neighbour, (len(centres), self._neighbours))
+        missing = ~np.isfinite(distance)
+        neighbour = np.where(missing, 0, neighbour)
+
+        weight = _kernel_weights(distance, plan["smooth"][neighbour], self._kernel(projected=len(present) == 2))
+        weight = np.where(missing, 0.0, weight * plan["measure"])
+        if weights is not None:
+            weight = weight * weights[neighbour]
+        field = values[neighbour]
+        quantiles = np.full(len(centres), np.nan)
+        for index in range(len(centres)):
+            # Only the particles the kernel actually reaches: a zero-weight entry
+            # would still sit in the cumulative distribution and can drag the
+            # interpolation onto a plateau.
+            reached = weight[index] > 0.0
+            quantiles[index] = statistic(field[index][reached], weight[index][reached])
+        return quantiles.reshape(shape)
 
     # ------------------------------------------------------------------ plan
     def _layout(self) -> dict[str, Any]:
@@ -292,6 +385,10 @@ class SphRender:
             rendered = self._render_projected(quantity, plan)
         else:
             rendered = self._render_volume(quantity, plan)
+        return self._to_axis_order(rendered, plan)
+
+    def _to_axis_order(self, rendered: np.ndarray, plan: dict[str, Any]) -> np.ndarray:
+        """Reorder an ``(x, y[, z])`` grid into the result's own axis order."""
         order = [plan["present"].index(str(axis.prop)) for axis in self._result.model.axes]
         return np.transpose(rendered, np.argsort(order))
 
@@ -461,6 +558,29 @@ class BinSphRenderMixin:
 def _is_uniform(axis: Any) -> bool:
     edges = np.asarray(axis.edges, dtype=float)
     return bool(np.allclose(np.diff(edges), np.diff(edges)[0]))
+
+
+def _cell_centres(axis: Any) -> np.ndarray:
+    edges = np.asarray(axis.edges, dtype=float)
+    return 0.5 * (edges[:-1] + edges[1:])
+
+
+def _kernel_weights(distance: np.ndarray, smoothing: np.ndarray, kernel: Any) -> np.ndarray:
+    r"""``W(distance, h)`` for a grid of separations and a matching grid of ``h``.
+
+    A three-dimensional kernel evaluates its own vectorised ``value``; a projected
+    one (``Kernel2D``, used for the two-dimensional render) only has the scalar
+    numerical quadrature pynbody builds its lookup table from, so the table is
+    interpolated here — the same table the renderer samples.
+    """
+    if getattr(kernel, "h_power", 3) != 2:
+        return np.asarray(kernel.value(distance, smoothing), dtype=float)
+    # pynbody caches the sample table per kernel and *not* per dtype, and its C
+    # renderer asks for it as float32 — so ask for the same thing it will, or a
+    # later kernel sum trips over a float64 table.
+    samples = np.asarray(kernel.get_samples(), dtype=float)
+    spacing = 0.02  # pynbody's table runs over q**2 in steps of 0.02, q = r/h
+    return np.interp((distance / smoothing) ** 2, np.arange(len(samples)) * spacing, samples) / smoothing**2
 
 
 def _position_array(sim: Any, axes: dict[str, Any]) -> np.ndarray:

@@ -18,6 +18,7 @@ from pynbody.sph import kernels
 
 from pynbodyext.core.calculate import Bin1D
 from pynbodyext.core.calculate.bins import SphRender
+from pynbodyext.core.calculate.bins.statistics import Percentile
 
 #: Cell size of the 2-D test grids: 10 kpc across, 20 bins.
 SPAN = 10.0
@@ -110,11 +111,11 @@ def test_unusable_smoothing_lengths_are_rejected() -> None:
 
 
 def test_quantiles_are_not_implemented_yet() -> None:
-    """A kernel-weighted median needs neighbour lists, not two kernel sums."""
+    """Statistics that are neither kernel sums nor quantiles are rejected."""
     bins = make_bins(make_sim(500))
 
-    with pytest.raises(NotImplementedError, match="quantile"):
-        bins.sph_render["vz.median"]
+    with pytest.raises(KeyError):
+        bins.sph_render["vz.nonsense"]
 
 
 def test_unknown_keys_are_rejected() -> None:
@@ -316,3 +317,101 @@ def test_an_unequal_z_resolution_warns_about_pynbody_grid_bug() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error")  # a matching resolution must stay quiet
         (equal[0] @ equal[1] @ equal[2])(sim).sph_render["count"]
+
+
+# ---------------------------------------------------------------------------
+# the kernel-weighted quantiles
+# ---------------------------------------------------------------------------
+
+
+def test_a_median_of_one_particle_is_that_particle() -> None:
+    """One particle, one neighbour: the weighted median is its value, exactly."""
+    sim = pynbody.new(dm=1)
+    sim["pos"] = SimArray(np.array([[0.0, 0.0, 0.0]]), "kpc")
+    sim["mass"] = SimArray([1.0], "Msol")
+    sim["vz"] = SimArray([42.0], "km s**-1")
+    sim["smooth"] = SimArray([1.0], "kpc")
+    bins = make_bins(sim)
+
+    median = np.asarray(SphRender(bins, neighbours=1)["vz.median"])
+    count = np.asarray(bins.sph_render["count"])
+
+    np.testing.assert_allclose(median[count > 0.0], 42.0)
+    assert np.isnan(median[count == 0.0]).all(), "cells the kernel misses stay empty"
+
+
+def test_a_constant_field_has_the_same_median_as_mean() -> None:
+    """Whatever the weights are, a constant field is its own quantiles."""
+    sim = make_sim(2000)
+    sim["const"] = SimArray(np.full(len(sim), 7.0), "km s**-1")
+    bins = make_bins(sim)
+
+    count = np.asarray(bins.sph_render["count"])
+    for key in ("const.median", "const.p16", "const.mean"):
+        values = np.asarray(bins.sph_render[key])
+        np.testing.assert_allclose(values[count > 0.0], 7.0, rtol=1e-6, err_msg=key)
+
+
+def test_quantiles_match_a_brute_force_weighted_quantile() -> None:
+    """Every neighbour, every weight, computed by hand in the test."""
+    h, nbins, span, n = 0.6, 6, 6.0, 200
+    rng = np.random.default_rng(5)
+    sim = pynbody.new(dm=n)
+    sim["pos"] = SimArray(rng.uniform(-2, 2, (n, 3)), "kpc")
+    sim["mass"] = SimArray(rng.uniform(0.5, 2.0, n), "Msol")
+    sim["vz"] = SimArray(rng.normal(0.0, 100.0, n), "km s**-1")
+    sim["smooth"] = SimArray(np.full(n, h), "kpc")
+    x = Bin1D("x", vmin=-span / 2, vmax=span / 2, nbins=nbins, alias="x")
+    y = Bin1D("y", vmin=-span / 2, vmax=span / 2, nbins=nbins, alias="y")
+    bins = (x @ y)(sim)
+
+    rendered = np.asarray(SphRender(bins, neighbours=n)["vz.abs.p16@mass"])
+
+    edge = span / nbins
+    centres = -span / 2 + (np.arange(nbins) + 0.5) * edge
+    table = np.asarray(kernels.Kernel2D(kernels.CubicSplineKernel()).get_samples(dtype=float))
+    q2 = np.arange(len(table)) * 0.02
+    position = np.asarray(sim["pos"])
+    mass, vz = np.asarray(sim["mass"]), np.abs(np.asarray(sim["vz"]))
+    statistic = Percentile("p16", 16.0)
+    reference = np.full((nbins, nbins), np.nan)
+    for i, x_centre in enumerate(centres):
+        for j, y_centre in enumerate(centres):
+            distance = np.hypot(position[:, 0] - x_centre, position[:, 1] - y_centre)
+            weight = np.interp((distance / h) ** 2, q2, table) / h**2 * edge**2 * mass
+            reference[i, j] = statistic(vz[weight > 0.0], weight[weight > 0.0])
+
+    np.testing.assert_allclose(rendered, reference, rtol=1e-9, atol=1e-9)
+
+
+def test_quantiles_respect_transforms_weights_and_units() -> None:
+    sim = make_sim(3000)
+    bins = make_bins(sim)
+
+    absolute = bins.sph_render["vz.abs.p16"]
+    weighted = bins.sph_render["vz.abs.p16@mass"]
+
+    assert absolute.units == bins["vz.mean"].units
+    assert np.nanmin(np.asarray(absolute)) >= 0.0, "|vz| percentiles cannot be negative"
+    assert not np.allclose(absolute, weighted), "@mass should move the percentile"
+    # p50 and median are the same statistic under two names
+    np.testing.assert_allclose(
+        np.asarray(bins.sph_render["vz.p50"]), np.asarray(bins.sph_render["vz.median"]), equal_nan=True
+    )
+
+
+def test_the_neighbour_count_must_be_positive() -> None:
+    bins = make_bins(make_sim(200))
+
+    with pytest.raises(ValueError, match="neighbours"):
+        SphRender(bins, neighbours=0)
+
+
+def test_a_quantile_then_a_kernel_sum_still_works() -> None:
+    """pynbody caches its kernel table per kernel: ask for it in its own dtype."""
+    bins = make_bins(make_sim(500))
+
+    median = np.asarray(bins.sph_render["vz.median"])
+    mean = np.asarray(bins.sph_render["vz.mean"])
+
+    assert median.shape == mean.shape == (NBINS, NBINS)
