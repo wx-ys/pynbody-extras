@@ -363,6 +363,20 @@ class PsfOps(ImageOps):
         -------
         ImageData
             The blurred image, with the same geometry as this one.
+
+        Examples
+        --------
+        What a telescope would see, before anything is added to it:
+
+        >>> observed = model.process.psf.convolve(fwhm=3.0)  # doctest: +SKIP
+        >>> observed = model.process.psf.convolve(measured_psf, mode="same")  # doctest: +SKIP
+
+        See Also
+        --------
+        wiener, richardson_lucy :
+            Going the other way, to undo a known blur.
+        :func:`~pynbodyext.plot.image.psf.convolve_psf` :
+            The array-level form.
         """
         blurred = convolve_psf(
             self.image.data,
@@ -381,14 +395,74 @@ class PsfOps(ImageOps):
         )
 
     def wiener(self, psf: Any, *, balance: float = 1e-2, mask: Any = None) -> ImageData:
-        """Undo a blur with a Wiener filter; see :func:`wiener_deconvolve`."""
+        """Undo a blur with a Wiener filter, in the Fourier domain.
+
+        Fast and steady, at the cost of ringing around sharp features; the result is
+        for looking at, not for measuring.
+
+        Parameters
+        ----------
+        psf : array_like
+            The kernel the image was blurred with (from :func:`gaussian_psf` or a
+            measured PSF).
+        balance : float, default: 1e-2
+            Noise-to-signal regularisation.  Smaller sharpens harder and amplifies
+            noise more — this is the knob to trade the two.
+        mask : array_like of bool, optional
+            Pixels to include, oriented for you when image-like.
+
+        Returns
+        -------
+        ImageData
+            The restored image, with ``wiener_deconvolve(...)`` appended to ``.ops``.
+
+        Examples
+        --------
+        >>> sharpened = observed.process.psf.wiener(psf, balance=1e-6)  # doctest: +SKIP
+
+        See Also
+        --------
+        richardson_lucy, deconvolve :
+            The iterative alternative, and the dispatcher.
+        :func:`~pynbodyext.plot.image.psf.wiener_deconvolve` :
+            The array-level form.
+        """
         restored = wiener_deconvolve(
             self.image.data, psf, balance=balance, mask=None if mask is None else aligned_values(mask)
         )
         return self.image._derived(restored, "wiener_deconvolve", {"balance": balance, "mask": mask})
 
     def richardson_lucy(self, psf: Any, *, iterations: int = 10, epsilon: float = 1e-12, mask: Any = None) -> ImageData:
-        """Undo a blur iteratively; see :func:`richardson_lucy`."""
+        """Undo a blur iteratively (Richardson-Lucy).
+
+        Positivity-preserving and ring-free, but it needs many iterations to sharpen
+        and turns spiky if run for too long.
+
+        Parameters
+        ----------
+        psf : array_like
+            The kernel the image was blurred with.
+        iterations : int, default: 10
+            Number of iterations.  A few dozen is a useful range; more will keep
+            concentrating the signal onto individual pixels.
+        epsilon : float, default: 1e-12
+            Floor used when dividing by the re-blurred estimate.
+        mask : array_like of bool, optional
+            Pixels to include, oriented for you when image-like.
+
+        Returns
+        -------
+        ImageData
+            The restored image, with ``richardson_lucy(...)`` appended to ``.ops``.
+
+        Examples
+        --------
+        >>> sharpened = observed.process.psf.richardson_lucy(psf, iterations=30)  # doctest: +SKIP
+
+        See Also
+        --------
+        :func:`~pynbodyext.plot.image.psf.richardson_lucy` : the array-level form.
+        """
         restored = richardson_lucy(
             self.image.data,
             psf,
@@ -399,6 +473,31 @@ class PsfOps(ImageOps):
         return self.image._derived(restored, "richardson_lucy", {"iterations": iterations, "mask": mask})
 
     def deconvolve(self, psf: Any, *, method: str = "wiener", **kwargs: Any) -> ImageData:
-        """Undo a blur with the chosen algorithm; see :func:`deconvolve_psf`."""
+        """Undo a blur, choosing the algorithm by name.
+
+        Parameters
+        ----------
+        psf : array_like
+            The kernel the image was blurred with.
+        method : {"wiener", "richardson_lucy"}, default: "wiener"
+            The algorithm; remaining keyword arguments go to it (``balance`` for
+            Wiener, ``iterations`` for Richardson-Lucy).
+
+        Returns
+        -------
+        ImageData
+            The restored image, with ``deconvolve_psf(...)`` appended to ``.ops``.
+
+        Examples
+        --------
+        >>> sharpened = observed.process.psf.deconvolve(psf, method="richardson_lucy", iterations=20)  # doctest: +SKIP
+
+        See Also
+        --------
+        wiener, richardson_lucy :
+            The two algorithms, called directly.
+        :func:`~pynbodyext.plot.image.psf.deconvolve_psf` :
+            The array-level form.
+        """
         restored = deconvolve_psf(self.image.data, psf, method=method, **kwargs)
         return self.image._derived(restored, "deconvolve_psf", {"method": method, **kwargs})

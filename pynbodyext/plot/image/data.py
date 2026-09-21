@@ -274,6 +274,24 @@ class ImageData:
         -------
         ImageData
             The new image, with the same provenance as this one.
+
+        Examples
+        --------
+        Replace the values but keep the grid, units and history:
+
+        >>> residual = density.with_data(data - model)  # doctest: +SKIP
+        >>> residual.extent is None or residual.extent == density.extent  # doctest: +SKIP
+        True
+
+        Re-label in the same breath:
+
+        >>> smoothed = density.with_data(smoothed_values, label="smoothed density")  # doctest: +SKIP
+
+        Notes
+        -----
+        The processing methods (:meth:`~pynbodyext.plot.image.smooth.SmoothOps.gaussian`
+        and friends) are the same idea with the operation recorded; use this one when
+        the values come from somewhere else.
         """
         replacement = np.asarray(data)
         if replacement.shape != self.shape:
@@ -359,7 +377,7 @@ class ImageData:
         x_units: Any = None,
         y_units: Any = None,
     ) -> ImageData:
-        """Build an image from a single binned array (a :class:`BinsArray`).
+        """Build an image from a single binned array (a ``BinsArray``).
 
         The array is laid out ``(x, y)``, like every binned result, and is
         transposed into the image convention of rows ``= y``, columns ``= x``; its
@@ -382,6 +400,21 @@ class ImageData:
         -------
         ImageData
             The values as an image, with the geometry of their grid.
+
+        Examples
+        --------
+        The same thing, spelled from the array's side:
+
+        >>> image = ImageData.from_bins_array(bins2d["mass.sum"])  # doctest: +SKIP
+        >>> image = bins2d["mass.sum"].image  # doctest: +SKIP
+        >>> image.display.draw(cmap="inferno", colorbar=True)  # doctest: +SKIP
+
+        Raises
+        ------
+        TypeError
+            If *array* did not come from a binned result.
+        ValueError
+            If the result is not 2-D, or an axis has gaps between its bins.
         """
         bins = getattr(array, "bins", None)
         if bins is None:

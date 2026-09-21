@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import weakref
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Union
 
 import numpy as np
 
@@ -19,10 +19,23 @@ from .ops import ImageOps, register_ops
 from .smooth import normalize
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from matplotlib.axes import Axes
+    from matplotlib.collections import QuadMesh
+    from matplotlib.colorbar import Colorbar
+    from matplotlib.colors import Colormap, Normalize
+    from matplotlib.contour import ContourSet
+    from matplotlib.image import AxesImage
+
     from .data import ImageData
+
+#: Anything the drawing methods return: an image, a mesh, a contour set or a bar.
+Artist = Union["AxesImage", "QuadMesh", "ContourSet", "Colorbar"]
 
 __all__ = [
     "COLORBAR_LOCATIONS",
+    "Artist",
     "DisplayOps",
     "add_colorbar",
     "draw_contour",
@@ -74,7 +87,7 @@ def _apply_axis_labels(ax: Any, image: ImageData) -> None:
 
 def add_colorbar(
     mappable: Any = None,
-    ax: Any = None,
+    ax: Axes | None = None,
     *,
     loc: str = "right",
     size: str = "5%",
@@ -82,13 +95,13 @@ def add_colorbar(
     label_pad: float = 2.0,
     tick_label_size: float = 10.0,
     label: str | None = None,
-    cmap: Any = None,
-    norm: Any = None,
+    cmap: str | Colormap | None = None,
+    norm: Normalize | str | None = None,
     log: bool = False,
     vmin: float | None = None,
     vmax: float | None = None,
     **kwargs: Any,
-) -> Any:
+) -> Colorbar:
     """Dock a colour bar to the panel that holds *mappable*.
 
     The colour bar is placed with ``mpl_toolkits.axes_grid1.make_axes_locatable``,
@@ -259,7 +272,7 @@ def _finish(
 
 def draw_image(
     image: Any,
-    ax: Any = None,
+    ax: Axes | None = None,
     *,
     colorbar: bool | str = False,
     colorbar_kwargs: dict[str, Any] | None = None,
@@ -315,7 +328,7 @@ def draw_image(
 
 def draw_imshow(
     image: Any,
-    ax: Any = None,
+    ax: Axes | None = None,
     *,
     colorbar: bool | str = False,
     colorbar_kwargs: dict[str, Any] | None = None,
@@ -377,7 +390,7 @@ def draw_imshow(
 
 def draw_pcolormesh(
     image: Any,
-    ax: Any = None,
+    ax: Axes | None = None,
     *,
     colorbar: bool | str = False,
     colorbar_kwargs: dict[str, Any] | None = None,
@@ -436,9 +449,9 @@ def draw_pcolormesh(
 
 def draw_contour(
     image: Any,
-    ax: Any = None,
+    ax: Axes | None = None,
     *,
-    levels: Any = 8,
+    levels: int | Sequence[float] = 8,
     filled: bool = False,
     colorbar: bool | str = False,
     colorbar_kwargs: dict[str, Any] | None = None,
@@ -511,12 +524,10 @@ def draw_contour(
     return artist
 
 
-def _symmetric_limits(data: np.ndarray, kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Add symmetric ``vmin``/``vmax`` unless the caller set them."""
-    if "vmin" in kwargs or "vmax" in kwargs:
-        return kwargs
+def _symmetric_limits(data: np.ndarray, vmin: float | None, vmax: float | None) -> tuple[float, float]:
+    """Centre the colour scale on zero, unless the caller set the limits."""
     limit = float(np.nanmax(np.abs(data))) if np.isfinite(data).any() else 0.0
-    return {**kwargs, "vmin": -limit, "vmax": limit}
+    return (vmin if vmin is not None else -limit), (vmax if vmax is not None else limit)
 
 
 def positive_limits(data: Any, *, vmin: float | None = None, vmax: float | None = None) -> tuple[float, float]:
@@ -552,8 +563,13 @@ def positive_limits(data: Any, *, vmin: float | None = None, vmax: float | None 
 
 
 def resolve_norm(
-    data: Any, *, norm: Any = None, log: bool = False, vmin: float | None = None, vmax: float | None = None
-) -> tuple[Any, tuple[float, float] | None]:
+    data: Any,
+    *,
+    norm: Normalize | str | None = None,
+    log: bool = False,
+    vmin: float | None = None,
+    vmax: float | None = None,
+) -> tuple[Normalize | None, tuple[float, float] | None]:
     """Work out the norm to draw *data* with, and its limits when it is logarithmic.
 
     ``norm=`` and ``log=True`` are two ways of saying the same thing and cannot be
@@ -591,7 +607,7 @@ def resolve_norm(
     return norm, None
 
 
-def reject_log_and_symmetric(symmetric: bool, log: bool = False, norm: Any = None) -> None:
+def reject_log_and_symmetric(symmetric: bool, log: bool = False, norm: Normalize | str | None = None) -> None:
     """Refuse ``symmetric=True`` together with ``log=True``, which cannot both hold."""
     if symmetric and (log or is_log_norm(norm)):
         raise ValueError("symmetric=True centres the colour scale on zero, which log=True cannot do; pass one of them.")
@@ -617,10 +633,40 @@ class DisplayOps(ImageOps):
         percentiles: tuple[float, float] | None = None,
         asinh_a: float = 10.0,
     ) -> ImageData:
-        """Map the values to ``[0, 1]`` for display, keeping the geometry.
+        """Map this image's values to ``[0, 1]``, keeping its geometry.
 
-        Unlike the free :func:`~pynbodyext.plot.image.smooth.normalize`, this
-        returns an image, so it can be chained.
+        The usual way to lift faint structure before drawing, or to prepare values
+        for compositing.
+
+        Parameters
+        ----------
+        vmin, vmax : float, optional
+            Limits of the mapping; default to the data range, or to *percentiles*.
+        stretch : {"linear", "sqrt", "log", "asinh", "hist"}, default: "linear"
+            Display stretch.  ``"log"`` lifts faint structure, ``"asinh"`` is the
+            astronomical alternative, ``"hist"`` equalises over the whole image.
+        percentiles : (float, float), optional
+            Percentiles used for whichever of *vmin*/*vmax* is not given, e.g.
+            ``(1, 99)`` to keep a bright source from flattening the rest.
+        asinh_a : float, default: 10.0
+            Softening parameter of the ``"asinh"`` stretch.
+
+        Returns
+        -------
+        ImageData
+            A new image in ``[0, 1]``, geometry, units and labels intact, with
+            ``normalize(...)`` appended to ``.ops``.  Non-finite pixels stay
+            non-finite.
+
+        Examples
+        --------
+        >>> faint = velocity.display.normalize(stretch="log", percentiles=(1, 99))  # doctest: +SKIP
+        >>> faint.display.draw(cmap="inferno")  # doctest: +SKIP
+
+        Notes
+        -----
+        The free :func:`~pynbodyext.plot.image.smooth.normalize` maps a plain array to
+        an array; this method maps an image to an image, so it can be chained.
         """
         stretched = normalize(
             self.data, vmin=vmin, vmax=vmax, stretch=stretch, percentiles=percentiles, asinh_a=asinh_a
@@ -641,10 +687,37 @@ class DisplayOps(ImageOps):
         alpha: Any = None,
         bad: Any = None,
     ) -> np.ndarray:
-        """Map the values to an ``(ny, nx, 4)`` RGBA array.
+        """Map this image's values to an ``(ny, nx, 4)`` RGBA array.
 
-        See :func:`~pynbodyext.plot.image.cmaps.to_rgba`; the default colour map is
-        the SAURON map ``sauron_cmap``.
+        For writing a figure to a file, compositing by hand, or handing the image to
+        another library.
+
+        Parameters
+        ----------
+        cmap : str or Colormap, optional
+            Colour map; the SAURON velocity map by default (``cmap="sauron"``).
+        vmin, vmax : float, optional
+            Limits; default to the data range, or to *percentiles*.
+        stretch : {"linear", "sqrt", "log", "asinh", "hist"}, default: "linear"
+            Display stretch, as in :meth:`normalize`.
+        percentiles : (float, float), optional
+            Limits as percentiles, e.g. ``(1, 99)``.
+        norm : matplotlib.colors.Normalize or str, optional
+            A ready-made scale — ``LogNorm(...)`` or ``"log"`` — used instead of
+            ``vmin``/``vmax``/``stretch``.
+        alpha : float or array_like, optional
+            Constant opacity, or a per-pixel alpha array.
+        bad : color, optional
+            Colour for non-finite pixels; fully transparent by default.
+
+        Returns
+        -------
+        numpy.ndarray
+            Float RGBA image.
+
+        Examples
+        --------
+        >>> rgba = density.display.to_rgba(cmap="inferno", vmin=1e-3, vmax=1e2)  # doctest: +SKIP
         """
         from .cmaps import sauron_cmap, to_rgba
 
@@ -662,108 +735,299 @@ class DisplayOps(ImageOps):
 
     def draw(
         self,
-        ax: Any = None,
+        ax: Axes | None = None,
         *,
         colorbar: bool | str = False,
         colorbar_kwargs: dict[str, Any] | None = None,
         aspect: Any = None,
         symmetric: bool = False,
+        norm: Normalize | str | None = None,
+        log: bool = False,
+        vmin: float | None = None,
+        vmax: float | None = None,
         **kwargs: Any,
-    ) -> Any:
-        """Draw the image, picking the right artist for the bin spacing.
+    ) -> AxesImage | QuadMesh:
+        """Draw the image, picking the artist that suits the bin spacing.
+
+        The everyday call: evenly spaced bins are drawn with ``imshow``, uneven ones
+        with ``pcolormesh``, so a logarithmic or quantile grid is never forced onto a
+        regular pixel grid.
 
         Parameters
         ----------
+        ax : matplotlib.axes.Axes, optional
+            Axes to draw on; a new figure is created when omitted.
+        colorbar : bool or {"right", "left", "top", "bottom"}, default: False
+            Add a colour bar docked to that side, labelled from the image's ``label``
+            and ``units``.
+        colorbar_kwargs : dict, optional
+            Forwarded to :meth:`add_colorbar`, e.g. ``{"size": "8%", "pad": 0.1}``.
+        aspect : optional
+            Axes aspect, e.g. ``"auto"``.
         symmetric : bool, default: False
             Centre the colour scale on zero — the right choice for a velocity map.
-            Ignored when ``vmin``/``vmax`` are given; cannot be combined with
+            Ignored when ``vmin``/``vmax`` are given, and refused together with a
+            logarithmic scale.
+        norm : matplotlib.colors.Normalize or str, optional
+            A colour scale, e.g. ``LogNorm()`` or ``"log"``; an alternative to
             ``log=True``.
+        log : bool, default: False
+            Draw on a logarithmic colour scale over the positive values — the right
+            choice for a map that spans decades, such as a density.
+        vmin, vmax : float, optional
+            Limits of the colour scale.
         **kwargs
-            As in :func:`draw_image`, e.g. ``cmap``, ``colorbar``, ``log=True``.
+            Forwarded to the artist, e.g. ``cmap``; see
+            :func:`~pynbodyext.plot.image.display.draw_image`.
+
+        Returns
+        -------
+        matplotlib.image.AxesImage or matplotlib.collections.QuadMesh
+            The artist.
+
+        Examples
+        --------
+        >>> density.display.draw(cmap="inferno", log=True, colorbar="bottom")  # doctest: +SKIP
+        >>> velocity.display.draw(symmetric=True, colorbar=True)  # doctest: +SKIP
         """
-        reject_log_and_symmetric(symmetric, bool(kwargs.get("log")), kwargs.get("norm"))
-        kwargs = _symmetric_limits(self.data, kwargs) if symmetric else kwargs
+        reject_log_and_symmetric(symmetric, log, norm)
+        if symmetric:
+            vmin, vmax = _symmetric_limits(self.data, vmin, vmax)
         return draw_image(
-            self.image, ax=ax, colorbar=colorbar, colorbar_kwargs=colorbar_kwargs, aspect=aspect, **kwargs
+            self.image,
+            ax=ax,
+            colorbar=colorbar,
+            colorbar_kwargs=colorbar_kwargs,
+            aspect=aspect,
+            norm=norm,
+            log=log,
+            vmin=vmin,
+            vmax=vmax,
+            **kwargs,
         )
 
     def imshow(
         self,
-        ax: Any = None,
+        ax: Axes | None = None,
         *,
         colorbar: bool | str = False,
         colorbar_kwargs: dict[str, Any] | None = None,
         aspect: Any = None,
         symmetric: bool = False,
+        norm: Normalize | str | None = None,
+        log: bool = False,
+        vmin: float | None = None,
+        vmax: float | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> AxesImage:
         """Draw the image with ``imshow``; requires evenly spaced bins.
 
-        Accepts the arguments of :func:`draw_imshow`, in particular ``log=True`` (or
-        a ``norm=``) for a map that spans decades, and ``symmetric=True`` for a
-        velocity map.
+        Use this when the artist matters (a pixel image rather than a mesh);
+        :meth:`draw` picks between the two for you.
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes, optional
+            Axes to draw on; a new figure is created when omitted.
+        colorbar : bool or {"right", "left", "top", "bottom"}, default: False
+            Add a colour bar docked to that side.
+        colorbar_kwargs : dict, optional
+            Forwarded to :meth:`add_colorbar`.
+        aspect : optional
+            Axes aspect, e.g. ``"auto"``.
+        symmetric : bool, default: False
+            Centre the colour scale on zero, for a velocity-like map.
+        norm : matplotlib.colors.Normalize or str, optional
+            A colour scale, e.g. ``LogNorm()`` or ``"log"``; an alternative to
+            ``log=True``.
+        log : bool, default: False
+            Draw on a logarithmic colour scale over the positive values, for a map
+            that spans decades.
+        vmin, vmax : float, optional
+            Limits of the colour scale.
+        **kwargs
+            Forwarded to ``matplotlib.axes.Axes.imshow``.  The image's own ``extent``
+            and ``origin="lower"`` are supplied unless overridden.
+
+        Returns
+        -------
+        matplotlib.image.AxesImage
+            The artist.
+
+        Examples
+        --------
+        >>> velocity.display.imshow(cmap="sauron", symmetric=True, colorbar=True)  # doctest: +SKIP
+
+        See Also
+        --------
+        pcolormesh, draw :
+            The bins-aware alternative, and the auto-choosing call.
+        :func:`~pynbodyext.plot.image.display.draw_imshow` :
+            The array-level form.
         """
-        reject_log_and_symmetric(symmetric, bool(kwargs.get("log")), kwargs.get("norm"))
-        kwargs = _symmetric_limits(self.data, kwargs) if symmetric else kwargs
+        reject_log_and_symmetric(symmetric, log, norm)
+        if symmetric:
+            vmin, vmax = _symmetric_limits(self.data, vmin, vmax)
         return draw_imshow(
-            self.image, ax=ax, colorbar=colorbar, colorbar_kwargs=colorbar_kwargs, aspect=aspect, **kwargs
+            self.image,
+            ax=ax,
+            colorbar=colorbar,
+            colorbar_kwargs=colorbar_kwargs,
+            aspect=aspect,
+            norm=norm,
+            log=log,
+            vmin=vmin,
+            vmax=vmax,
+            **kwargs,
         )
 
     def pcolormesh(
         self,
-        ax: Any = None,
+        ax: Axes | None = None,
         *,
         colorbar: bool | str = False,
         colorbar_kwargs: dict[str, Any] | None = None,
         aspect: Any = None,
         symmetric: bool = False,
+        norm: Normalize | str | None = None,
+        log: bool = False,
+        vmin: float | None = None,
+        vmax: float | None = None,
         shading: str = "flat",
         **kwargs: Any,
-    ) -> Any:
-        """Draw the image as cells, honouring arbitrary bin edges.
+    ) -> QuadMesh:
+        """Draw the image as quadrilateral cells, one per bin.
 
-        Accepts the arguments of :func:`draw_pcolormesh`, in particular ``log=True``
-        (or a ``norm=``) and ``symmetric=True``.
+        The right call for bins that are not evenly spaced (logarithmic, quantile or
+        explicit edges): every cell is drawn where it really is.
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes, optional
+            Axes to draw on; a new figure is created when omitted.
+        colorbar : bool or {"right", "left", "top", "bottom"}, default: False
+            Add a colour bar docked to that side.
+        colorbar_kwargs : dict, optional
+            Forwarded to :meth:`add_colorbar`.
+        aspect : optional
+            Axes aspect, e.g. ``"auto"``.
+        symmetric : bool, default: False
+            Centre the colour scale on zero.
+        norm : matplotlib.colors.Normalize or str, optional
+            A colour scale, e.g. ``LogNorm()`` or ``"log"``; an alternative to
+            ``log=True``.
+        log : bool, default: False
+            Draw on a logarithmic colour scale over the positive values.
+        vmin, vmax : float, optional
+            Limits of the colour scale.
+        shading : str, default: "flat"
+            Matplotlib shading mode; ``"flat"`` pairs the data with the given edges.
+        **kwargs
+            Forwarded to ``matplotlib.axes.Axes.pcolormesh``.
+
+        Returns
+        -------
+        matplotlib.collections.QuadMesh
+            The artist.
+
+        Examples
+        --------
+        >>> logarithmic_bins.display.pcolormesh(cmap="inferno", log=True)  # doctest: +SKIP
+
+        See Also
+        --------
+        :func:`~pynbodyext.plot.image.display.draw_pcolormesh` :
+            The array-level form.
         """
-        reject_log_and_symmetric(symmetric, bool(kwargs.get("log")), kwargs.get("norm"))
-        kwargs = _symmetric_limits(self.data, kwargs) if symmetric else kwargs
+        reject_log_and_symmetric(symmetric, log, norm)
+        if symmetric:
+            vmin, vmax = _symmetric_limits(self.data, vmin, vmax)
         return draw_pcolormesh(
             self.image,
             ax=ax,
             colorbar=colorbar,
             colorbar_kwargs=colorbar_kwargs,
             aspect=aspect,
+            norm=norm,
+            log=log,
+            vmin=vmin,
+            vmax=vmax,
             shading=shading,
             **kwargs,
         )
 
     def contour(
         self,
-        ax: Any = None,
+        ax: Axes | None = None,
         *,
-        levels: Any = 8,
+        levels: int | Sequence[float] = 8,
         filled: bool = False,
         colorbar: bool | str = False,
         colorbar_kwargs: dict[str, Any] | None = None,
         aspect: Any = None,
         symmetric: bool = False,
         count: int = 6,
+        norm: Normalize | str | None = None,
+        log: bool = False,
+        vmin: float | None = None,
+        vmax: float | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> ContourSet:
         """Draw contour lines (or ``filled=True`` bands) on the image's own grid.
+
+        Levels sit on the bin centres, so they land on the right pixels for unevenly
+        spaced bins too; pass the same ``ax`` as :meth:`draw` to overlay them on the
+        map.
 
         Parameters
         ----------
+        ax : matplotlib.axes.Axes, optional
+            Axes to draw on; pass the one holding the image to overlay.
+        levels : int or array_like, default: 8
+            Number of levels, or the levels themselves — e.g. ``[-200, 0, 200]`` to
+            mark zero crossings.  On a logarithmic scale an integer counts intervals,
+            spaced geometrically.
+        filled : bool, default: False
+            Fill the bands (``contourf``) instead of drawing lines.
+        colorbar : bool or {"right", "left", "top", "bottom"}, default: False
+            Add a colour bar docked to that side.
+        colorbar_kwargs : dict, optional
+            Forwarded to :meth:`add_colorbar`.
+        aspect : optional
+            Axes aspect, e.g. ``"auto"``.
         symmetric : bool, default: False
-            With ``levels`` left as a count, place the levels symmetrically about
-            zero, *count* on each side — the right choice for a velocity map.
+            Place the levels symmetrically about zero, *count* on each side — the
+            right choice for a velocity map.
         count : int, default: 6
             How many levels on each side of zero when *symmetric* is set.
+        norm : matplotlib.colors.Normalize or str, optional
+            A colour scale for the lines or bands, e.g. ``LogNorm()`` or ``"log"``; an
+            alternative to ``log=True``.
+        log : bool, default: False
+            Space the levels geometrically and colour them on a logarithmic scale.
+        vmin, vmax : float, optional
+            Limits of the logarithmic scale, and therefore of the levels.
         **kwargs
-            As in :func:`draw_contour`, e.g. ``colors``, ``linewidths``, and
-            ``log=True`` (or a ``norm=``) to space the levels geometrically.
+            Forwarded to ``contour``/``contourf``: ``colors``, ``linewidths``,
+            ``cmap``…
+
+        Returns
+        -------
+        matplotlib.contour.ContourSet
+            The artist, which :meth:`add_colorbar` accepts directly.
+
+        Examples
+        --------
+        >>> map_image.display.draw(ax=ax, cmap="inferno")  # doctest: +SKIP
+        >>> velocity.display.contour(ax=ax, symmetric=True, colors="w")  # doctest: +SKIP
+        >>> density.display.contour(log=True, levels=5)  # doctest: +SKIP
+
+        See Also
+        --------
+        :func:`~pynbodyext.plot.image.display.draw_contour` :
+            The array-level form.
         """
-        reject_log_and_symmetric(symmetric, bool(kwargs.get("log")), kwargs.get("norm"))
+        reject_log_and_symmetric(symmetric, log, norm)
         if symmetric and "levels" not in kwargs:
             limit = float(np.nanmax(np.abs(self.data)))
             levels = np.linspace(-limit, limit, 2 * count + 1)
@@ -775,15 +1039,38 @@ class DisplayOps(ImageOps):
             colorbar=colorbar,
             colorbar_kwargs=colorbar_kwargs,
             aspect=aspect,
+            norm=norm,
+            log=log,
+            vmin=vmin,
+            vmax=vmax,
             **kwargs,
         )
 
-    def add_colorbar(self, mappable: Any = None, ax: Any = None, **kwargs: Any) -> Any:
+    def add_colorbar(self, mappable: Any = None, ax: Axes | None = None, **kwargs: Any) -> Colorbar:
         """Dock a colour bar to the panel showing this image.
 
-        Shorthand for :func:`add_colorbar`: with no *mappable*, the artist drawn
-        from this image in *ax* is used, so ``img.display.imshow();
-        img.display.add_colorbar(loc="bottom")`` works.
+        Parameters
+        ----------
+        mappable : artist, ImageData or AdaptiveMap, optional
+            What the bar describes.  Defaults to this image: the artist already drawn
+            from it in *ax* is used when there is one, so a bar can be added *after*
+            drawing.
+        ax : matplotlib.axes.Axes, optional
+            Panel to dock to; defaults to the artist's axes, then the current axes.
+        **kwargs
+            Forwarded to :func:`~pynbodyext.plot.image.display.add_colorbar`: ``loc``,
+            ``size``, ``pad``, ``label``, ``label_pad``, ``tick_label_size``, and
+            ``norm=``/``log=`` when the bar is built from an image.
+
+        Returns
+        -------
+        matplotlib.colorbar.Colorbar
+            The colour bar.
+
+        Examples
+        --------
+        >>> density.display.draw(cmap="inferno")  # doctest: +SKIP
+        >>> density.display.add_colorbar(loc="bottom", size="6%")  # doctest: +SKIP
         """
         return add_colorbar(self.image if mappable is None else mappable, ax=ax, **kwargs)
 

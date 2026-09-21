@@ -140,15 +140,92 @@ def add_poisson_noise(
 class NoiseOps(ImageOps):
     """The noise family of an image: ``image.process.noise.gaussian(snr=20)``."""
 
-    def gaussian(self, *, sigma: Any = None, snr: Any = None, mask: Any = None, rng: Any = None) -> ImageData:
-        """Add Gaussian noise; see :func:`add_noise`."""
+    def gaussian(
+        self,
+        *,
+        sigma: float | Any = None,
+        snr: float | Any = None,
+        mask: Any = None,
+        rng: int | np.random.Generator | None = None,
+    ) -> ImageData:
+        """Add Gaussian white noise, from a known sigma or a target S/N.
+
+        Parameters
+        ----------
+        sigma : float or array_like, optional
+            Noise standard deviation — a scalar, or a per-pixel map.  Give exactly
+            one of *sigma* and *snr*.
+        snr : float or array_like, optional
+            Target signal-to-noise per pixel, so ``sigma = |data| / snr`` — the "this
+            observation reaches S/N = 20" spelling.
+        mask : array_like of bool, optional
+            Pixels to perturb; ``False`` pixels come back unchanged, and an
+            image-like mask is oriented for you.
+        rng : int or numpy.random.Generator, optional
+            Seed or generator, so a noisy figure can be reproduced — the seed is
+            recorded in ``.ops``.
+
+        Returns
+        -------
+        ImageData
+            The noisy image, geometry and labels intact, with ``add_noise(...)``
+            appended to ``.ops``.  Non-finite pixels are left alone.
+
+        Examples
+        --------
+        >>> noisy = model.process.noise.gaussian(snr=20, rng=0)  # doctest: +SKIP
+        >>> noisy.ops[-1]  # doctest: +SKIP
+        add_noise(snr=20.0, rng=0)
+
+        See Also
+        --------
+        poisson :
+            Counting noise, for a map of expected counts.
+        :func:`~pynbodyext.plot.image.noise.add_noise` :
+            The array-level form.
+        """
         noisy = add_noise(self.data, sigma=sigma, snr=snr, mask=mask, rng=rng)
         return self.derive(noisy, "add_noise", {"sigma": sigma, "snr": snr, "mask": mask, "rng": _seed_of(rng)})
 
     def poisson(
-        self, *, exposure: float = 1.0, background: float = 0.0, mask: Any = None, rng: Any = None
+        self,
+        *,
+        exposure: float = 1.0,
+        background: float = 0.0,
+        mask: Any = None,
+        rng: int | np.random.Generator | None = None,
     ) -> ImageData:
-        """Add counting noise; see :func:`add_poisson_noise`."""
+        """Add counting (Poisson) noise to a map of expected counts.
+
+        Parameters
+        ----------
+        exposure : float, default: 1.0
+            Counts collected per unit signal.  Larger means deeper and quieter: the
+            variance of the result is ``(data + background) / exposure``.
+        background : float, default: 0.0
+            Uniform background counted along with the signal, in the same units, and
+            subtracted again afterwards.
+        mask : array_like of bool, optional
+            Pixels to perturb; ``False`` pixels come back unchanged.
+        rng : int or numpy.random.Generator, optional
+            Seed or generator, recorded in ``.ops``.
+
+        Returns
+        -------
+        ImageData
+            The noisy image in the input's units, with ``add_poisson_noise(...)``
+            appended to ``.ops``.  Non-finite pixels are left alone, and a negative
+            expectation is refused.
+
+        Examples
+        --------
+        >>> shallow = counts.process.noise.poisson(exposure=0.05, background=2.0, rng=1)  # doctest: +SKIP
+
+        See Also
+        --------
+        :func:`~pynbodyext.plot.image.noise.add_poisson_noise` :
+            The array-level form.
+        """
         noisy = add_poisson_noise(self.data, exposure=exposure, background=background, mask=mask, rng=rng)
         return self.derive(
             noisy,

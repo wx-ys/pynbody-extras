@@ -352,7 +352,43 @@ class SmoothOps(ImageOps):
     def gaussian(
         self, sigma: Any = None, *, fwhm: Any = None, truncate: float = 4.0, mode: str = "reflect", mask: Any = None
     ) -> ImageData:
-        """Smooth with a Gaussian kernel; see :func:`gaussian_smooth`."""
+        """Smooth this image with a Gaussian kernel.
+
+        Parameters
+        ----------
+        sigma, fwhm : float or (float, float), optional
+            Kernel width, a ``(y, x)`` pair for an anisotropic kernel.  It is given in
+            the units of the axes when the grid is evenly spaced — the image's own
+            ``pixel_size`` does the conversion — and in pixels otherwise.  Give
+            exactly one of *sigma* and *fwhm*.
+        truncate : float, default: 4.0
+            Kernel radius in units of sigma.
+        mode : str, default: "reflect"
+            Edge handling, any ``scipy.ndimage.gaussian_filter`` mode.
+        mask : array_like of bool, optional
+            Pixels to include; an image-like mask (a ``BinsArray``, say) is oriented
+            for you.
+
+        Returns
+        -------
+        ImageData
+            A new image with the geometry, units and labels intact and
+            ``gaussian_smooth(...)`` appended to ``.ops``.  Non-finite pixels — empty
+            bins, masked pixels — neither contribute to nor receive signal and stay
+            non-finite.
+
+        Examples
+        --------
+        >>> smoothed = density.process.smooth.gaussian(fwhm=1.0)  # doctest: +SKIP
+        >>> anisotropic = density.process.smooth.gaussian(sigma=(2.0, 0.5))  # doctest: +SKIP
+
+        See Also
+        --------
+        box, median, downsample :
+            The other kernels.
+        :func:`~pynbodyext.plot.image.smooth.gaussian_smooth` :
+            The array-level form, with the kernel details.
+        """
         smoothed = gaussian_smooth(
             self.image.data,
             sigma,
@@ -368,18 +404,95 @@ class SmoothOps(ImageOps):
             {"sigma": sigma, "fwhm": fwhm, "truncate": truncate, "mode": mode, "mask": mask},
         )
 
-    def box(self, size: Any = 3, *, mode: str = "reflect", mask: Any = None) -> ImageData:
-        """Smooth with a top-hat kernel; see :func:`box_smooth`."""
+    def box(self, size: int | tuple[int, int] = 3, *, mode: str = "reflect", mask: Any = None) -> ImageData:
+        """Smooth this image with a top-hat (moving average) kernel.
+
+        Parameters
+        ----------
+        size : int or (int, int), default: 3
+            Kernel size in pixels, a ``(y, x)`` pair for an anisotropic kernel.
+        mode : str, default: "reflect"
+            Edge handling, any ``scipy.ndimage.uniform_filter`` mode.
+        mask : array_like of bool, optional
+            Pixels to include, oriented for you when image-like.
+
+        Returns
+        -------
+        ImageData
+            The smoothed image, with ``box_smooth(...)`` appended to ``.ops``.
+
+        Examples
+        --------
+        >>> smoothed = binned.image.process.smooth.box(size=5)  # doctest: +SKIP
+
+        See Also
+        --------
+        :func:`~pynbodyext.plot.image.smooth.box_smooth` : the array-level form.
+        """
         smoothed = box_smooth(self.image.data, size, mode=mode, mask=_mask(mask))
         return self.image._derived(smoothed, "box_smooth", {"size": size, "mode": mode, "mask": mask})
 
-    def median(self, size: Any = 3, *, mode: str = "nearest", mask: Any = None) -> ImageData:
-        """Median-filter the image; see :func:`median_filter`."""
+    def median(self, size: int | tuple[int, int] = 3, *, mode: str = "nearest", mask: Any = None) -> ImageData:
+        """Median-filter this image, ignoring non-finite pixels.
+
+        The usual way to take out cosmic-ray-like hot pixels before smoothing.
+
+        Parameters
+        ----------
+        size : int or (int, int), default: 3
+            Window size in pixels; keep it small, the NaN-aware path pads the image
+            and takes a median over every sliding window.
+        mode : str, default: "nearest"
+            Edge handling: ``"nearest"``, ``"reflect"``, ``"mirror"`` or
+            ``"constant"`` (padded with ``NaN``).
+        mask : array_like of bool, optional
+            Pixels to include, oriented for you when image-like.
+
+        Returns
+        -------
+        ImageData
+            The filtered image, with ``median_filter(...)`` appended to ``.ops``.
+
+        Examples
+        --------
+        >>> clean = raw.process.smooth.median(size=3)  # doctest: +SKIP
+
+        See Also
+        --------
+        :func:`~pynbodyext.plot.image.smooth.median_filter` : the array-level form.
+        """
         filtered = median_filter(self.image.data, size, mode=mode, mask=_mask(mask))
         return self.image._derived(filtered, "median_filter", {"size": size, "mode": mode, "mask": mask})
 
-    def downsample(self, factor: Any = 2, *, func: str = "mean") -> ImageData:
-        """Block-average the image, shrinking it by *factor*; see :func:`downsample`."""
+    def downsample(self, factor: int | tuple[int, int] = 2, *, func: str = "mean") -> ImageData:
+        """Average neighbouring pixels into larger blocks.
+
+        For a quick look at a large map, or to match another map's resolution.  The
+        bin edges move with the blocks, so the geometry stays right.
+
+        Parameters
+        ----------
+        factor : int or (int, int), default: 2
+            Block size in pixels; the shape must divide by it in both directions.
+        func : {"mean", "sum", "median", "max"}, default: "mean"
+            Reduction applied inside each block; non-finite pixels are skipped.
+
+        Returns
+        -------
+        ImageData
+            The smaller image — shape, ``extent``, edges, units and labels all
+            consistent — with ``downsample(...)`` appended to ``.ops``.
+
+        Examples
+        --------
+        >>> small = density.process.smooth.downsample(factor=4)  # doctest: +SKIP
+        >>> small.shape  # doctest: +SKIP
+        (150, 150)
+
+        See Also
+        --------
+        :func:`~pynbodyext.plot.image.smooth.downsample` : the array-level form.
+        """
         reduced = downsample(self.image.data, factor, func=func)
         factor_y, factor_x = _factor_pair(factor)
         overrides: dict[str, Any] = {}

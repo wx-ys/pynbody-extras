@@ -441,6 +441,18 @@ class ComposeOps(ImageOps):
         -------
         numpy.ndarray
             Float RGBA image.
+
+        Examples
+        --------
+        >>> composite = gas.compose(dm, style="inferno", other_style="cividis")  # doctest: +SKIP
+        >>> image.imshow_compose(gas, dm, extent=gas.extent)  # doctest: +SKIP
+
+        See Also
+        --------
+        masks, imshow :
+            The transition masks on their own, and the ready-made figure.
+        :func:`~pynbodyext.plot.image.compose.compose_maps` :
+            The array-level form.
         """
         return compose_maps(
             self.data, _values(other), style1=style, style2=other_style, mask=mask, line_angle=line_angle, width=width
@@ -452,7 +464,39 @@ class ComposeOps(ImageOps):
     def masks(
         self, line_angle: float = 45.0, width: float = 0.1, *, center: tuple[float, float] | None = None
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Split this image with two complementary soft masks; see :func:`create_map_mask`."""
+        """Split this image with two complementary soft masks.
+
+        Useful on its own — to weight two layers, or to cut a region out of a map —
+        as well as behind :meth:`stitch`.
+
+        Parameters
+        ----------
+        line_angle : float, default: 45.0
+            Angle of the dividing line in degrees, measured from the ``+x``
+            direction and increasing counter-clockwise: ``0`` splits left/right,
+            ``90`` bottom/top, ``180`` puts this image on the left.
+        width : float, default: 0.1
+            Width of the transition band as a fraction of the image diagonal, so the
+            softness looks the same at any resolution.  ``0`` gives a hard split.
+        center : (float, float), optional
+            Point the line passes through, in pixels; the image centre by default.
+
+        Returns
+        -------
+        tuple of numpy.ndarray
+            ``(mask1, mask2)``, complementary floats in ``[0, 1]`` with the image's
+            shape.
+
+        Examples
+        --------
+        >>> mask1, mask2 = gas.compose.masks(line_angle=45, width=0.15)  # doctest: +SKIP
+        >>> image.blend_images(rgb_gas, rgb_dm, mask1)  # doctest: +SKIP
+
+        See Also
+        --------
+        :func:`~pynbodyext.plot.image.compose.create_map_mask` :
+            The array-level form.
+        """
         return create_map_mask(self.data, line_angle=line_angle, width=width, center=center)
 
     def imshow(self, other: Any, **kwargs: Any) -> Any:
@@ -472,6 +516,21 @@ class ComposeOps(ImageOps):
         -------
         matplotlib.image.AxesImage
             The artist.
+
+        Examples
+        --------
+        >>> gas.compose.imshow(
+        ...     dm,
+        ...     style="inferno",
+        ...     other_style="cividis",  # doctest: +SKIP
+        ...     label1="gas",
+        ...     label2="dark matter",
+        ... )
+
+        See Also
+        --------
+        :func:`~pynbodyext.plot.image.compose.imshow_compose` :
+            The array-level form.
         """
         # ``style``/``other_style`` are this image's names for the pair; the free
         # function's ``style1``/``style2`` are accepted as well.

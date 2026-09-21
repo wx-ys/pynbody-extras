@@ -240,16 +240,73 @@ class ImageOps(ImageDataView):
     def derive(self, data: Any, op_name: str, params: dict[str, Any] | None = None, **overrides: Any) -> ImageData:
         """Return a new image carrying *data*, recording *op_name* in ``.ops``.
 
-        Shape-changing operations must pass their own ``x_edges``/``y_edges``.
+        The one thing a capability family needs from this base: it keeps the image's
+        geometry, units and labels, appends the operation to the provenance chain, and
+        lets an operation of your own behave exactly like a built-in one.
+
+        Parameters
+        ----------
+        data : array_like
+            The new values.  They may change shape, but then you must pass the new
+            grid yourself (see *overrides*).
+        op_name : str
+            Name of the operation as it should appear in ``.ops`` — by convention the
+            free function that did the work (``"gaussian_smooth"``).
+        params : dict, optional
+            The arguments it was called with; entries that are ``None`` are dropped.
+        **overrides
+            Any image field to replace, e.g. ``x_edges``/``y_edges`` for a
+            shape-changing operation, or ``label``.
+
+        Returns
+        -------
+        ImageData
+            The new image.
+
+        Examples
+        --------
+        >>> class DoubleOps(ImageOps):  # doctest: +SKIP
+        ...     def double(self):
+        ...         return self.derive(2 * self.data, "double", {})
+        >>> ImageData.register_ops("double", DoubleOps)  # doctest: +SKIP
+        >>> img.double.double().ops[-1]  # doctest: +SKIP
+        double()
         """
         return self.image._derived(data, op_name, params, **overrides)
 
     def limits(self) -> tuple[float, float]:
-        """The value range this image would be drawn with."""
+        """The value range this image would be drawn with.
+
+        The ``(vmin, vmax)`` that :func:`~pynbodyext.plot.image.smooth.normalize` and
+        the drawing methods would use by default — handy for setting a colour scale or
+        labelling a colour bar in a plugin.
+
+        Returns
+        -------
+        tuple of float
+            ``(vmin, vmax)`` over the finite values.
+
+        Examples
+        --------
+        >>> image.process.smooth.limits()  # doctest: +SKIP
+        (0.0, 42.0)
+        """
         return value_limits(self.image.data)
 
     def kernel_scale(self) -> tuple[float, float] | None:
-        """Pixel size in axis units, or ``None`` when the grid has no single one."""
+        """The image's ``pixel_size``, for kernel widths given in axis units.
+
+        Returns
+        -------
+        tuple of float or None
+            ``(dy, dx)`` when the bins are evenly spaced, and ``None`` when they are
+            not — the signal that a kernel width has to be given in pixels.
+
+        Examples
+        --------
+        >>> image.process.psf.kernel_scale()  # doctest: +SKIP
+        (0.5, 0.5)
+        """
         try:
             return self.image.pixel_size
         except ValueError:  # unevenly spaced bins: kernel widths fall back to pixels
