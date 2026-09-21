@@ -147,7 +147,9 @@ class SphRender:
         a snapshot with a few very small ``h``; passed to the renderer unchanged.
     wrap : bool, default: True
         Whether to repeat particles across a periodic ``boxsize``, as pynbody's
-        renderer does.  Turning it off restricts the render to the box.
+        renderer does.  Turning it off restricts the render to the box.  The
+        quantiles wrap the query into the box for the same reason (they search
+        their own tree), so both engines agree across a boundary.
     neighbours : int, default: 64
         How many particles the *quantile* statistics (``median``, ``pXX``) look at
         per cell, nearest first.  The kernel sums (``count``, ``sum``, ``mean``,
@@ -283,14 +285,22 @@ class SphRender:
         present = plan["present"]
         coordinates = {"x": 0, "y": 1, "z": 2}
         points = plan["position"][:, [coordinates[prop] for prop in present]]
-        boxsize = None if plan["boxsize"] is None else [plan["boxsize"]] * len(present)
-        tree = plan.get("tree")
-        if tree is None:
-            tree = plan["tree"] = cKDTree(points, boxsize=boxsize)
-
+        boxsize = plan["boxsize"]
         shape = tuple(plan["axes"][prop].nbins for prop in present)
         grid = np.meshgrid(*[_cell_centres(plan["axes"][prop]) for prop in present], indexing="ij")
         centres = np.stack([axis.ravel() for axis in grid], axis=-1)
+        if boxsize is not None:
+            # scipy's periodic tree refuses coordinates outside [0, boxsize), and
+            # snapshots (gadget ones especially) sit in [-L/2, L/2).  Shifting by
+            # whole boxes does not change a minimum-image distance, so wrapping
+            # both the particles and the query points is exactly pynbody's wrap.
+            points = points % boxsize
+            centres = centres % boxsize
+
+        tree = plan.get("tree")
+        if tree is None:
+            span = None if boxsize is None else [boxsize] * len(present)
+            tree = plan["tree"] = cKDTree(points, boxsize=span)
         distance, neighbour = tree.query(centres, k=self._neighbours)
         # ``k=1`` comes back one-dimensional, and a k larger than the particle
         # count pads with infinities; neither has a neighbour to weight.
@@ -340,9 +350,9 @@ class SphRender:
             smooth = np.asarray(sim["smooth"], dtype=float)
         except (KeyError, ValueError) as exc:
             raise ValueError(
-                "sph_render needs SPH smoothing lengths, and this snapshot has no usable 'smooth' array. "
-                "pynbody derives them from the particle distribution, so this usually means the snapshot "
-                "has no particles to smooth over."
+                "sph_render needs SPH smoothing lengths, and this particle set has no usable 'smooth' array: "
+                "only some families carry one (gas does, the collisionless ones do not), so render a family "
+                "or sub-result that does — bins.gas.sph_render[...] — or give a single-family binning."
             ) from exc
         if not np.all(np.isfinite(smooth)) or np.any(smooth <= 0.0):
             raise ValueError(

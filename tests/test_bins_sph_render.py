@@ -415,3 +415,69 @@ def test_a_quantile_then_a_kernel_sum_still_works() -> None:
     mean = np.asarray(bins.sph_render["vz.mean"])
 
     assert median.shape == mean.shape == (NBINS, NBINS)
+
+
+# ---------------------------------------------------------------------------
+# periodic boxes
+# ---------------------------------------------------------------------------
+
+
+def make_periodic_sim(boxsize: float, *, span: float = 1000.0, h: float = 20.0, count: int = 1):
+    """A snapshot whose coordinates sit in ``[-L/2, L/2)``, as gadget writes them.
+
+    ``boxsize=0`` leaves the snapshot non-periodic, for the control case.
+    """
+    rng = np.random.default_rng(13)
+    sim = pynbody.new(dm=count)
+    sim["pos"] = SimArray(rng.uniform(-span / 2, span / 2, (count, 3)), "kpc")
+    if count == 1:
+        sim["pos"] = SimArray(np.array([[-span / 2 + 0.1, 0.0, 0.0]]), "kpc")
+    sim["mass"] = SimArray(np.full(count, 1.0), "Msol")
+    sim["vz"] = SimArray(np.full(count, 5.0), "km s**-1")
+    sim["smooth"] = SimArray(np.full(count, h), "kpc")
+    if boxsize > 0:
+        sim.properties["boxsize"] = boxsize
+    axes = [Bin1D(prop, vmin=-span / 2, vmax=span / 2, nbins=32, alias=prop) for prop in ("x", "y")]
+    return (axes[0] @ axes[1])(sim)
+
+
+def test_a_quantile_accepts_coordinates_outside_the_box() -> None:
+    """scipy's periodic tree wants [0, L); snapshots are not written that way."""
+    bins = make_periodic_sim(1000.0, count=200)
+
+    median = np.asarray(bins.sph_render["vz.median"])
+
+    assert median.shape == (32, 32)
+    assert np.isfinite(median).any()
+
+
+def test_the_box_wraps_the_quantile_neighbours_as_the_sums_do() -> None:
+    """A particle just inside one edge reaches the other, in both engines."""
+    bins = make_periodic_sim(1000.0)
+
+    count = np.asarray(bins.sph_render["count"])
+    median = np.asarray(bins.sph_render["vz.median"])
+
+    for cell in (0, -1):  # either side of the periodic boundary
+        assert count[cell, 16] > 0.0
+        assert median[cell, 16] == 5.0
+    # without a box, the far side is simply far away
+    open_bins = make_periodic_sim(0.0)
+    assert np.asarray(open_bins.sph_render["count"])[-1, 16] == 0.0
+    assert np.isnan(np.asarray(open_bins.sph_render["vz.median"])[-1, 16])
+
+
+def test_a_mixed_particle_set_points_at_the_family_with_smoothing() -> None:
+    """Only some families carry smoothing lengths; say which way out."""
+    rng = np.random.default_rng(21)
+    sim = pynbody.new(dm=400, gas=400)
+    for family, count in ((sim.dm, 400), (sim.gas, 400)):
+        family["pos"] = SimArray(rng.uniform(-3.5, 3.5, (count, 3)), "kpc")
+        family["mass"] = SimArray(rng.uniform(0.5, 2.0, count), "Msol")
+        family["vz"] = SimArray(rng.normal(0.0, 100.0, count), "km s**-1")
+    sim.gas["smooth"] = SimArray(np.full(400, 0.5), "kpc")  # only the gas is SPH
+
+    with pytest.raises(ValueError, match="family"):
+        make_bins(sim).sph_render["count"]
+
+    assert make_bins(sim.gas).sph_render["count"].shape == (NBINS, NBINS)
