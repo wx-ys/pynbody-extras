@@ -134,9 +134,10 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   cell membership — a *view*, so the result is a `BinsArray` on the same grid and
   the units match the strict query.  Two or three spatial axes with evenly spaced
   bins (anything else raises), `count` is the kernel-integrated particle number,
-  2-D delegates to pynbody's projected renderer while 3-D sums with pynbody's
-  kernel itself (its `to_3d_grid` mis-sizes z pixels), and the weighted quantiles
-  wait for a neighbour-list engine.
+  both dimensions render with pynbody (2-D projected, 3-D `to_3d_grid`), the
+  unequal y/z resolution that trips pynbody's z-pixel bug warns rather than
+  returning something different, and the weighted quantiles wait for a
+  neighbour-list engine.
 
 ## Image layer (`pynbodyext/plot/image/`)
 

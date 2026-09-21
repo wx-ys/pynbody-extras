@@ -64,6 +64,15 @@ Requirements
 
 ``pynbody.sph`` is imported on first use, so importing the bins package stays
 light.
+
+Known upstream caveat
+---------------------
+pynbody's three-dimensional renderer sizes its z pixels with the *y* resolution
+(``pixel_dz = (z2 - z1) / ny``), so a 3-D grid with ``nz != ny`` comes out
+misplaced — and can lose contributions altogether.  That renderer is still the one
+used here (its kernel, its wrapping and its conventions are what this view is meant
+to reproduce), and a :class:`UserWarning` says so whenever ``nz != ny``; use equal
+y and z bin counts until it is fixed upstream.
 """
 
 from __future__ import annotations
@@ -89,9 +98,6 @@ _SPATIAL = ("x", "y", "z")
 
 #: Statistics built from one or two kernel sums (no neighbour lists needed).
 _SUM_STATISTICS = (Sum, Mean, RMS, Dispersion)
-
-#: Particle-cell pairs in one render before we warn about the cost.
-_ENTRY_WARNING = 20_000_000
 
 
 class SphRender:
@@ -164,6 +170,7 @@ class SphRender:
 
     def _compute(self, key: str) -> BinsArray:
         sim = self._result.model.sim
+        self._warn_about_z_resolution(self._layout())
         parsed = parse_pipeline_key(key)
 
         if parsed is None:
@@ -336,63 +343,73 @@ class SphRender:
         return np.asarray(image).T * plan["measure"]
 
     def _render_volume(self, quantity: np.ndarray, plan: dict[str, Any]) -> np.ndarray:
-        r"""Render onto the 3-D cell grid ourselves.
+        r"""Render onto the 3-D cell grid with pynbody's own renderer.
 
-        pynbody's :func:`~pynbody.sph._render.to_3d_grid` sizes the z pixels with
-        the *y* resolution (``pixel_dz = (z2 - z1) / ny``), which misplaces — and
-        for unequal ``ny``/``nz`` silently discards — every contribution, so the
-        direct sum is done here instead.  The kernel is pynbody's, so the values
-        agree with pynbody wherever its renderer is correct (``ny == nz``).
+        Same convention as the projected path — pynbody's kernel, ``mass``/``rho``
+        set to one so nothing is weighted twice, multiplied by the cell volume to
+        keep the units of the strict query.  pynbody's
+        :func:`~pynbody.sph._render.to_3d_grid` sizes its z pixels with the *y*
+        resolution (``pixel_dz = (z2 - z1) / ny``, `_render.pyx`), so anything but
+        ``nz == ny`` is suspect; :meth:`_warn_about_z_resolution` says so rather
+        than quietly returning a different map.
         """
-        kernel = self._kernel(projected=False)
+        from pynbody.sph import _render
+
+        axes = plan["axes"]
         position = plan["position"]
         smooth = self._smoothing(plan["smooth"])
-        measure = plan["measure"]
-        axes = plan["axes"]
-        centres = {prop: 0.5 * (axes[prop].edges[:-1] + axes[prop].edges[1:]) for prop in _SPATIAL}
-        shape = tuple(axes[prop].nbins for prop in _SPATIAL)
-        out = np.zeros(shape, dtype=float)
+        ones = np.ones_like(quantity)
+        bounds = {prop: (float(axes[prop].edges[0]), float(axes[prop].edges[-1])) for prop in _SPATIAL}
 
-        self._warn_if_expensive(smooth, plan)
-        for index in np.nonzero(quantity)[0]:
-            for offset in self._offset_vectors(plan["boxsize"], plan):
-                atom = position[index] + offset
-                ranges = [
-                    _cell_range(centres[prop], axes[prop].edges[0], plan["widths"][prop], atom[i], 2.0 * smooth[index])
-                    for i, prop in enumerate(_SPATIAL)
-                ]
-                if any(start >= stop for start, stop in ranges):
-                    continue
-                slices = tuple(slice(start, stop) for start, stop in ranges)
-                delta = [
-                    centres[prop][start:stop] - atom[i]
-                    for i, (prop, (start, stop)) in enumerate(zip(_SPATIAL, ranges, strict=True))
-                ]
-                distance = np.sqrt(
-                    delta[0][:, None, None] ** 2 + delta[1][None, :, None] ** 2 + delta[2][None, None, :] ** 2
-                )
-                out[slices] += quantity[index] * measure * kernel.value(distance, smooth[index])
-        return out
+        volume = _render.to_3d_grid(
+            axes["x"].nbins,
+            axes["y"].nbins,
+            axes["z"].nbins,
+            position[:, 0],
+            position[:, 1],
+            position[:, 2],
+            smooth,
+            bounds["x"][0],
+            bounds["x"][1],
+            bounds["y"][0],
+            bounds["y"][1],
+            bounds["z"][0],
+            bounds["z"][1],
+            quantity,
+            ones,
+            ones,
+            0.0,
+            np.inf,
+            self._kernel(projected=False),
+            self._wrap_offsets(axes["x"], plan["boxsize"]),
+            self._wrap_offsets(axes["y"], plan["boxsize"]),
+            self._wrap_offsets(axes["z"], plan["boxsize"]),
+        )
+        return np.asarray(volume) * plan["measure"]
 
-    def _warn_if_expensive(self, smooth: np.ndarray, plan: dict[str, Any]) -> None:
-        reach = np.prod([2.0 * smooth / plan["widths"][prop] + 1.0 for prop in _SPATIAL], axis=0)
-        entries = float(np.sum(reach)) * self._offset_count(plan["boxsize"], plan)
-        if entries > _ENTRY_WARNING:
-            warnings.warn(
-                f"this sph_render touches about {entries / 1e6:.0f} million particle-cell pairs "
-                "(the smoothing lengths are large next to the cells); consider smoothing_floor, "
-                "a coarser grid or smooth_floor to bound it.",
-                stacklevel=2,
-            )
+    def _warn_about_z_resolution(self, plan: dict[str, Any]) -> None:
+        """Flag a 3-D render that hits pynbody's z-pixel bug.
+
+        ``to_3d_grid`` divides the z range by ``ny`` instead of ``nz``, so the z
+        cells it uses are not the cells asked for unless the two happen to match:
+        values are misplaced, and with small smoothing lengths they can vanish
+        altogether.  Warning beats silently returning a different map; the fix is
+        upstream, and until then equal y/z resolutions are the safe case.
+        """
+        if len(plan["present"]) < 3:
+            return
+        y_cells, z_cells = plan["axes"]["y"].nbins, plan["axes"]["z"].nbins
+        if y_cells == z_cells:
+            return
+        warnings.warn(
+            f"pynbody's 3-D renderer sizes its z pixels with the y resolution, so a grid with "
+            f"nz={z_cells} != ny={y_cells} renders misplaced cells (and can lose contributions "
+            "entirely). Use the same number of bins on y and z, or a 2-D projection, for now.",
+            UserWarning,
+            stacklevel=3,
+        )
 
     # ------------------------------------------------------------------ wrap
-    def _offset_vectors(self, boxsize: float | None, plan: dict[str, Any]) -> list[tuple[float, float, float]]:
-        per_axis = [self._wrap_offsets(plan["axes"][prop], boxsize) for prop in _SPATIAL]
-        return [(x, y, z) for x in per_axis[0] for y in per_axis[1] for z in per_axis[2]]
-
-    def _offset_count(self, boxsize: float | None, plan: dict[str, Any]) -> int:
-        return int(np.prod([len(self._wrap_offsets(plan["axes"][prop], boxsize)) for prop in _SPATIAL]))
-
     def _wrap_offsets(self, axis: Any, boxsize: float | None) -> list[float]:
         """The offsets along one axis, as pynbody's renderer builds them."""
         if boxsize is None:
@@ -465,10 +482,3 @@ def _boxsize(sim: Any) -> float | None:
     if position_units is not None and getattr(boxsize, "units", None) is not None:
         boxsize = boxsize.in_units(position_units, **sim.conversion_context())
     return float(boxsize)
-
-
-def _cell_range(centres: np.ndarray, start: float, width: float, coordinate: float, reach: float) -> tuple[int, int]:
-    """The cells of one axis whose centres are within *reach* of *coordinate*."""
-    low = int(np.floor((coordinate - reach - start) / width))
-    high = int(np.ceil((coordinate + reach - start) / width))
-    return max(low, 0), min(high, len(centres))

@@ -8,6 +8,8 @@ pynbody's own kernel where they can be checked exactly.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pynbody
 import pytest
@@ -260,3 +262,57 @@ def test_a_volume_render_places_the_kernel_on_the_cell_grid() -> None:
     assert count.shape == (nbins, nbins, nbins)
     assert count[middle, middle, middle] == pytest.approx(kernels.CubicSplineKernel().value(0.0, h) * edge**3, rel=1e-6)
     assert count.sum() == pytest.approx(1.0, rel=0.05)
+
+
+def test_a_volume_render_matches_a_direct_kernel_sum() -> None:
+    """With equal y/z resolutions, pynbody's 3-D grid is what it claims to be."""
+    h, nbins, span, n = 0.7, 9, 5.4, 120
+    rng = np.random.default_rng(11)
+    sim = pynbody.new(dm=n)
+    sim["pos"] = SimArray(rng.uniform(-2, 2, (n, 3)), "kpc")
+    sim["mass"] = SimArray(rng.uniform(0.5, 2.0, n), "Msol")
+    sim["smooth"] = SimArray(np.full(n, h), "kpc")
+    axes = [Bin1D(prop, vmin=-span / 2, vmax=span / 2, nbins=nbins, alias=prop) for prop in ("x", "y", "z")]
+    bins = (axes[0] @ axes[1] @ axes[2])(sim)
+
+    rendered = np.asarray(bins.sph_render["mass.sum"])
+
+    edge = span / nbins
+    centres = -span / 2 + (np.arange(nbins) + 0.5) * edge
+    grid = np.meshgrid(centres, centres, centres, indexing="ij")
+    kernel = kernels.CubicSplineKernel()
+    position = np.asarray(sim["pos"])
+    mass = np.asarray(sim["mass"])
+    reference = np.zeros((nbins, nbins, nbins))
+    for atom, weight in zip(position, mass, strict=True):
+        distance = np.sqrt(
+            (grid[0] - atom[0]) ** 2 + (grid[1] - atom[1]) ** 2 + (grid[2] - atom[2]) ** 2
+        )
+        reference += weight * edge**3 * kernel.value(distance, h)
+
+    # pynbody samples its kernel from a 0.02-step lookup table, so the agreement
+    # is to the table's resolution rather than to machine precision: about a
+    # percent of the peak, and closer than that in the bulk.
+    peak = reference.max()
+    assert rendered.sum() == pytest.approx(reference.sum(), rel=0.01)
+    np.testing.assert_allclose(rendered, reference, rtol=0.03, atol=0.02 * peak)
+
+
+def test_an_unequal_z_resolution_warns_about_pynbody_grid_bug() -> None:
+    """pynbody sizes z pixels with ``ny``; say so rather than hide it."""
+    sim = make_sim(300, h=0.5)
+    axes = [
+        Bin1D(prop, vmin=-SPAN / 2, vmax=SPAN / 2, nbins=nbins, alias=prop)
+        for prop, nbins in (("x", 5), ("y", 5), ("z", 3))
+    ]
+    bins = (axes[0] @ axes[1] @ axes[2])(sim)
+
+    with pytest.warns(UserWarning, match="z pixels"):
+        bins.sph_render["count"]
+
+    equal = [
+        Bin1D(prop, vmin=-SPAN / 2, vmax=SPAN / 2, nbins=5, alias=prop) for prop in ("x", "y", "z")
+    ]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # a matching resolution must stay quiet
+        (equal[0] @ equal[1] @ equal[2])(sim).sph_render["count"]
