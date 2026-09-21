@@ -8,6 +8,11 @@ import numpy as np
 from pynbody.array import SimArray
 
 if TYPE_CHECKING:
+    from matplotlib.axes import Axes
+    from matplotlib.lines import Line2D
+
+    from pynbodyext.plot.image.data import ImageData
+
     from .result import BinNDResult
 
 
@@ -135,7 +140,7 @@ class BinsArray(SimArray):
         return np.asarray(self).reshape(self.shape_bins)
 
     @property
-    def image(self) -> Any:
+    def image(self) -> ImageData:
         """This query as an image, ready for :mod:`pynbodyext.plot.image`.
 
         The values are laid out ``(x, y)`` here and transposed into the image
@@ -185,7 +190,7 @@ class BinsArray(SimArray):
             arr = arr.copy()
         return arr.reshape(self.shape_bins)
 
-    def plot(self, ax: Any = None, **kwargs: Any) -> Any:
+    def plot(self, ax: Axes | None = None, **kwargs: Any) -> list[Line2D]:
         """Plot this 1-D per-bin array against the first axis's bin centers.
 
         Parameters

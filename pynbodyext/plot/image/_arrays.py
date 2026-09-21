@@ -6,9 +6,16 @@ modules that use these helpers.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from numpy.typing import ArrayLike
+
+    from ._types import KernelWidth, MapLike, MaskLike
 
 __all__ = [
     "FWHM_PER_SIGMA",
@@ -32,7 +39,7 @@ __all__ = [
 FWHM_PER_SIGMA = 2.0 * np.sqrt(2.0 * np.log(2.0))
 
 
-def as_2d(data: Any, *, name: str = "data") -> np.ndarray:
+def as_2d(data: ArrayLike, *, name: str = "data") -> np.ndarray:
     """Return *data* as a float 2-D array, rejecting anything else."""
     array = np.asarray(data, dtype=float)
     if array.ndim != 2:
@@ -57,7 +64,7 @@ def shape_hint(expected: tuple[int, int], got: tuple[int, int], *, name: str = "
     return f"{name} has shape {got}, expected {expected}."
 
 
-def as_pair(value: Any, *, name: str) -> int | tuple[int, int]:
+def as_pair(value: int | tuple[int, int] | ArrayLike, *, name: str) -> int | tuple[int, int]:
     """Normalise a scalar-or-``(y, x)`` pair of integers."""
     array = np.atleast_1d(np.asarray(value, dtype=int))
     if array.size == 1:
@@ -67,7 +74,9 @@ def as_pair(value: Any, *, name: str) -> int | tuple[int, int]:
     return int(array[0]), int(array[1])
 
 
-def resolve_sigma(sigma: Any, fwhm: Any, pixel_scale: Any) -> float | tuple[float, float]:
+def resolve_sigma(
+    sigma: KernelWidth | None, fwhm: KernelWidth | None, pixel_scale: KernelWidth | None
+) -> float | tuple[float, float]:
     """Turn a ``sigma``/``fwhm`` pair (optionally in physical units) into pixels."""
     if (sigma is None) == (fwhm is None):
         raise ValueError("Pass exactly one of 'sigma' or 'fwhm' (pixel or 'pixel_scale' units).")
@@ -89,7 +98,7 @@ def resolve_sigma(sigma: Any, fwhm: Any, pixel_scale: Any) -> float | tuple[floa
     return float(width[0]), float(width[1])
 
 
-def validity_mask(data: np.ndarray, mask: Any) -> np.ndarray:
+def validity_mask(data: np.ndarray, mask: MaskLike) -> np.ndarray:
     """Boolean mask of pixels that may contribute to a neighbourhood average."""
     valid = np.isfinite(data)
     if mask is None:
@@ -100,7 +109,7 @@ def validity_mask(data: np.ndarray, mask: Any) -> np.ndarray:
     return valid & extra
 
 
-def masked_filter(data: np.ndarray, valid: np.ndarray, apply: Any) -> np.ndarray:
+def masked_filter(data: np.ndarray, valid: np.ndarray, apply: Callable[[np.ndarray], np.ndarray]) -> np.ndarray:
     """Apply *apply* to ``data * valid`` and to ``valid``, then renormalise.
 
     This is the trick that makes a smoother or a convolution NaN-aware: only
@@ -114,7 +123,7 @@ def masked_filter(data: np.ndarray, valid: np.ndarray, apply: Any) -> np.ndarray
     return np.where(valid, averaged, np.nan)
 
 
-def aligned_values(value: Any) -> np.ndarray:
+def aligned_values(value: MapLike) -> np.ndarray:
     """Values of anything image-like, in the image's own orientation.
 
     A binned array is ``(x, y)`` while an image is ``(row=y, column=x)``, so this is
@@ -132,7 +141,7 @@ def aligned_values(value: Any) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-def checked_edges(edges: Any, name: str, count: int) -> np.ndarray | None:
+def checked_edges(edges: ArrayLike | None, name: str, count: int) -> np.ndarray | None:
     """Validate one array of bin edges against *count* bins, and freeze it.
 
     Returns ``None`` when *edges* is ``None``, i.e. when the direction is simply
@@ -163,7 +172,11 @@ def uniform_edges(bounds: tuple[float, float], count: int) -> np.ndarray:
 
 
 def resolve_edges(
-    shape: tuple[int, int], *, extent: Any = None, x_edges: Any = None, y_edges: Any = None
+    shape: tuple[int, int],
+    *,
+    extent: tuple[float, float, float, float] | None = None,
+    x_edges: ArrayLike | None = None,
+    y_edges: ArrayLike | None = None,
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
     """Bin edges of both directions, from explicit edges and/or an extent.
 
@@ -230,7 +243,11 @@ def typical_width(edges: np.ndarray | None) -> float:
 
 
 def value_limits(
-    data: Any, *, vmin: float | None = None, vmax: float | None = None, percentiles: tuple[float, float] | None = None
+    data: ArrayLike,
+    *,
+    vmin: float | None = None,
+    vmax: float | None = None,
+    percentiles: tuple[float, float] | None = None,
 ) -> tuple[float, float]:
     """The ``(vmin, vmax)`` an image of *data* would be drawn with.
 

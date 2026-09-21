@@ -25,6 +25,9 @@ from ._arrays import aligned_values, as_2d, as_pair, masked_filter, resolve_sigm
 from .ops import ImageOps
 
 if TYPE_CHECKING:
+    from numpy.typing import ArrayLike
+
+    from ._types import KernelWidth, MaskLike
     from .data import ImageData
 
 __all__ = [
@@ -40,7 +43,7 @@ __all__ = [
 _METHODS = ("auto", "fft", "direct")
 
 
-def normalize_psf(psf: Any) -> np.ndarray:
+def normalize_psf(psf: ArrayLike) -> np.ndarray:
     """Scale a kernel so that it sums to one, preserving total flux.
 
     Raises
@@ -58,14 +61,14 @@ def normalize_psf(psf: Any) -> np.ndarray:
 
 
 def gaussian_psf(
-    fwhm: Any = None,
+    fwhm: KernelWidth | None = None,
     *,
-    sigma: Any = None,
-    size: Any = None,
+    sigma: KernelWidth | None = None,
+    size: int | tuple[int, int] | None = None,
     shape: tuple[int, int] | None = None,
     e: float = 0.0,
     theta: float = 0.0,
-    pixel_scale: Any = None,
+    pixel_scale: KernelWidth | None = None,
     normalize: bool = True,
     truncate: float = 4.0,
 ) -> np.ndarray:
@@ -131,7 +134,12 @@ def gaussian_psf(
 
 
 def _kernel_size(
-    size: Any, shape: tuple[int, int] | None, sigma_x: float, sigma_y: float, theta: float, truncate: float
+    size: int | tuple[int, int] | None,
+    shape: tuple[int, int] | None,
+    sigma_x: float,
+    sigma_y: float,
+    theta: float,
+    truncate: float,
 ) -> tuple[int, int]:
     """Resolve the kernel shape from an explicit size, an image shape and sigma."""
     if size is not None:
@@ -154,16 +162,16 @@ def _kernel_size(
 
 
 def convolve_psf(
-    image: Any,
-    psf: Any = None,
+    image: ArrayLike,
+    psf: ArrayLike | None = None,
     *,
-    fwhm: Any = None,
-    sigma: Any = None,
+    fwhm: KernelWidth | None = None,
+    sigma: KernelWidth | None = None,
     mode: str = "same",
     method: str = "auto",
-    mask: Any = None,
+    mask: MaskLike = None,
     normalize: bool = True,
-    pixel_scale: Any = None,
+    pixel_scale: KernelWidth | None = None,
     **psf_kwargs: Any,
 ) -> np.ndarray:
     """Convolve an image with a point-spread function.
@@ -234,7 +242,7 @@ def _embedded_kernel(kernel: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
     return np.roll(canvas, (-(kernel_y // 2), -(kernel_x // 2)), axis=(0, 1))
 
 
-def wiener_deconvolve(image: Any, psf: Any, *, balance: float = 1e-2, mask: Any = None) -> np.ndarray:
+def wiener_deconvolve(image: ArrayLike, psf: ArrayLike, *, balance: float = 1e-2, mask: MaskLike = None) -> np.ndarray:
     """Undo a blur with a Wiener filter in the Fourier domain.
 
     Parameters
@@ -266,7 +274,7 @@ def wiener_deconvolve(image: Any, psf: Any, *, balance: float = 1e-2, mask: Any 
 
 
 def richardson_lucy(
-    image: Any, psf: Any, *, iterations: int = 10, epsilon: float = 1e-12, mask: Any = None
+    image: ArrayLike, psf: ArrayLike, *, iterations: int = 10, epsilon: float = 1e-12, mask: MaskLike = None
 ) -> np.ndarray:
     """Undo a blur with the Richardson-Lucy algorithm.
 
@@ -307,7 +315,7 @@ def richardson_lucy(
     return np.where(valid, estimate, np.nan)
 
 
-def deconvolve_psf(image: Any, psf: Any, *, method: str = "wiener", **kwargs: Any) -> np.ndarray:
+def deconvolve_psf(image: ArrayLike, psf: ArrayLike, *, method: str = "wiener", **kwargs: Any) -> np.ndarray:
     """Deconvolve *image* with *psf* using the requested algorithm.
 
     Parameters
@@ -340,13 +348,13 @@ class PsfOps(ImageOps):
 
     def convolve(
         self,
-        psf: Any = None,
+        psf: ArrayLike | None = None,
         *,
-        fwhm: Any = None,
-        sigma: Any = None,
+        fwhm: KernelWidth | None = None,
+        sigma: KernelWidth | None = None,
         mode: str = "same",
         method: str = "auto",
-        mask: Any = None,
+        mask: MaskLike = None,
         normalize: bool = True,
         **psf_kwargs: Any,
     ) -> ImageData:
@@ -409,7 +417,7 @@ class PsfOps(ImageOps):
             blurred, "convolve_psf", {"fwhm": fwhm, "sigma": sigma, "mode": mode, "method": method, "mask": mask}
         )
 
-    def wiener(self, psf: Any, *, balance: float = 1e-2, mask: Any = None) -> ImageData:
+    def wiener(self, psf: ArrayLike, *, balance: float = 1e-2, mask: MaskLike = None) -> ImageData:
         """Undo a blur with a Wiener filter, in the Fourier domain.
 
         Fast and steady, at the cost of ringing around sharp features; the result is
@@ -447,7 +455,9 @@ class PsfOps(ImageOps):
         )
         return self.image._derived(restored, "wiener_deconvolve", {"balance": balance, "mask": mask})
 
-    def richardson_lucy(self, psf: Any, *, iterations: int = 10, epsilon: float = 1e-12, mask: Any = None) -> ImageData:
+    def richardson_lucy(
+        self, psf: ArrayLike, *, iterations: int = 10, epsilon: float = 1e-12, mask: MaskLike = None
+    ) -> ImageData:
         """Undo a blur iteratively (Richardson-Lucy).
 
         Positivity-preserving and ring-free, but it needs many iterations to sharpen
@@ -487,7 +497,7 @@ class PsfOps(ImageOps):
         )
         return self.image._derived(restored, "richardson_lucy", {"iterations": iterations, "mask": mask})
 
-    def deconvolve(self, psf: Any, *, method: str = "wiener", **kwargs: Any) -> ImageData:
+    def deconvolve(self, psf: ArrayLike, *, method: str = "wiener", **kwargs: Any) -> ImageData:
         """Undo a blur, choosing the algorithm by name.
 
         Parameters

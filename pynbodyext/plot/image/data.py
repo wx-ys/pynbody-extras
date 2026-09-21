@@ -54,13 +54,23 @@ from the edges when only the latter are given.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
 from ._arrays import bin_centers, edges_are_uniform, pixel_width, resolve_edges, shape_hint
 from .display import DisplayOps, _unit_text
-from .ops import OPERATIONS, ImageDataView, ImageOp, ImageOps, ProcessOps, register_ops
+from .ops import OPERATIONS, ImageDataView, ImageOp, ImageOps, OpRegistrar, ProcessOps, register_ops
+
+if TYPE_CHECKING:
+    from numpy.typing import ArrayLike
+
+    from pynbodyext.core.calculate.bins.arrays import BinsArray
+    from pynbodyext.core.calculate.bins.axes import BinAxis
+    from pynbodyext.core.calculate.bins.result import BinNDResult
+    from pynbodyext.util._type import UnitLike
+
+    from ._types import MapLike
 
 __all__ = ["ImageData", "ImageOp", "OPERATIONS", "as_image", "register_ops"]
 
@@ -119,12 +129,12 @@ class ImageData:
     extent: tuple[float, float, float, float] | None = None
     x_edges: np.ndarray | None = None
     y_edges: np.ndarray | None = None
-    x_units: Any = None
-    y_units: Any = None
+    x_units: UnitLike | None = None
+    y_units: UnitLike | None = None
     x_label: str | None = None
     y_label: str | None = None
     label: str | None = None
-    units: Any = None
+    units: UnitLike | None = None
     ops: tuple[ImageOp, ...] = ()
 
     def __post_init__(self) -> None:
@@ -196,7 +206,7 @@ class ImageData:
         """
         return (pixel_width(self.y_edges, self.shape[0]), pixel_width(self.x_edges, self.shape[1]))
 
-    def __array__(self, dtype: Any = None, copy: bool | None = None) -> np.ndarray:
+    def __array__(self, dtype: np.dtype[Any] | type[Any] | None = None, copy: bool | None = None) -> np.ndarray:
         """Expose the raw values, so ``np.asarray(image)`` does the obvious thing."""
         return np.array(self.data, dtype=dtype, copy=copy)
 
@@ -205,7 +215,9 @@ class ImageData:
     # ------------------------------------------------------------------
 
     @classmethod
-    def register_ops(cls, name: str, view: type[ImageOps] | None = None, *, overwrite: bool = False) -> Any:
+    def register_ops(
+        cls, name: str, view: type[ImageOps] | None = None, *, overwrite: bool = False
+    ) -> type[ImageDataView] | OpRegistrar:
         """Register a capability view under ``image.<name>``.
 
         Lets a new family of image operations live in its own module without
@@ -240,7 +252,7 @@ class ImageData:
         """
         return dict(OPERATIONS)
 
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name: str) -> ImageDataView:
         """Resolve a registered capability view, e.g. ``image.tessellation``."""
         view = OPERATIONS.get(name)
         if view is not None:
@@ -265,7 +277,9 @@ class ImageData:
     # derivation
     # ------------------------------------------------------------------
 
-    def _derived(self, data: Any, op_name: str, params: dict[str, Any] | None = None, **overrides: Any) -> ImageData:
+    def _derived(
+        self, data: ArrayLike, op_name: str, params: dict[str, Any] | None = None, **overrides: Any
+    ) -> ImageData:
         """Return a copy carrying *data*, with *op_name* appended to :attr:`ops`.
 
         Used by the processing methods; everything that changes shape must pass
@@ -275,7 +289,7 @@ class ImageData:
         overrides.setdefault("ops", (*self.ops, ImageOp(op_name, recorded)))
         return replace(self, data=np.asarray(data), **overrides)
 
-    def with_data(self, data: Any, **overrides: Any) -> ImageData:
+    def with_data(self, data: ArrayLike, **overrides: Any) -> ImageData:
         """Return a copy with new values, keeping (or overriding) the metadata.
 
         Parameters
@@ -320,15 +334,15 @@ class ImageData:
     @classmethod
     def from_bins(
         cls,
-        bins: Any,
+        bins: BinNDResult,
         query: str,
         *,
         label: str | None = None,
-        units: Any = None,
+        units: UnitLike | None = None,
         x_label: str | None = None,
         y_label: str | None = None,
-        x_units: Any = None,
-        y_units: Any = None,
+        x_units: UnitLike | None = None,
+        y_units: UnitLike | None = None,
     ) -> ImageData:
         """Build an image from one query of a 2-D :class:`BinNDResult`.
 
@@ -383,14 +397,14 @@ class ImageData:
     @classmethod
     def from_bins_array(
         cls,
-        array: Any,
+        array: BinsArray,
         *,
         label: str | None = None,
-        units: Any = None,
+        units: UnitLike | None = None,
         x_label: str | None = None,
         y_label: str | None = None,
-        x_units: Any = None,
-        y_units: Any = None,
+        x_units: UnitLike | None = None,
+        y_units: UnitLike | None = None,
     ) -> ImageData:
         """Build an image from a single binned array (a ``BinsArray``).
 
@@ -466,7 +480,7 @@ class ImageData:
         return f"ImageData({', '.join(parts)})"
 
 
-def _axis_edges(axis: Any, index: int) -> np.ndarray:
+def _axis_edges(axis: BinAxis, index: int) -> np.ndarray:
     """Edges of a binned axis, rejecting grids whose bins do not tile the axis."""
     if not getattr(axis, "is_continuous", False):
         raise ValueError(
@@ -479,13 +493,13 @@ def _axis_edges(axis: Any, index: int) -> np.ndarray:
     return edges
 
 
-def _axis_name(axis: Any) -> str:
+def _axis_name(axis: BinAxis) -> str:
     """Display name of an axis: its property when that is a plain name, else its alias."""
     prop = getattr(axis, "prop", None)
     return prop if isinstance(prop, str) else str(getattr(axis, "alias", ""))
 
 
-def as_image(value: Any) -> ImageData:
+def as_image(value: MapLike) -> ImageData:
     """Interpret *value* as an image: an :class:`ImageData`, a binned array, or an array.
 
     A binned array — what ``bins2d["mass.sum"]`` returns — is laid out ``(x, y)``,
@@ -522,7 +536,7 @@ def as_image(value: Any) -> ImageData:
     if isinstance(value, ImageData):
         return value
     if getattr(value, "bins", None) is not None and hasattr(value, "grid"):
-        return ImageData.from_bins_array(value)
+        return ImageData.from_bins_array(cast("BinsArray", value))
     array = np.asarray(value)
     if array.ndim != 2:
         raise TypeError(

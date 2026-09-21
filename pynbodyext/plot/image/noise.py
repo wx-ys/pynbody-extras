@@ -21,7 +21,7 @@ both accept anything the rest of the layer accepts as a map — a plain array, a
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -29,17 +29,20 @@ from ._arrays import aligned_values, as_2d, validity_mask
 from .ops import ImageOps
 
 if TYPE_CHECKING:
+    from numpy.typing import ArrayLike
+
+    from ._types import KernelWidth, MapLike, MaskLike
     from .data import ImageData
 
 __all__ = ["NoiseOps", "add_noise", "add_poisson_noise"]
 
 
-def _generator(rng: Any) -> np.random.Generator:
+def _generator(rng: int | np.random.Generator | None) -> np.random.Generator:
     """A generator from a seed, an existing generator, or nothing at all."""
     return rng if isinstance(rng, np.random.Generator) else np.random.default_rng(rng)
 
 
-def _broadcast(value: Any, shape: tuple[int, int], *, name: str) -> np.ndarray:
+def _broadcast(value: MapLike, shape: tuple[int, int], *, name: str) -> np.ndarray:
     """A scalar or an array matching *shape*."""
     array = np.asarray(value, dtype=float)
     if array.ndim == 0:
@@ -49,7 +52,14 @@ def _broadcast(value: Any, shape: tuple[int, int], *, name: str) -> np.ndarray:
     return array
 
 
-def add_noise(data: Any, *, sigma: Any = None, snr: Any = None, mask: Any = None, rng: Any = None) -> np.ndarray:
+def add_noise(
+    data: ArrayLike,
+    *,
+    sigma: KernelWidth | None = None,
+    snr: float | ArrayLike | None = None,
+    mask: MaskLike = None,
+    rng: int | np.random.Generator | None = None,
+) -> np.ndarray:
     """Add Gaussian white noise to a map.
 
     Parameters
@@ -93,7 +103,12 @@ def add_noise(data: Any, *, sigma: Any = None, snr: Any = None, mask: Any = None
 
 
 def add_poisson_noise(
-    data: Any, *, exposure: float = 1.0, background: float = 0.0, mask: Any = None, rng: Any = None
+    data: ArrayLike,
+    *,
+    exposure: float = 1.0,
+    background: float = 0.0,
+    mask: MaskLike = None,
+    rng: int | np.random.Generator | None = None,
 ) -> np.ndarray:
     """Add counting noise to a map of expected counts.
 
@@ -143,9 +158,9 @@ class NoiseOps(ImageOps):
     def gaussian(
         self,
         *,
-        sigma: float | Any = None,
-        snr: float | Any = None,
-        mask: Any = None,
+        sigma: KernelWidth | None = None,
+        snr: float | ArrayLike | None = None,
+        mask: MaskLike = None,
         rng: int | np.random.Generator | None = None,
     ) -> ImageData:
         """Add Gaussian white noise, from a known sigma or a target S/N.
@@ -192,7 +207,7 @@ class NoiseOps(ImageOps):
         *,
         exposure: float = 1.0,
         background: float = 0.0,
-        mask: Any = None,
+        mask: MaskLike = None,
         rng: int | np.random.Generator | None = None,
     ) -> ImageData:
         """Add counting (Poisson) noise to a map of expected counts.
@@ -234,7 +249,7 @@ class NoiseOps(ImageOps):
         )
 
 
-def _seed_of(rng: Any) -> Any:
+def _seed_of(rng: int | np.random.Generator | None) -> int | None:
     """What to record about the generator: the seed when there is one."""
     if rng is None or isinstance(rng, np.random.Generator):
         return None

@@ -6,13 +6,19 @@ Extracted from result.py to reduce the size of the god class.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 import numpy as np
 
 if TYPE_CHECKING:
+    from matplotlib.axes import Axes
+    from matplotlib.collections import PathCollection, QuadMesh
+    from matplotlib.image import AxesImage
+    from matplotlib.lines import Line2D
+
     from .arrays import BinsArray
     from .axes import BinAxisAccessor
+    from .result import BinNDResult
 
 
 @runtime_checkable
@@ -34,7 +40,9 @@ class _BinQueryable(Protocol):
 class BinPlotMixin:
     """Provides ``plot`` and ``imshow`` methods for :class:`~.result.BinNDResult`."""
 
-    def plot(self: _BinQueryable, x: str, y: str, ax: Any = None, *, kind: str | None = None, **kwargs: Any) -> Any:
+    def plot(
+        self: _BinQueryable, x: str, y: str, ax: Axes | None = None, *, kind: str | None = None, **kwargs: Any
+    ) -> list[Line2D] | PathCollection:
         """Plot a 1-D profile.
 
         Parameters
@@ -76,7 +84,7 @@ class BinPlotMixin:
             return ax.plot(x_values, y_arr, **kwargs)
         raise ValueError(f"Unknown plot kind {plot_kind!r}; use 'plot' or 'scatter'.")
 
-    def imshow(self: _BinQueryable, field: str, ax: Any = None, **kwargs: Any) -> Any:
+    def imshow(self: _BinQueryable, field: str, ax: Axes | None = None, **kwargs: Any) -> AxesImage | QuadMesh:
         """Show a 2-D bin grid as an image.
 
         Requires exactly two axes, the first mapping to x and the second to y::
@@ -121,4 +129,4 @@ class BinPlotMixin:
         if self.ndim != 2:
             raise ValueError("imshow requires exactly 2 bin axes.")
         kwargs.setdefault("aspect", "auto")
-        return ImageData.from_bins(self, field).display.draw(ax=ax, **kwargs)
+        return ImageData.from_bins(cast("BinNDResult", self), field).display.draw(ax=ax, **kwargs)

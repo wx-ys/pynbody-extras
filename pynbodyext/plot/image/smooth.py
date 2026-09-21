@@ -27,6 +27,11 @@ from ._arrays import aligned_values, as_2d, as_pair, masked_filter, resolve_sigm
 from .ops import ImageOps
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from numpy.typing import ArrayLike
+
+    from ._types import KernelWidth, MaskLike
     from .data import ImageData
 
 __all__ = [
@@ -48,14 +53,14 @@ _LOG_GAIN = 1e3
 
 
 def gaussian_smooth(
-    data: Any,
-    sigma: Any = None,
+    data: ArrayLike,
+    sigma: KernelWidth | None = None,
     *,
-    fwhm: Any = None,
+    fwhm: KernelWidth | None = None,
     truncate: float = 4.0,
     mode: str = "reflect",
-    mask: Any = None,
-    pixel_scale: Any = None,
+    mask: MaskLike = None,
+    pixel_scale: KernelWidth | None = None,
 ) -> np.ndarray:
     """Smooth a 2-D image with a Gaussian kernel.
 
@@ -99,7 +104,9 @@ def gaussian_smooth(
     )
 
 
-def box_smooth(data: Any, size: Any = 3, *, mode: str = "reflect", mask: Any = None) -> np.ndarray:
+def box_smooth(
+    data: ArrayLike, size: int | tuple[int, int] = 3, *, mode: str = "reflect", mask: MaskLike = None
+) -> np.ndarray:
     """Smooth a 2-D image with a top-hat (moving average) kernel.
 
     Parameters
@@ -127,7 +134,9 @@ def box_smooth(data: Any, size: Any = 3, *, mode: str = "reflect", mask: Any = N
 _PAD_MODES = {"nearest": "edge", "reflect": "reflect", "mirror": "symmetric", "constant": "constant"}
 
 
-def median_filter(data: Any, size: Any = 3, *, mode: str = "nearest", mask: Any = None) -> np.ndarray:
+def median_filter(
+    data: ArrayLike, size: int | tuple[int, int] = 3, *, mode: str = "nearest", mask: MaskLike = None
+) -> np.ndarray:
     """Median-filter a 2-D image, ignoring non-finite pixels.
 
     Useful for removing cosmic-ray-like hot pixels before smoothing.  The
@@ -187,7 +196,9 @@ def _apply_stretch(unit: np.ndarray, stretch: str, asinh_a: float) -> np.ndarray
     return functions[0](unit)
 
 
-def stretch_functions(stretch: str, *, asinh_a: float = 10.0) -> tuple[Any, Any] | None:
+def stretch_functions(
+    stretch: str, *, asinh_a: float = 10.0
+) -> tuple[Callable[[np.ndarray], np.ndarray], Callable[[np.ndarray], np.ndarray]] | None:
     """Forward and inverse of a display *stretch* on ``[0, 1]``.
 
     A stretch is a monotone map from the unit interval to itself; returning its
@@ -235,7 +246,7 @@ def stretch_functions(stretch: str, *, asinh_a: float = 10.0) -> tuple[Any, Any]
 
 
 def normalize(
-    data: Any,
+    data: ArrayLike,
     *,
     vmin: float | None = None,
     vmax: float | None = None,
@@ -290,7 +301,7 @@ def normalize(
 _REDUCERS = {"mean": np.nanmean, "sum": np.nansum, "median": np.nanmedian, "max": np.nanmax}
 
 
-def downsample(data: Any, factor: Any = 2, *, func: str = "mean") -> np.ndarray:
+def downsample(data: ArrayLike, factor: int | tuple[int, int] = 2, *, func: str = "mean") -> np.ndarray:
     """Average neighbouring pixels into larger blocks.
 
     Each ``factor_y x factor_x`` block of the input becomes one output pixel.
@@ -327,13 +338,13 @@ def downsample(data: Any, factor: Any = 2, *, func: str = "mean") -> np.ndarray:
         return _REDUCERS[func](blocks, axis=(2, 3))
 
 
-def _factor_pair(factor: Any) -> tuple[int, int]:
+def _factor_pair(factor: int | tuple[int, int]) -> tuple[int, int]:
     """Normalise a ``factor`` into an explicit ``(y, x)`` pair."""
     pair = as_pair(factor, name="factor")
     return (pair, pair) if isinstance(pair, int) else pair
 
 
-def _mask(mask: Any) -> np.ndarray | None:
+def _mask(mask: MaskLike) -> np.ndarray | None:
     """Bring a mask into image orientation, accepting a binned array as well."""
     return None if mask is None else aligned_values(mask)
 
@@ -350,7 +361,13 @@ class SmoothOps(ImageOps):
     """
 
     def gaussian(
-        self, sigma: Any = None, *, fwhm: Any = None, truncate: float = 4.0, mode: str = "reflect", mask: Any = None
+        self,
+        sigma: KernelWidth | None = None,
+        *,
+        fwhm: KernelWidth | None = None,
+        truncate: float = 4.0,
+        mode: str = "reflect",
+        mask: MaskLike = None,
     ) -> ImageData:
         """Smooth this image with a Gaussian kernel.
 
@@ -404,7 +421,7 @@ class SmoothOps(ImageOps):
             {"sigma": sigma, "fwhm": fwhm, "truncate": truncate, "mode": mode, "mask": mask},
         )
 
-    def box(self, size: int | tuple[int, int] = 3, *, mode: str = "reflect", mask: Any = None) -> ImageData:
+    def box(self, size: int | tuple[int, int] = 3, *, mode: str = "reflect", mask: MaskLike = None) -> ImageData:
         """Smooth this image with a top-hat (moving average) kernel.
 
         Parameters
@@ -432,7 +449,7 @@ class SmoothOps(ImageOps):
         smoothed = box_smooth(self.image.data, size, mode=mode, mask=_mask(mask))
         return self.image._derived(smoothed, "box_smooth", {"size": size, "mode": mode, "mask": mask})
 
-    def median(self, size: int | tuple[int, int] = 3, *, mode: str = "nearest", mask: Any = None) -> ImageData:
+    def median(self, size: int | tuple[int, int] = 3, *, mode: str = "nearest", mask: MaskLike = None) -> ImageData:
         """Median-filter this image, ignoring non-finite pixels.
 
         The usual way to take out cosmic-ray-like hot pixels before smoothing.

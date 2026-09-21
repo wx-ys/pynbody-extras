@@ -27,7 +27,7 @@ what the colour bars are built from.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -36,6 +36,16 @@ from .cmaps import as_norm, get_cmap, norm_from_stretch, to_rgba
 from .display import add_colorbar
 from .ops import ImageOps
 from .smooth import STRETCHES
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from matplotlib.axes import Axes
+    from matplotlib.colors import Colormap, Normalize
+    from matplotlib.image import AxesImage
+    from numpy.typing import ArrayLike
+
+    from ._types import MapLike, MaskLike
 
 __all__ = ["ComposeOps", "MapStyle", "blend_images", "blend_stack", "compose_maps", "create_map_mask", "imshow_compose"]
 
@@ -72,13 +82,13 @@ class MapStyle:
     (0.0, 1.0)
     """
 
-    cmap: Any = None
+    cmap: str | Colormap | None = None
     vmin: float | None = None
     vmax: float | None = None
     stretch: str = "linear"
-    norm: Any = None
+    norm: Normalize | str | None = None
     percentiles: tuple[float, float] | None = None
-    bad: Any = None
+    bad: str | tuple[float, ...] | None = None
 
     def __post_init__(self) -> None:
         if self.stretch not in STRETCHES:
@@ -88,11 +98,11 @@ class MapStyle:
         if self.percentiles is not None and self.percentiles[0] > self.percentiles[1]:
             raise ValueError(f"percentiles must be increasing, got {self.percentiles!r}.")
 
-    def limits(self, data: Any) -> tuple[float, float]:
+    def limits(self, data: ArrayLike) -> tuple[float, float]:
         """The value limits this style uses for *data*, colour bar included."""
         return value_limits(data, vmin=self.vmin, vmax=self.vmax, percentiles=self.percentiles)
 
-    def to_rgba(self, data: Any) -> np.ndarray:
+    def to_rgba(self, data: ArrayLike) -> np.ndarray:
         """Colour *data* with this style."""
         return to_rgba(
             data,
@@ -105,7 +115,7 @@ class MapStyle:
             bad=self.bad,
         )
 
-    def norm_for(self, data: Any) -> Any:
+    def norm_for(self, data: ArrayLike) -> Normalize:
         """The norm a colour bar of this style should use over *data*.
 
         Without this a stretched map would be labelled by a linear scale, putting the
@@ -138,7 +148,11 @@ def as_map_style(style: MapStyle | str | dict[str, Any] | None) -> MapStyle:
 
 
 def create_map_mask(
-    show_array: Any, line_angle: float = 45.0, width: float = 0.1, *, center: tuple[float, float] | None = None
+    show_array: ArrayLike | tuple[int, int],
+    line_angle: float = 45.0,
+    width: float = 0.1,
+    *,
+    center: tuple[float, float] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Create two complementary soft masks split by a line at *line_angle*.
 
@@ -202,7 +216,7 @@ def create_map_mask(
     return mask1, 1.0 - mask1
 
 
-def _leading_shape(show_array: Any) -> tuple[int, int]:
+def _leading_shape(show_array: ArrayLike | tuple[int, int]) -> tuple[int, int]:
     """Shape of the first two dimensions of an image, or of a shape argument."""
     if (
         isinstance(show_array, (tuple, list))
@@ -216,7 +230,7 @@ def _leading_shape(show_array: Any) -> tuple[int, int]:
     return int(array.shape[0]), int(array.shape[1])
 
 
-def blend_images(image1: Any, image2: Any, mask: Any) -> np.ndarray:
+def blend_images(image1: ArrayLike, image2: ArrayLike, mask: MaskLike) -> np.ndarray:
     """Crossfade two equally shaped images with a per-pixel *mask*.
 
     Parameters
@@ -244,7 +258,7 @@ def blend_images(image1: Any, image2: Any, mask: Any) -> np.ndarray:
     return weights * first + (1.0 - weights) * second
 
 
-def blend_stack(images: Any, weights: Any) -> np.ndarray:
+def blend_stack(images: Sequence[ArrayLike], weights: Sequence[ArrayLike]) -> np.ndarray:
     """Combine N layers with per-pixel weights that are normalised to sum to one.
 
     Parameters
@@ -284,12 +298,12 @@ def _broadcast_weight(layer: np.ndarray, weight: np.ndarray) -> np.ndarray:
 
 
 def compose_maps(
-    data1: Any,
-    data2: Any,
+    data1: MapLike,
+    data2: MapLike,
     *,
     style1: MapStyle | str | dict[str, Any] | None = None,
     style2: MapStyle | str | dict[str, Any] | None = None,
-    mask: Any = None,
+    mask: MaskLike = None,
     line_angle: float = 45.0,
     width: float = 0.1,
 ) -> np.ndarray:
@@ -351,10 +365,10 @@ def compose_maps(
 
 
 def imshow_compose(
-    data1: Any,
-    data2: Any,
+    data1: MapLike,
+    data2: MapLike,
     *,
-    ax: Any = None,
+    ax: Axes | None = None,
     extent: tuple[float, float, float, float] | None = None,
     colorbars: bool = True,
     style1: MapStyle | str | dict[str, Any] | None = None,
@@ -362,7 +376,7 @@ def imshow_compose(
     label1: str | None = None,
     label2: str | None = None,
     **kwargs: Any,
-) -> Any:
+) -> AxesImage:
     """Draw :func:`compose_maps` into axes, with one colour bar per map.
 
     Parameters
@@ -418,11 +432,11 @@ class ComposeOps(ImageOps):
 
     def __call__(
         self,
-        other: Any,
+        other: MapLike,
         *,
         style: MapStyle | str | dict[str, Any] | None = None,
         other_style: MapStyle | str | dict[str, Any] | None = None,
-        mask: Any = None,
+        mask: MaskLike = None,
         line_angle: float = 45.0,
         width: float = 0.1,
     ) -> np.ndarray:
@@ -507,9 +521,9 @@ class ComposeOps(ImageOps):
 
     def imshow(
         self,
-        other: Any,
+        other: MapLike,
         *,
-        ax: Any = None,
+        ax: Axes | None = None,
         extent: tuple[float, float, float, float] | None = None,
         colorbars: bool = True,
         style: MapStyle | str | dict[str, Any] | None = None,
@@ -517,7 +531,7 @@ class ComposeOps(ImageOps):
         label1: str | None = None,
         label2: str | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> AxesImage:
         """Draw this image stitched with *other*, with one colour bar each.
 
         Parameters
@@ -573,7 +587,7 @@ class ComposeOps(ImageOps):
         )
 
 
-def _values(value: Any) -> np.ndarray:
+def _values(value: MapLike) -> np.ndarray:
     """Values of anything image-like — an ImageData, a binned array, or an array.
 
     Binned arrays are transposed into image orientation on the way (see

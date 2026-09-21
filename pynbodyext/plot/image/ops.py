@@ -29,14 +29,20 @@ not its base classes): define a subclass and register it::
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 import numpy as np
 
 from ._arrays import value_limits
 
 if TYPE_CHECKING:
+    from numpy.typing import ArrayLike
+
+    from pynbodyext.util._type import UnitLike
+
+    from ._types import MapLike
     from .adaptive import AdaptiveOps
     from .compose import ComposeOps
     from .data import ImageData
@@ -50,7 +56,7 @@ __all__ = ["OPERATIONS", "ImageDataView", "ImageOp", "ImageOps", "ProcessOps", "
 OPERATIONS: dict[str, type[ImageDataView]] = {}
 
 
-def _describe(value: Any) -> str:
+def _describe(value: MapLike) -> str:
     """Compact rendering of one recorded operation parameter."""
     if isinstance(value, np.ndarray):
         return f"<array {value.shape}>"
@@ -85,7 +91,9 @@ class ImageOp:
         return f"{self.name}({arguments})"
 
 
-def register_ops(name: str, view: type[ImageDataView] | None = None, *, overwrite: bool = False) -> Any:
+def register_ops(
+    name: str, view: type[ImageDataView] | None = None, *, overwrite: bool = False
+) -> type[ImageDataView] | OpRegistrar:
     """Register *view* as the view answering to ``image.<name>``.
 
     Usable as a decorator (``@ImageData.register_ops("name")``) or as a call.
@@ -193,12 +201,12 @@ class ImageDataView:
         return self.image.pixel_size
 
     @property
-    def x_units(self) -> Any:
+    def x_units(self) -> UnitLike | None:
         """Units of the x axis."""
         return self.image.x_units
 
     @property
-    def y_units(self) -> Any:
+    def y_units(self) -> UnitLike | None:
         """Units of the y axis."""
         return self.image.y_units
 
@@ -218,9 +226,15 @@ class ImageDataView:
         return self.image.label
 
     @property
-    def units(self) -> Any:
+    def units(self) -> UnitLike | None:
         """Units of the values."""
         return self.image.units
+
+
+#: What :func:`register_ops` hands back: the view class when it was called with
+#: one, or the decorator waiting for it.  Defined once the view exists, so the
+#: alias is a real type rather than a string an annotation resolver would trip on.
+OpRegistrar: TypeAlias = Callable[[type[ImageDataView]], type[ImageDataView]]
 
 
 @dataclass(frozen=True)
@@ -237,7 +251,9 @@ class ImageOps(ImageDataView):
     True
     """
 
-    def derive(self, data: Any, op_name: str, params: dict[str, Any] | None = None, **overrides: Any) -> ImageData:
+    def derive(
+        self, data: ArrayLike, op_name: str, params: dict[str, Any] | None = None, **overrides: Any
+    ) -> ImageData:
         """Return a new image carrying *data*, recording *op_name* in ``.ops``.
 
         The one thing a capability family needs from this base: it keeps the image's

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import weakref
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -27,15 +27,17 @@ if TYPE_CHECKING:
     from matplotlib.colors import Colormap, Normalize
     from matplotlib.contour import ContourSet
     from matplotlib.image import AxesImage
+    from mpl_toolkits.axes_grid1.axes_divider import AxesDivider
+    from numpy.typing import ArrayLike
 
+    from pynbodyext.util._type import UnitLike
+
+    from ._types import Artist
+    from .adaptive import AdaptiveMap
     from .data import ImageData
-
-#: Anything the drawing methods return: an image, a mesh, a contour set or a bar.
-Artist = Union["AxesImage", "QuadMesh", "ContourSet", "Colorbar"]
 
 __all__ = [
     "COLORBAR_LOCATIONS",
-    "Artist",
     "DisplayOps",
     "add_colorbar",
     "draw_contour",
@@ -51,13 +53,13 @@ _EMPTY_UNITS = {"", "1", "NoUnit()", "dimensionless", "unitless"}
 COLORBAR_LOCATIONS = ("right", "left", "top", "bottom")
 
 #: One divider per panel, so that several colour bars can be docked to it.
-_DIVIDERS: weakref.WeakKeyDictionary[Any, Any] = weakref.WeakKeyDictionary()
+_DIVIDERS: weakref.WeakKeyDictionary[Axes, AxesDivider] = weakref.WeakKeyDictionary()
 
 #: Label of each artist we drew, so ``add_colorbar(artist)`` can name it too.
-_ARTIST_LABELS: weakref.WeakKeyDictionary[Any, str] = weakref.WeakKeyDictionary()
+_ARTIST_LABELS: weakref.WeakKeyDictionary[Artist, str] = weakref.WeakKeyDictionary()
 
 
-def _unit_text(units: Any) -> str | None:
+def _unit_text(units: UnitLike | None) -> str | None:
     """Render *units* for a figure label, or ``None`` when there is nothing to show."""
     if units is None or type(units).__name__ == "NoUnit":
         return None
@@ -65,7 +67,7 @@ def _unit_text(units: Any) -> str | None:
     return None if text in _EMPTY_UNITS else text
 
 
-def _annotation(label: str | None, units: Any) -> str | None:
+def _annotation(label: str | None, units: UnitLike | None) -> str | None:
     """Combine a quantity label and its units for an axis or colour bar."""
     unit_text = _unit_text(units)
     if label is None:
@@ -73,7 +75,7 @@ def _annotation(label: str | None, units: Any) -> str | None:
     return str(label) if unit_text is None else f"{label} [{unit_text}]"
 
 
-def _apply_axis_labels(ax: Any, image: ImageData) -> None:
+def _apply_axis_labels(ax: Axes, image: ImageData) -> None:
     """Label the axes from the image metadata, without overwriting the caller's labels."""
     if not ax.get_xlabel():
         annotation = _annotation(image.x_label, image.x_units)
@@ -86,7 +88,7 @@ def _apply_axis_labels(ax: Any, image: ImageData) -> None:
 
 
 def add_colorbar(
-    mappable: Any = None,
+    mappable: Artist | ImageData | AdaptiveMap | None = None,
     ax: Axes | None = None,
     *,
     loc: str = "right",
@@ -214,7 +216,7 @@ def add_colorbar(
     return colorbar
 
 
-def _divider_for(axes: Any) -> Any:
+def _divider_for(axes: Axes) -> AxesDivider:
     """The divider installed on *axes*, shared so several bars can share a panel.
 
     ``make_axes_locatable`` installs a fresh divider each time it is called, and
@@ -230,19 +232,23 @@ def _divider_for(axes: Any) -> Any:
     return divider
 
 
-def _as_mappable(mappable: Any) -> tuple[Any, ImageData | None]:
+def _as_mappable(mappable: Artist | ImageData | AdaptiveMap | None) -> tuple[Artist | None, ImageData | None]:
     """Split a colour-bar argument into a drawn artist and the image behind it."""
+    from typing import cast
+
     from matplotlib.cm import ScalarMappable
 
     if mappable is None or isinstance(mappable, ScalarMappable) or hasattr(mappable, "get_array"):
         return mappable, None
-    image = getattr(mappable, "image", mappable)  # AdaptiveMap carries an ImageData
+    # An AdaptiveMap carries its ImageData; an ImageData is one already (duck-typed,
+    # because importing ImageData here at runtime would close an import cycle).
+    image = cast("ImageData", getattr(mappable, "image", mappable))
     if hasattr(image, "data") and hasattr(image, "extent"):
         return None, image
     raise TypeError(f"add_colorbar expects a drawn artist or an ImageData/AdaptiveMap, got {type(mappable).__name__}.")
 
 
-def _artist_in(axes: Any, image: ImageData) -> Any:
+def _artist_in(axes: Axes, image: ImageData) -> Artist | None:
     """The artist in *axes* that was drawn from *image*, if it is still there."""
     candidates = list(getattr(axes, "images", ())) + list(getattr(axes, "collections", ()))
     for artist in reversed(candidates):
@@ -253,7 +259,12 @@ def _artist_in(axes: Any, image: ImageData) -> Any:
 
 
 def _finish(
-    ax: Any, image: Any, artist: Any, colorbar: bool | str, aspect: Any, colorbar_kwargs: dict[str, Any] | None = None
+    ax: Axes,
+    image: ImageData,
+    artist: Artist,
+    colorbar: bool | str,
+    aspect: str | float | None,
+    colorbar_kwargs: dict[str, Any] | None = None,
 ) -> None:
     """Shared tail of the drawing methods: labels, aspect and colour bar."""
     _apply_axis_labels(ax, image)
@@ -271,18 +282,18 @@ def _finish(
 
 
 def draw_image(
-    image: Any,
+    image: ImageData,
     ax: Axes | None = None,
     *,
     colorbar: bool | str = False,
     colorbar_kwargs: dict[str, Any] | None = None,
-    aspect: Any = None,
-    norm: Any = None,
+    aspect: str | float | None = None,
+    norm: Normalize | str | None = None,
     log: bool = False,
     vmin: float | None = None,
     vmax: float | None = None,
     **kwargs: Any,
-) -> Any:
+) -> AxesImage | QuadMesh:
     """Draw *image*, picking the right artist for the bin spacing.
 
     Evenly spaced bins go through :func:`draw_imshow`; unevenly spaced ones through
@@ -327,18 +338,18 @@ def draw_image(
 
 
 def draw_imshow(
-    image: Any,
+    image: ImageData,
     ax: Axes | None = None,
     *,
     colorbar: bool | str = False,
     colorbar_kwargs: dict[str, Any] | None = None,
-    aspect: Any = None,
-    norm: Any = None,
+    aspect: str | float | None = None,
+    norm: Normalize | str | None = None,
     log: bool = False,
     vmin: float | None = None,
     vmax: float | None = None,
     **kwargs: Any,
-) -> Any:
+) -> AxesImage:
     """Draw *image* with ``imshow``, labelling it from its metadata.
 
     Use this for evenly spaced bins; :func:`draw_pcolormesh` handles arbitrary bin
@@ -389,19 +400,19 @@ def draw_imshow(
 
 
 def draw_pcolormesh(
-    image: Any,
+    image: ImageData,
     ax: Axes | None = None,
     *,
     colorbar: bool | str = False,
     colorbar_kwargs: dict[str, Any] | None = None,
-    aspect: Any = None,
-    norm: Any = None,
+    aspect: str | float | None = None,
+    norm: Normalize | str | None = None,
     log: bool = False,
     vmin: float | None = None,
     vmax: float | None = None,
     shading: str = "flat",
     **kwargs: Any,
-) -> Any:
+) -> QuadMesh:
     """Draw *image* as quadrilateral cells, honouring arbitrary bin edges.
 
     Parameters
@@ -448,20 +459,20 @@ def draw_pcolormesh(
 
 
 def draw_contour(
-    image: Any,
+    image: ImageData,
     ax: Axes | None = None,
     *,
     levels: int | Sequence[float] = 8,
     filled: bool = False,
     colorbar: bool | str = False,
     colorbar_kwargs: dict[str, Any] | None = None,
-    aspect: Any = None,
-    norm: Any = None,
+    aspect: str | float | None = None,
+    norm: Normalize | str | None = None,
     log: bool = False,
     vmin: float | None = None,
     vmax: float | None = None,
     **kwargs: Any,
-) -> Any:
+) -> ContourSet:
     """Draw contour lines of *image*, on the grid the image actually samples.
 
     The contours are placed on the bin centres, so they are correct for unevenly
@@ -530,7 +541,7 @@ def _symmetric_limits(data: np.ndarray, vmin: float | None, vmax: float | None) 
     return (vmin if vmin is not None else -limit), (vmax if vmax is not None else limit)
 
 
-def positive_limits(data: Any, *, vmin: float | None = None, vmax: float | None = None) -> tuple[float, float]:
+def positive_limits(data: ArrayLike, *, vmin: float | None = None, vmax: float | None = None) -> tuple[float, float]:
     """The strictly positive range of *data*, for a logarithmic scale.
 
     Parameters
@@ -563,7 +574,7 @@ def positive_limits(data: Any, *, vmin: float | None = None, vmax: float | None 
 
 
 def resolve_norm(
-    data: Any,
+    data: ArrayLike,
     *,
     norm: Normalize | str | None = None,
     log: bool = False,
@@ -677,15 +688,15 @@ class DisplayOps(ImageOps):
 
     def to_rgba(
         self,
-        cmap: Any = None,
+        cmap: str | Colormap | None = None,
         *,
         vmin: float | None = None,
         vmax: float | None = None,
         stretch: str = "linear",
         percentiles: tuple[float, float] | None = None,
-        norm: Any = None,
-        alpha: Any = None,
-        bad: Any = None,
+        norm: Normalize | str | None = None,
+        alpha: float | ArrayLike | None = None,
+        bad: str | tuple[float, ...] | None = None,
     ) -> np.ndarray:
         """Map this image's values to an ``(ny, nx, 4)`` RGBA array.
 
@@ -739,7 +750,7 @@ class DisplayOps(ImageOps):
         *,
         colorbar: bool | str = False,
         colorbar_kwargs: dict[str, Any] | None = None,
-        aspect: Any = None,
+        aspect: str | float | None = None,
         symmetric: bool = False,
         norm: Normalize | str | None = None,
         log: bool = False,
@@ -812,7 +823,7 @@ class DisplayOps(ImageOps):
         *,
         colorbar: bool | str = False,
         colorbar_kwargs: dict[str, Any] | None = None,
-        aspect: Any = None,
+        aspect: str | float | None = None,
         symmetric: bool = False,
         norm: Normalize | str | None = None,
         log: bool = False,
@@ -887,7 +898,7 @@ class DisplayOps(ImageOps):
         *,
         colorbar: bool | str = False,
         colorbar_kwargs: dict[str, Any] | None = None,
-        aspect: Any = None,
+        aspect: str | float | None = None,
         symmetric: bool = False,
         norm: Normalize | str | None = None,
         log: bool = False,
@@ -964,7 +975,7 @@ class DisplayOps(ImageOps):
         filled: bool = False,
         colorbar: bool | str = False,
         colorbar_kwargs: dict[str, Any] | None = None,
-        aspect: Any = None,
+        aspect: str | float | None = None,
         symmetric: bool = False,
         count: int = 6,
         norm: Normalize | str | None = None,
@@ -1048,7 +1059,7 @@ class DisplayOps(ImageOps):
 
     def add_colorbar(
         self,
-        mappable: Any = None,
+        mappable: Artist | ImageData | AdaptiveMap | None = None,
         ax: Axes | None = None,
         *,
         loc: str = "right",

@@ -208,6 +208,23 @@ object a caller normally holds.
   `MapStyle.norm_for(data)` — used by `compose.imshow` — returns a norm matching the
   stretch exactly (`FuncNorm` over the data range, per `stretch_functions`), so a
   stretched map's colour bar no longer shows a linear scale.
+- **Annotations name real types.** The vocabulary is `plot/image/_types.py` —
+  `MapLike` (an image, a binned array or a plain array), `MaskLike`, `KernelWidth`
+  (a number, a pynbody unit, or a `(y, x)` pair) — plus `numpy.typing.ArrayLike`,
+  the `matplotlib` artist classes and `UnitLike`; a signature never answers with a
+  bare `Any` (it stays only inside a container, `dict[str, Any]`, and on forwarded
+  `**kwargs`, where it is honest). The bridge is typed on both sides:
+  `BinsArray.image` is an `ImageData`, and `ImageData.from_bins_array` takes a
+  `BinsArray`. `tests/test_plot_image_typehints.py` keeps both from drifting.
+  An `Artist` is anything a drawing method returns — an image, a mesh, a contour
+  set, a scatter `PathCollection`, or a bar — so a scatter profile can go straight
+  to `add_colorbar` without a type error. The annotations are deferred (PEP 563)
+  and the names they use are imported under `TYPE_CHECKING`, which the lint config
+  requires (`ruff` `TC`); resolving them therefore takes
+  `plot/image/_types.resolve_type_hints`, which imports what they name — matplotlib's
+  drawing stack, the calculator — only when asked. That is deliberate: importing
+  `pynbodyext.plot.image` stays free of `matplotlib.pyplot` and of the calculator
+  (about 350 ms and 270 ms), and the tests pin it.
 - **Contours** are a display verb alongside `imshow`: `image.display.contour(ax=ax,
   levels=…, filled=…)` (and `AdaptiveMap.contour`) draws on the bin centres, so it
   is correct for uneven bins and overlays an existing image when passed the same
