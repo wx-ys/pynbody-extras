@@ -9,18 +9,31 @@ from drifting back to ``Any``.
 
 ``Any`` stays where it is honest: inside a container (``dict[str, Any]``,
 ``Sequence[Any]``) and as the type of ``**kwargs`` forwarded to matplotlib.
+
+The annotations are deferred (PEP 563) and several of the types they name are
+imported lazily — matplotlib's drawing stack when you draw, the calculator's
+binned-result types when you bin — so resolving them takes
+:func:`~pynbodyext.plot.image._types.resolve_type_hints` rather than a bare
+``typing.get_type_hints``.  These tests use it, which also proves the namespace it
+resolves against is complete.
 """
 
 from __future__ import annotations
 
 import inspect
 import re
+import subprocess
+import sys
+import typing
 
 import pytest
+from matplotlib.collections import PathCollection
 
 from pynbodyext.core.calculate.bins.arrays import BinsArray
 from pynbodyext.core.calculate.bins.plot import BinPlotMixin
 from pynbodyext.plot.image import ImageData, adaptive, cmaps, compose, data, display, noise, ops, psf, smooth
+from pynbodyext.plot.image import add_colorbar
+from pynbodyext.plot.image._types import resolve_type_hints
 from pynbodyext.plot.image.adaptive import AdaptiveMap
 from pynbodyext.plot.image.compose import MapStyle
 from pynbodyext.plot.image.ops import ImageOp
@@ -123,6 +136,54 @@ def test_no_field_uses_a_bare_any(qualname: str, annotations: dict[str, object])
     """A dataclass field is a user-facing argument too."""
     offenders = [f"{name}: {text}" for name, text in annotations.items() if bare_any(annotation_text(text))]
     assert offenders == [], f"{qualname} uses a bare Any for {', '.join(offenders)}"
+
+
+def test_every_public_annotation_resolves() -> None:
+    """Deferred annotations must resolve for the tools that read them.
+
+    Documentation, validation and plugin code calls ``typing.get_type_hints``; a
+    name that only exists for the type checker makes it fail with a ``NameError``.
+    ``plot.image._types.resolve_type_hints`` knows the names the modules cannot
+    import themselves, and this walks everything the layer and its bridge annotate.
+    """
+    unresolved = []
+    for qualname, callable in CALLABLES:
+        try:
+            resolve_type_hints(callable)
+        except Exception as exc:  # NameError, or a TypeError from a bad alias
+            unresolved.append(f"{qualname} ({type(exc).__name__}: {exc})")
+    assert unresolved == [], f"annotations do not resolve: {'; '.join(unresolved)}"
+
+
+def test_the_artist_union_covers_every_drawing_method_artist() -> None:
+    """The colour-bar API takes anything the drawing methods hand back.
+
+    ``BinPlotMixin.plot(kind="scatter")`` returns a ``PathCollection`` — a
+    ``ScalarMappable``, so a valid mappable — and it has to be accepted statically
+    too, not only at runtime.
+    """
+    accepted = typing.get_args(resolve_type_hints(add_colorbar)["mappable"])
+    assert PathCollection in accepted
+
+
+def test_importing_the_layer_stays_off_the_drawing_stack_and_the_calculator() -> None:
+    """Resolving every annotation eagerly would undo the lazy imports.
+
+    ``import pynbodyext.plot.image`` is a cheap import on purpose: matplotlib's
+    drawing stack arrives when you draw, and the calculator when you bin — about
+    350 ms and 270 ms respectively.  A bare ``typing.get_type_hints`` on an
+    annotation that names one of those raises ``NameError``; the supported route is
+    :func:`~pynbodyext.plot.image._types.resolve_type_hints`, which pays for them
+    only when asked.
+    """
+    code = (
+        "import pynbodyext.plot.image, sys; "
+        "assert not [m for m in sys.modules if m.startswith('pynbodyext.core.calculate')], 'calculator imported'; "
+        "assert 'matplotlib.pyplot' not in sys.modules, 'pyplot imported'"
+    )
+    completed = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
+
+    assert completed.returncode == 0, completed.stderr
 
 
 # ---------------------------------------------------------------------------

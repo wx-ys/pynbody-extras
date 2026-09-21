@@ -45,6 +45,7 @@ EXPECTED_NAMES = {
     "normalize_psf",
     "register_cmap",
     "register_ops",
+    "resolve_type_hints",
     "richardson_lucy",
     "to_rgba",
     "vel_cmap",

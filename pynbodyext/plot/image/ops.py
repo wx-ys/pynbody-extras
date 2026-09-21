@@ -29,6 +29,7 @@ not its base classes): define a subclass and register it::
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, TypeAlias
 
@@ -37,8 +38,6 @@ import numpy as np
 from ._arrays import value_limits
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from numpy.typing import ArrayLike
 
     from pynbodyext.util._type import UnitLike
@@ -55,10 +54,6 @@ __all__ = ["OPERATIONS", "ImageDataView", "ImageOp", "ImageOps", "ProcessOps", "
 
 #: Registered views, keyed by the attribute they answer to.
 OPERATIONS: dict[str, type[ImageDataView]] = {}
-
-#: What :func:`register_ops` hands back: the view class when it was called with
-#: one, or the decorator waiting for it.
-OpRegistrar: TypeAlias = "Callable[[type[ImageDataView]], type[ImageDataView]]"
 
 
 def _describe(value: MapLike) -> str:
@@ -234,6 +229,12 @@ class ImageDataView:
     def units(self) -> UnitLike | None:
         """Units of the values."""
         return self.image.units
+
+
+#: What :func:`register_ops` hands back: the view class when it was called with
+#: one, or the decorator waiting for it.  Defined once the view exists, so the
+#: alias is a real type rather than a string an annotation resolver would trip on.
+OpRegistrar: TypeAlias = Callable[[type[ImageDataView]], type[ImageDataView]]
 
 
 @dataclass(frozen=True)

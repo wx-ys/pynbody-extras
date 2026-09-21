@@ -24,8 +24,14 @@ this package requires a live simulation object — and :class:`ImageData` offers
 same operations as methods, grouped by family::
 
     image.ImageData.from_bins(bins2d, "vz.mean").smooth.gaussian(fwhm=2).display.imshow(colorbar=True)
+
+The annotations here are deferred (PEP 563) and name types this package imports
+lazily — matplotlib's artist classes when you draw, the calculator's binned-result
+types when you bin — so a tool that reads them resolves through
+:func:`resolve_type_hints` rather than a bare ``typing.get_type_hints``.
 """
 
+from ._types import resolve_type_hints
 from .adaptive import AdaptiveMap, adaptive_bin_map, adaptive_map_from_bins
 from .cmaps import (
     SAURON_POSITIONS,
@@ -86,6 +92,7 @@ __all__ = [
     "register_cmap",
     "register_ops",
     "richardson_lucy",
+    "resolve_type_hints",
     "to_rgba",
     "vel_cmap",
     "vel_cmap_r",

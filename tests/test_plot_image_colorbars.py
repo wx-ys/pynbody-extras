@@ -37,6 +37,20 @@ def test_add_colorbar_attaches_to_the_artist() -> None:
         plt.close(fig)
 
 
+def test_a_scatter_profile_can_be_given_a_colour_bar() -> None:
+    """A ``kind="scatter"`` profile is a mappable, like an image is."""
+    fig, ax = plt.subplots()
+    try:
+        artist = ax.scatter([1.0, 2.0, 3.0], [4.0, 5.0, 6.0], c=[10.0, 20.0, 30.0])
+
+        bar = add_colorbar(artist, ax=ax)
+
+        assert bar.mappable is artist
+        fig.canvas.draw()
+    finally:
+        plt.close(fig)
+
+
 @pytest.mark.parametrize("loc", ["right", "left", "top", "bottom"])
 def test_add_colorbar_supports_every_side(loc: str) -> None:
     fig, ax = plt.subplots()
