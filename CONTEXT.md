@@ -140,6 +140,12 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   `median`/`pXX` are weighted quantiles over the 64 nearest particles per cell
   (same definition, reduced for all cells in one vectorised call), and the C++
   KD-tree underneath comes from scipy/pynbody rather than a new extension.
+  The quantile's K-nearest cap is an *approximation*: the kernel reaches many
+  more particles than `h` does (hundreds per cell in a real snapshot), so the
+  engine measures the share of a cell's exact kernel weight the list carries and
+  warns when it is short; the planned replacement is a scatter of every particle
+  onto the cells its kernel touches, reduced segment-wise (`weighted_percentiles`
+  already takes `segments=`).
 
 ## Image layer (`pynbodyext/plot/image/`)
 

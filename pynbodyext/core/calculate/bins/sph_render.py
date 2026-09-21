@@ -59,6 +59,19 @@ Two engines share that query, because not every statistic is a sum:
   vectorised call — so a quantile means the same thing in both:
   ``"vz.abs.p16@mass"`` is the mass-weighted 16th percentile of ``|vz|``, and
   ``"vz.median"`` is the weighted median, which need not equal ``"vz.mean"``.
+  **The cap is a real approximation, not a formality.**  A cell's weight is
+  carried by every particle the kernel reaches, and a normal SPH snapshot puts
+  *hundreds* of them there — in a test snapshot the median cell has 190, and 91%
+  of particles have more than 64 within ``2h``.  So looking at the nearest 64 can
+  truncate badly, and the engine measures it: the exact weight of a cell is one
+  kernel sum away, and when the neighbour list carries less than
+  :data:`_TRUNCATION_TOLERANCE` of it a :class:`UserWarning` says so.  On that
+  snapshot the 64 nearest carry 56% of the weight, and the truncated median
+  differs from the complete one by up to 35 km/s where the field's own spread is
+  34 km/s.  Raise ``neighbours`` while the warning fires (or use the kernel sums,
+  which reach everything); an engine that scatters every particle onto the cells
+  its kernel touches — no cap, and the segmented reduction for it is already in
+  :func:`~.statistics.weighted_percentiles` — is the planned replacement.
 
 Requirements
 ------------
@@ -127,6 +140,14 @@ _QUANTILE_STATISTICS = (Median, Percentile)
 #: normal snapshot's kernel support is covered in full.
 _NEIGHBOURS = 64
 
+#: Share of a cell's kernel weight the neighbour list must carry before the
+#: quantiles are considered converged.  A normal snapshot has far more than 64
+#: particles inside ``2h``, so this is a real check, not a formality.
+_TRUNCATION_TOLERANCE = 0.99
+
+#: Cache key for the weight-only render the truncation check needs.
+_WEIGHT_KEY = "__sph_render_weight__"
+
 
 class SphRender:
     """Kernel-smoothed queries over a binned result.
@@ -155,7 +176,12 @@ class SphRender:
         per cell, nearest first.  The kernel sums (``count``, ``sum``, ``mean``,
         ``rms``, ``disp``) do not use this: they reach exactly as far as the
         kernel does.  Raise it for a snapshot whose kernel support holds more
-        particles than this, or lower it to trade accuracy for speed.
+        particles than this, or lower it to trade accuracy for speed.  How to tell:
+        the quantiles compare their neighbour list against the cell's exact kernel
+        weight and warn when the list is short of it, and ``64`` — plenty for a
+        particle's own 64-neighbour smoothing — is *not* usually enough for a cell,
+        because the kernel support (``2h``) reaches many more particles than ``h``
+        does.  With every particle in the list the quantile is exact.
 
     Examples
     --------
@@ -313,12 +339,43 @@ class SphRender:
         weight = np.where(missing, 0.0, weight * plan["measure"])
         if weights is not None:
             weight = weight * weights[neighbour]
+        self._warn_if_truncated(weight, values, weights)
         # One call for every cell: the reduction is the same weighted percentile
         # the scalar statistic computes, parameterised differently.  Particles the
         # kernel does not reach (or whose value is not finite) carry no weight and
         # drop out there.
         quantiles = weighted_percentiles(values[neighbour], weight, statistic.percentile)
         return np.asarray(quantiles, dtype=float).reshape(shape)
+
+    def _warn_if_truncated(self, weight: np.ndarray, values: np.ndarray, weights: np.ndarray | None) -> None:
+        """Say so when the ``neighbours`` nearest particles are not enough.
+
+        The kernel sums reach every particle the kernel touches; the quantiles look
+        at a fixed number of nearest neighbours, so a dense region — the middle of
+        a halo, say — can hold more of them than that.  The exact weight of each
+        cell is one kernel sum away (a render of the weight field), so the share the
+        neighbour list actually carries is measurable: compare them, and warn when
+        the list is missing weight.
+        """
+        quantity = np.ones_like(values) if weights is None else np.asarray(weights, float)
+        exact = self._renders.get(_WEIGHT_KEY)
+        if exact is None:
+            exact = self._renders[_WEIGHT_KEY] = self._render_cells(quantity)
+        kept = weight.sum(axis=1)
+        reachable = np.asarray(exact, dtype=float).ravel()
+        usable = reachable > 0.0
+        if not usable.any():
+            return
+        share = kept[usable] / reachable[usable]
+        if np.median(share) < _TRUNCATION_TOLERANCE:
+            warnings.warn(
+                f"the {self._neighbours} nearest neighbours carry only {np.median(share):.0%} of the kernel "
+                f"weight that reaches a typical cell, so this quantile is truncated — raise "
+                f"SphRender(neighbours=...) (e.g. to a few hundred for a normal SPH snapshot) or use the "
+                f"kernel sums, which see all of it.",
+                UserWarning,
+                stacklevel=3,
+            )
 
     # ------------------------------------------------------------------ plan
     def _layout(self) -> dict[str, Any]:
@@ -388,12 +445,14 @@ class SphRender:
     # ----------------------------------------------------------------- render
     def _render(self, quantity: np.ndarray) -> np.ndarray:
         """Kernel sum of *quantity* over the cells, in the result's axis order."""
+        return self._to_axis_order(self._render_cells(quantity), self._layout())
+
+    def _render_cells(self, quantity: np.ndarray) -> np.ndarray:
+        """Kernel sum of *quantity*, in the order the cell grid is indexed here."""
         plan = self._layout()
         if len(plan["present"]) == 2:
-            rendered = self._render_projected(quantity, plan)
-        else:
-            rendered = self._render_volume(quantity, plan)
-        return self._to_axis_order(rendered, plan)
+            return self._render_projected(quantity, plan)
+        return self._render_volume(quantity, plan)
 
     def _to_axis_order(self, rendered: np.ndarray, plan: dict[str, Any]) -> np.ndarray:
         """Reorder an ``(x, y[, z])`` grid into the result's own axis order."""
@@ -579,7 +638,8 @@ def _kernel_weights(distance: np.ndarray, smoothing: np.ndarray, kernel: Any) ->
     A three-dimensional kernel evaluates its own vectorised ``value``; a projected
     one (``Kernel2D``, used for the two-dimensional render) only has the scalar
     numerical quadrature pynbody builds its lookup table from, so the table is
-    interpolated here — the same table the renderer samples.
+    indexed exactly as the renderer indexes it — the same table, the same lookup —
+    so a quantile weighs its neighbours with the very weights the kernel sums use.
     """
     if getattr(kernel, "h_power", 3) != 2:
         return np.asarray(kernel.value(distance, smoothing), dtype=float)
@@ -587,8 +647,10 @@ def _kernel_weights(distance: np.ndarray, smoothing: np.ndarray, kernel: Any) ->
     # renderer asks for it as float32 — so ask for the same thing it will, or a
     # later kernel sum trips over a float64 table.
     samples = np.asarray(kernel.get_samples(), dtype=float)
-    spacing = 0.02  # pynbody's table runs over q**2 in steps of 0.02, q = r/h
-    return np.interp((distance / smoothing) ** 2, np.arange(len(samples)) * spacing, samples) / smoothing**2
+    # ``_render.get_kernel``: index = num_samples * d**2 / (2h)**2, and zero beyond.
+    index = ((distance / smoothing) ** 2 / 4.0 * len(samples)).astype(np.intp)
+    inside = index < len(samples)
+    return np.where(inside, samples[np.clip(index, 0, len(samples) - 1)], 0.0) / smoothing**2
 
 
 def _position_array(sim: Any, axes: dict[str, Any]) -> np.ndarray:

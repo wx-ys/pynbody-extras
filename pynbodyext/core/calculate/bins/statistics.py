@@ -324,41 +324,11 @@ def _bincount_nan(bins: np.ndarray, values: np.ndarray, nbins: int) -> tuple[np.
     return counts, sums
 
 
-def weighted_percentiles(values: Any, weights: Any, percentile: float) -> np.ndarray | float:
-    """Weighted percentile of one sample, or of every row of a 2-D sample.
+def _flat_samples(values: Any, weights: Any, segments: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+    """Flatten a batch of samples into values, weights and a sample index each.
 
-    The definition is the one the weighted :class:`Percentile` has always used: the
-    pairs are sorted by value, the cumulative weight is shifted so the lightest
-    value sits at zero, normalised by the total, and the percentile is
-    interpolated along that curve.  Two details matter at the edges:
-
-    - a sample whose weight sits on a single value *is* that value (there is no
-      curve to interpolate, and previously this came back as ``NaN``);
-    - values that are not finite carry no information and are dropped, as the
-      kernel sums drop them — weights and values have to be finite together.
-
-    Parameters
-    ----------
-    values : array_like
-        One sample, 1-D, or one sample per row, 2-D.
-    weights : array_like
-        Per-value weights, the same shape as *values*.  Only positive weights
-        enter the cumulative distribution.
-    percentile : float
-        Percentile in ``[0, 100]``.
-
-    Returns
-    -------
-    numpy.ndarray or float
-        A float for a 1-D sample, else one value per row, ``NaN`` where nothing
-        carries weight.
-
-    Examples
-    --------
-    >>> weighted_percentiles([1.0, 2.0, 3.0], [1.0, 1.0, 1.0], 50.0)
-    2.0
-    >>> weighted_percentiles([[1.0, 2.0], [3.0, 4.0]], [[1.0, 1.0], [1.0, 3.0]], 50.0)
-    array([1.5, 3.5])
+    Accepts one sample (1-D), one per row (2-D), or flat arrays with a length per
+    segment; the caller gets the same three things either way.
     """
     values_array = np.asarray(values, dtype=float)
     weights_array = np.asarray(weights, dtype=float)
@@ -366,54 +336,117 @@ def weighted_percentiles(values: Any, weights: Any, percentile: float) -> np.nda
         raise ValueError(
             f"values and weights must have the same shape, got {values_array.shape} and {weights_array.shape}."
         )
-    single = values_array.ndim == 1
-    if single:
+    if segments is not None:
+        lengths = np.asarray(segments, dtype=int)
+        sample_of = np.repeat(np.arange(len(lengths)), lengths)
+        if len(values_array) != len(sample_of):
+            raise ValueError(f"segments describe {len(sample_of)} values, got {len(values_array)}.")
+        return values_array.ravel(), weights_array.ravel(), sample_of, len(lengths)
+    if values_array.ndim == 1:
         values_array = values_array[None, :]
         weights_array = weights_array[None, :]
     if values_array.ndim != 2:
         raise ValueError(f"values must be 1-D or 2-D, got shape {values_array.shape}.")
+    sample_of = np.repeat(np.arange(len(values_array)), values_array.shape[1])
+    return values_array.ravel(), weights_array.ravel(), sample_of, len(values_array)
+
+
+def weighted_percentiles(values: Any, weights: Any, percentile: float, *, segments: Any = None) -> np.ndarray | float:
+    """Weighted percentile of one sample, of every row of a 2-D batch — or of a
+    flat batch split into ``segments``.
+
+    The definition is the one the weighted :class:`Percentile` has always used: the
+    pairs are sorted by value, the cumulative weight is shifted so the lightest
+    value sits at zero, normalised by the total, and the percentile is
+    interpolated along that curve.  Two details matter at the edges:
+
+    - a sample whose weight sits on a single value *is* that value (there is no
+      curve to interpolate, and this used to come back as ``NaN``);
+    - values that are not finite carry no information and are dropped, as the
+      kernel sums drop them — weights and values have to be finite together.
+
+    Parameters
+    ----------
+    values, weights : array_like
+        Per-value values and weights, the same shape.
+    percentile : float
+        Percentile in ``[0, 100]``.
+    segments : array_like of int, optional
+        For flat input: the length of each consecutive sample.  This is how a
+        scattering of particles onto cells is reduced — one segment per cell,
+        however many particles landed in it — without padding every cell to the
+        largest one.  The values are sorted within their segment here, so the
+        caller need not order them.
+
+    Returns
+    -------
+    numpy.ndarray or float
+        A float for a single 1-D sample, else one value per sample (row, or
+        segment), ``NaN`` where nothing carries weight.
+
+    Examples
+    --------
+    >>> weighted_percentiles([1.0, 2.0, 3.0], [1.0, 1.0, 1.0], 50.0)
+    2.0
+    >>> weighted_percentiles([[1.0, 2.0], [3.0, 4.0]], [[1.0, 1.0], [1.0, 3.0]], 50.0)
+    array([1.5, 3.5])
+    >>> weighted_percentiles([6.0, 1.0, 2.0, 3.0], [1.0, 1.0, 1.0, 1.0], 50.0, segments=[1, 3])
+    array([ 6., nan])
+    """
+    single = segments is None and np.asarray(values).ndim == 1
+    values_array, weights_array, sample_of, n_samples = _flat_samples(values, weights, segments)
 
     carries = (weights_array > 0.0) & np.isfinite(values_array)
-    counts = carries.sum(axis=1)
-    out = np.full(len(values_array), np.nan)
+    samples = sample_of[carries]
+    counts = np.bincount(samples, minlength=n_samples)
+    out = np.full(n_samples, np.nan)
 
-    # Sorting puts the weighted, finite values first: everything else is +inf.
-    sortable = np.where(carries, values_array, np.inf)
-    order = np.argsort(sortable, axis=1, kind="stable")
-    sorted_values = np.take_along_axis(sortable, order, axis=1)
-    sorted_weights = np.take_along_axis(np.where(carries, weights_array, 0.0), order, axis=1)
+    # Cell-major, value-sorted: the segments come out contiguous, and the sorting
+    # puts the weighted, finite values of each before the rest.
+    order = np.lexsort((values_array[carries], samples))
+    sorted_values = values_array[carries][order]
+    sorted_weights = weights_array[carries][order]
+    starts = np.concatenate([[0], np.cumsum(counts)[:-1]]).astype(np.intp)
 
     one_point = counts == 1
     if one_point.any():
-        out[one_point] = sorted_values[one_point, 0]
+        out[one_point] = sorted_values[starts[one_point]]
 
     several = counts > 1
     if several.any():
-        width = int(counts.max())
-        columns = np.arange(width)[None, :]
-        valid = columns < counts[:, None]
-        sample = np.where(valid, sorted_values[:, :width], np.nan)
-        weight = np.where(valid, sorted_weights[:, :width], 0.0)
-        # The lightest value sits at zero, and the total excludes it, exactly as
-        # the scalar definition does; padding is +inf so it can never bracket the
-        # percentile.
-        cdf = np.cumsum(weight, axis=1)
-        total = cdf[:, -1] - cdf[:, 0]
+        # The lightest value sits at zero and the total excludes it, exactly as the
+        # scalar definition does; "base" is the weight accumulated before each
+        # segment starts.
+        cumulative = np.cumsum(sorted_weights)
+        last = max(len(sorted_weights) - 1, 0)
+        safe_starts = np.clip(starts, 0, last)
+        base = np.concatenate([[0.0], cumulative[:-1]])[safe_starts]
+        first_weight = sorted_weights[safe_starts]
+        ends = np.clip(starts + np.maximum(counts, 1) - 1, 0, last)
+        segment_total = (cumulative[ends] - base) - first_weight
+        shifted = (cumulative - np.repeat(base, counts)) - np.repeat(first_weight, counts)
+        # The lightest value *is* the zero of the curve; cancellation in the line
+        # above can leave it a few ulps off, which is enough to move a percentile
+        # of 0 onto the next value.
+        shifted[starts[counts > 0]] = 0.0
+        total = np.repeat(segment_total, counts)
         with np.errstate(invalid="ignore", divide="ignore"):
-            cdf = (cdf - cdf[:, :1]) / total[:, None]
-        cdf = np.where(valid, cdf, np.inf)
+            cdf = shifted / total
 
-        # np.interp's lookup, done for every row at once: the bracket is the entry
-        # the percentile falls into, and a target on a knot interpolates to it.
-        rows = np.arange(len(values_array))
+        # np.interp's lookup, done for every segment at once: the bracket is the
+        # first entry whose cumulative weight reaches the percentile, and a target
+        # on a knot interpolates to it.
         target = float(percentile) / 100.0
-        index = np.clip((cdf < target).sum(axis=1), 1, width - 1)
-        low, high = cdf[rows, index - 1], cdf[rows, index]
-        below, above = sample[rows, index - 1], sample[rows, index]
+        reached = np.flatnonzero(cdf >= target)
+        first = np.unique(samples[order][reached], return_index=True)[1]
+        hit = reached[first]
+        previous = np.maximum(hit - 1, starts[samples[order][hit]])
+        low, high = cdf[previous], cdf[hit]
+        below, above = sorted_values[previous], sorted_values[hit]
         with np.errstate(invalid="ignore", divide="ignore"):
             fraction = np.where(high > low, (target - low) / (high - low), 0.0)
         interpolated = below + np.nan_to_num(fraction) * (above - below)
-        out[several] = interpolated[several]
+        out[samples[order][hit]] = interpolated
 
     return float(out[0]) if single else out
 
