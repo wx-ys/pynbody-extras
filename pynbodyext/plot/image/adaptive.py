@@ -43,6 +43,12 @@ from .display import DisplayOps
 from .ops import ImageDataView, ImageOps
 
 if TYPE_CHECKING:
+    from numpy.typing import ArrayLike
+
+    from pynbodyext.core.calculate.bins.result import BinNDResult
+    from pynbodyext.util._type import UnitLike
+
+    from ._types import MapLike, MaskLike
     from .data import ImageData
 
 __all__ = ["AdaptiveMap", "AdaptiveOps", "adaptive_bin_map", "adaptive_map_from_bins"]
@@ -222,28 +228,28 @@ def _to_axis_units(cell_positions: np.ndarray, edges: np.ndarray | None, count: 
 
 
 def adaptive_bin_map(
-    value: Any,
-    signal: Any,
+    value: MapLike,
+    signal: MapLike,
     *,
-    noise: Any = None,
+    noise: MapLike | None = None,
     target_capacity: float | None = None,
     target_signal: float | None = None,
     target_nbins: int | None = None,
-    mask: Any = None,
+    mask: MaskLike = None,
     min_signal: float | None = None,
     method: str = "mean",
     extent: tuple[float, float, float, float] | None = None,
-    x_edges: Any = None,
-    y_edges: Any = None,
-    x_units: Any = None,
-    y_units: Any = None,
+    x_edges: ArrayLike | None = None,
+    y_edges: ArrayLike | None = None,
+    x_units: UnitLike | None = None,
+    y_units: UnitLike | None = None,
     x_label: str | None = None,
     y_label: str | None = None,
     regul: bool = True,
     maxiter: int = 50,
     verbose: int = 0,
     label: str | None = None,
-    units: Any = None,
+    units: UnitLike | None = None,
 ) -> AdaptiveMap:
     """Bin a 2-D map into regions of comparable signal, PowerBin-style.
 
@@ -399,7 +405,7 @@ def adaptive_bin_map(
 
 
 def adaptive_map_from_bins(
-    bins: Any, value: str, signal: str, *, noise: str | None = None, **kwargs: Any
+    bins: BinNDResult, value: str, signal: str, *, noise: str | None = None, **kwargs: Any
 ) -> AdaptiveMap:
     """Adaptively bin one query of a :class:`BinNDResult` against another.
 
@@ -450,13 +456,13 @@ class AdaptiveOps(ImageOps):
 
     def bin(
         self,
-        signal: Any,
+        signal: MapLike,
         *,
-        noise: Any = None,
+        noise: MapLike | None = None,
         target_capacity: float | None = None,
         target_signal: float | None = None,
         target_nbins: int | None = None,
-        mask: Any = None,
+        mask: MaskLike = None,
         min_signal: float | None = None,
         method: str = "mean",
         regul: bool = True,
@@ -548,6 +554,6 @@ class AdaptiveOps(ImageOps):
         )
 
 
-def _as_map_data(value: Any) -> np.ndarray:
+def _as_map_data(value: MapLike) -> np.ndarray:
     """Values of anything image-like, transposing a binned array on the way."""
     return aligned_values(value)

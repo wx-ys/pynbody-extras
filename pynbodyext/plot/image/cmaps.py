@@ -30,14 +30,20 @@ table is exact in the continuous definition, and matplotlib interpolates it onto
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, overload
 
 import matplotlib
 import matplotlib.colors as mcolors
 import numpy as np
-from matplotlib.colors import Colormap, LinearSegmentedColormap
+from matplotlib.colors import Colormap, LinearSegmentedColormap, Normalize
 
 from .smooth import normalize, stretch_functions
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from matplotlib.typing import ColorType
+    from numpy.typing import ArrayLike
 
 __all__ = [
     "SAURON_POSITIONS",
@@ -72,7 +78,15 @@ _NAMED_NORMS: dict[str, type[matplotlib.colors.Normalize]] = {
 }
 
 
-def as_norm(norm: Any) -> Any:
+@overload
+def as_norm(norm: None) -> None: ...
+
+
+@overload
+def as_norm(norm: Normalize | str) -> Normalize: ...
+
+
+def as_norm(norm: Normalize | str | None) -> Normalize | None:
     """Resolve a norm that may be given as a matplotlib scale *name*.
 
     Matplotlib lets ``norm=`` be a string (``"log"``, ``"symlog"``, ``"linear"``, …)
@@ -108,7 +122,7 @@ def as_norm(norm: Any) -> Any:
         ) from None
 
 
-def is_log_norm(norm: Any) -> bool:
+def is_log_norm(norm: Normalize | str | None) -> bool:
     """Whether *norm* asks for a logarithmic scale, as a name or an instance."""
     return norm == "log" or isinstance(norm, mcolors.LogNorm)
 
@@ -138,7 +152,9 @@ SAURON_RGB = np.array(
 )
 
 
-def cmap_from_colors(name: str, colors: Any, positions: Any = None, *, N: int = 256) -> LinearSegmentedColormap:
+def cmap_from_colors(
+    name: str, colors: Sequence[ColorType], positions: Sequence[float] | None = None, *, N: int = 256
+) -> LinearSegmentedColormap:
     """Build a :class:`~matplotlib.colors.LinearSegmentedColormap` from stops.
 
     Parameters
@@ -254,16 +270,16 @@ def get_cmap(cmap: Colormap | str | None = None) -> Colormap:
 
 
 def to_rgba(
-    data: Any,
+    data: ArrayLike,
     cmap: Colormap | str | None = None,
     *,
     vmin: float | None = None,
     vmax: float | None = None,
     stretch: str = "linear",
     percentiles: tuple[float, float] | None = None,
-    norm: Any = None,
-    alpha: Any = None,
-    bad: Any = None,
+    norm: Normalize | str | None = None,
+    alpha: float | ArrayLike | None = None,
+    bad: str | tuple[float, ...] | None = None,
 ) -> np.ndarray:
     """Map a 2-D array of numbers to an ``(ny, nx, 4)`` RGBA image.
 
