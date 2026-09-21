@@ -129,6 +129,14 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   `BinND`) is the one binning implementation, so profile building has a single
   statistics vocabulary (`"mass.sum"`, `"vz.disp"`, …) and the chunked-array
   experiment (dask, the `chunk` extra) is no longer carried.
+- [ADR-0013](docs/adr/0013-sph-render-smoothes-the-binned-queries.md):
+  `bins.sph_render[...]` answers the same queries through an SPH kernel instead of
+  cell membership — a *view*, so the result is a `BinsArray` on the same grid and
+  the units match the strict query.  Two or three spatial axes with evenly spaced
+  bins (anything else raises), `count` is the kernel-integrated particle number,
+  2-D delegates to pynbody's projected renderer while 3-D sums with pynbody's
+  kernel itself (its `to_3d_grid` mis-sizes z pixels), and the weighted quantiles
+  wait for a neighbour-list engine.
 
 ## Image layer (`pynbodyext/plot/image/`)
 

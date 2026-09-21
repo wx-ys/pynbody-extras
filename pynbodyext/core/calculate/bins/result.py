@@ -29,6 +29,7 @@ from .model import BinResultModel
 from .plot import BinPlotMixin
 from .query import BinQueryService
 from .selectors import is_int_sequence
+from .sph_render import BinSphRenderMixin
 from .statistics import BinNDStatAccessor
 from .subresults import BinSubresultStore
 
@@ -149,7 +150,7 @@ class BinQueriesView:
         return self._owner._apply(query, name=name, empty=empty, vectorized=vectorized)
 
 
-class BinNDResult(BinPlotMixin):
+class BinNDResult(BinPlotMixin, BinSphRenderMixin):
     """A binned (1-D / N-D) result over a simulation snapshot.
 
     Returned by calling :class:`~.nodes.Bin1D` or :class:`~.nodes.BinND` on a

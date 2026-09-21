@@ -96,6 +96,17 @@ The statistics are `sum`, `mean`, `median`, `rms`, `disp` and percentiles
 (`pXX`); the transforms `abs`, `log`, `log10`, `sqrt`, `square`; `count` needs no
 field; and `@<field>` may be any array the snapshot carries.
 
+Smoothing the particles with their SPH kernel instead of counting them in a cell
+is the same queries again, for a map that stays smooth where the bins are sparse:
+
+```python
+bins.sph_render["mass.sum"]         # per-cell mass, kernel-smoothed, same units
+bins.s.sph_render["count"]          # stars only; fractional — it is a kernel count
+bins.sph_render["vz.abs.mean@mass"] # transform |vz|, then the mass-weighted mean
+```
+
+It needs two or three spatial axes with evenly spaced bins (`x`/`y`, plus `z`).
+
 ### Image post-processing and visualization
 
 Two axes make a map; `bins2d["query"].image` is the `ImageData` for one of them —

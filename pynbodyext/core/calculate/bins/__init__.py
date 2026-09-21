@@ -13,6 +13,7 @@ from .axes import BIN_ALGORITHMS, BinAxis, BinAxisAccessor, has_axes, has_axis, 
 from .nodes import Bin1D, BinND
 from .plot import BinPlotMixin
 from .result import BinNDResult, BinsResultEngine, SubBinNDResult
+from .sph_render import SphRender
 from .statistics import register_pipeline_transform
 
 __all__ = [
@@ -31,4 +32,5 @@ __all__ = [
     "BinsResultEngine",
     "BinParticlesAccessor",
     "BinPlotMixin",
+    "SphRender",
 ]
