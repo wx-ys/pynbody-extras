@@ -163,7 +163,8 @@ object a caller normally holds.
 - **`register_ops`** / `ImageData.register_ops("tessellation", TessellationOps)`
   adds a capability family through the registry, so a new processing stage is a new
   module and a registration — no base-class list to edit
-  (`ImageData.operations()` lists what is registered).
+  (`ImageData.views()` lists what is registered; an instance's `.ops` is a different
+  thing — the chain of operations already applied to *that* image).
 - **`ImageOp`** (`plot/image/ops.py`, next to the views and the registry) — one
   recorded step of a chain (`name`, `params`), appended to `ImageData.ops` by every
   processing method and summarised by `repr(image)`.

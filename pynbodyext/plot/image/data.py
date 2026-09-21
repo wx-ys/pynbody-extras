@@ -221,8 +221,23 @@ class ImageData:
         return register_ops(name, view, overwrite=overwrite)
 
     @classmethod
-    def operations(cls) -> dict[str, type[ImageDataView]]:
-        """The registered views, keyed by the attribute they answer to."""
+    def views(cls) -> dict[str, type[ImageDataView]]:
+        """The registered view *classes*, keyed by the attribute they answer to.
+
+        Two entry points by default — ``display`` and ``process`` — plus whatever a
+        plugin registered.  (``.ops`` on an instance is a different thing: the chain
+        of operations already applied to that image.)
+
+        Returns
+        -------
+        dict of str to type
+            A copy, so the registry cannot be edited by accident.
+
+        Examples
+        --------
+        >>> sorted(image.ImageData.views())  # doctest: +SKIP
+        ['display', 'process']
+        """
         return dict(OPERATIONS)
 
     def __getattr__(self, name: str) -> Any:

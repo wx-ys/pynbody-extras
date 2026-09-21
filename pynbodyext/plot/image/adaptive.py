@@ -59,6 +59,12 @@ class AdaptiveMap(ImageDataView):
     binned from and can be processed further; the attributes below describe the
     partition itself.
 
+    Two names reach the painted values, and they are the same array: :attr:`value`,
+    which is what this class calls it, and :attr:`data`, which every view of an image
+    exposes (see :class:`~pynbodyext.plot.image.ops.ImageDataView`).  Use ``value``
+    when you are thinking about the binning, ``data`` when you are feeding the map
+    into something that takes any image.
+
     Attributes
     ----------
     image : ImageData
@@ -66,8 +72,8 @@ class AdaptiveMap(ImageDataView):
         pixels stay non-finite.  ``.value``, ``.extent``, ``.x_edges`` … are
         shortcuts to it.
     value : numpy.ndarray
-        Per-pixel image painted with its bin's value; non-finite outside the
-        binned region.
+        The painted map, per pixel: its bin's value, and non-finite outside the
+        binned region.  Also available as ``.data``.
     bin_num : numpy.ndarray of int
         Bin index of every pixel, ``-1`` outside the binned region.
     bin_value, bin_capacity, bin_count, bin_signal : numpy.ndarray
@@ -105,7 +111,18 @@ class AdaptiveMap(ImageDataView):
 
     @property
     def value(self) -> np.ndarray:
-        """Per-pixel image painted with its bin's value; non-finite outside the binned region."""
+        """The painted map: each pixel carries its bin's value, ``NaN`` where unbinned.
+
+        The canonical name here — ``.data`` is the same array under the name every
+        view of an image uses.
+
+        Examples
+        --------
+        >>> binned.value.shape == binned.image.shape  # doctest: +SKIP
+        True
+        >>> np.isnan(binned.value[~binned.mask]).all()  # doctest: +SKIP
+        True
+        """
         return self.data
 
     @property

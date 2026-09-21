@@ -9,7 +9,6 @@ import pytest
 
 EXPECTED_NAMES = {
     "COLORBAR_LOCATIONS",
-    "DisplayOps",
     "AdaptiveMap",
     "ImageData",
     "ImageDataView",
@@ -20,9 +19,7 @@ EXPECTED_NAMES = {
     "SAURON_RGB",
     "SAURON_POSITIONS",
     "MapStyle",
-    "NoiseOps",
     "OPERATIONS",
-    "ProcessOps",
     "STRETCHES",
     "add_colorbar",
     "add_noise",

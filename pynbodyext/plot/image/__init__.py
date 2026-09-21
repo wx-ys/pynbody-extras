@@ -41,15 +41,14 @@ from .cmaps import (
 )
 from .compose import MapStyle, blend_images, blend_stack, compose_maps, create_map_mask, imshow_compose
 from .data import OPERATIONS, ImageData, ImageOp, as_image, register_ops
-from .display import COLORBAR_LOCATIONS, DisplayOps, add_colorbar
-from .noise import NoiseOps, add_noise, add_poisson_noise
-from .ops import ImageDataView, ImageOps, ProcessOps
+from .display import COLORBAR_LOCATIONS, add_colorbar
+from .noise import add_noise, add_poisson_noise
+from .ops import ImageDataView, ImageOps
 from .psf import convolve_psf, deconvolve_psf, gaussian_psf, normalize_psf, richardson_lucy, wiener_deconvolve
 from .smooth import STRETCHES, box_smooth, downsample, gaussian_smooth, median_filter, normalize
 
 __all__ = [
     "COLORBAR_LOCATIONS",
-    "DisplayOps",
     "AdaptiveMap",
     "ImageData",
     "ImageDataView",
@@ -60,9 +59,7 @@ __all__ = [
     "SAURON_RGB",
     "SAURON_POSITIONS",
     "MapStyle",
-    "NoiseOps",
     "OPERATIONS",
-    "ProcessOps",
     "STRETCHES",
     "add_colorbar",
     "add_noise",

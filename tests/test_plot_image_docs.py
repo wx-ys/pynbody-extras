@@ -42,7 +42,7 @@ IMPLEMENTED_BY = {
     (PsfOps, "deconvolve"): "deconvolve_psf",
     (NoiseOps, "gaussian"): "add_noise",
     (NoiseOps, "poisson"): "add_poisson_noise",
-    (ComposeOps, "stitch"): "compose_maps",
+    (ComposeOps, "__call__"): "compose_maps",
     (ComposeOps, "masks"): "create_map_mask",
     (ComposeOps, "imshow"): "imshow_compose",
     (AdaptiveOps, "bin"): "adaptive_bin_map",
@@ -57,7 +57,8 @@ def public_methods(cls: type) -> list[tuple[str, object]]:
     return [
         (name, member)
         for name, member in vars(cls).items()
-        if not name.startswith("_") and callable(member) and inspect.isfunction(member)
+        # ``__call__`` is the spelling for a whole family (``image.compose(other)``)
+        if (name == "__call__" or not name.startswith("_")) and callable(member) and inspect.isfunction(member)
     ]
 
 

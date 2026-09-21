@@ -411,12 +411,12 @@ def imshow_compose(
 class ComposeOps(ImageOps):
     """The stitching family of an image: ``image.process.compose(other, …)``.
 
-    Calling the view stitches this image with another one;
-    :meth:`ComposeOps.masks` exposes the transition masks, and
-    :meth:`ComposeOps.imshow` draws the pair with one colour bar each.
+    Calling the view is how you stitch: ``gas.compose(dm, style=…, other_style=…)``
+    returns the composited RGBA image.  :meth:`masks` exposes the transition masks on
+    their own and :meth:`imshow` draws the pair with one colour bar each.
     """
 
-    def stitch(
+    def __call__(
         self,
         other: Any,
         *,
@@ -428,19 +428,28 @@ class ComposeOps(ImageOps):
     ) -> np.ndarray:
         """Stitch this image together with *other* into one RGBA array.
 
+        Each map is rendered through its own colour map and the two are crossfaded
+        through :meth:`masks`, so a gas density map and a dark-matter map can share
+        one figure with no seam between them.
+
         Parameters
         ----------
         other : ImageData or array_like
             The second map; an image must have the same shape as this one.
         style, other_style : MapStyle, str or dict, optional
-            How each map becomes colours; *style* describes this image.
-        mask, line_angle, width :
-            As in :func:`compose_maps`; the mask weights this image.
+            How each map becomes colours; *style* describes this image.  A bare
+            colour-map name is accepted, so ``style="inferno"`` is enough.
+        mask : array_like, optional
+            Weight of this image in ``[0, 1]``; defaults to the soft line split.
+        line_angle : float, default: 45.0
+            Angle of that split, in degrees (see :meth:`masks`).
+        width : float, default: 0.1
+            Width of the transition band, as a fraction of the image diagonal.
 
         Returns
         -------
         numpy.ndarray
-            Float RGBA image.
+            Float RGBA image whose alpha channel is the coverage of the two maps.
 
         Examples
         --------
@@ -458,16 +467,13 @@ class ComposeOps(ImageOps):
             self.data, _values(other), style1=style, style2=other_style, mask=mask, line_angle=line_angle, width=width
         )
 
-    #: ``image.process.compose(other, …)`` is the shorthand for :meth:`stitch`.
-    __call__ = stitch
-
     def masks(
         self, line_angle: float = 45.0, width: float = 0.1, *, center: tuple[float, float] | None = None
     ) -> tuple[np.ndarray, np.ndarray]:
         """Split this image with two complementary soft masks.
 
         Useful on its own — to weight two layers, or to cut a region out of a map —
-        as well as behind :meth:`stitch`.
+        as well as behind ``image.compose(other, …)``.
 
         Parameters
         ----------

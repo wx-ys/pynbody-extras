@@ -154,6 +154,7 @@ def test_adaptive_map_is_a_view_of_its_painted_image() -> None:
     assert not isinstance(binned, ImageOps)  # it is a result, not a capability
     assert binned.value is binned.image.data
     assert binned.data is binned.image.data
+    assert binned.value is binned.data  # one array, two documented names
     assert (binned.shape, binned.extent) == (binned.image.shape, binned.image.extent)
     assert (binned.x_units, binned.label) == (binned.image.x_units, binned.image.label)
     np.testing.assert_array_equal(binned.x_edges, binned.image.x_edges)
@@ -200,8 +201,8 @@ def test_a_new_family_is_reachable_without_touching_image_data(toy_family: objec
 
     assert isinstance(source.toy, ImageOps)
     np.testing.assert_allclose(doubled.data, source.data * 2.0)
-    assert "toy" in ImageData.operations()
-    assert ImageData.operations()["toy"] is ToyOps
+    assert "toy" in ImageData.views()
+    assert ImageData.views()["toy"] is ToyOps
 
 
 def test_register_ops_works_as_a_decorator(toy_family: object) -> None:
@@ -209,7 +210,7 @@ def test_register_ops_works_as_a_decorator(toy_family: object) -> None:
     class Registered(ImageOps):
         pass
 
-    assert ImageData.operations()["toy"] is Registered
+    assert ImageData.views()["toy"] is Registered
     assert isinstance(image().toy, Registered)
 
 
