@@ -54,6 +54,7 @@ __all__ = [
     "get_statistic",
     "evaluate_statistic",
     "is_statistic_name",
+    "weighted_percentiles",
     "register_pipeline_transform",
     # built-in statistics
     "Mean",
@@ -323,6 +324,100 @@ def _bincount_nan(bins: np.ndarray, values: np.ndarray, nbins: int) -> tuple[np.
     return counts, sums
 
 
+def weighted_percentiles(values: Any, weights: Any, percentile: float) -> np.ndarray | float:
+    """Weighted percentile of one sample, or of every row of a 2-D sample.
+
+    The definition is the one the weighted :class:`Percentile` has always used: the
+    pairs are sorted by value, the cumulative weight is shifted so the lightest
+    value sits at zero, normalised by the total, and the percentile is
+    interpolated along that curve.  Two details matter at the edges:
+
+    - a sample whose weight sits on a single value *is* that value (there is no
+      curve to interpolate, and previously this came back as ``NaN``);
+    - values that are not finite carry no information and are dropped, as the
+      kernel sums drop them — weights and values have to be finite together.
+
+    Parameters
+    ----------
+    values : array_like
+        One sample, 1-D, or one sample per row, 2-D.
+    weights : array_like
+        Per-value weights, the same shape as *values*.  Only positive weights
+        enter the cumulative distribution.
+    percentile : float
+        Percentile in ``[0, 100]``.
+
+    Returns
+    -------
+    numpy.ndarray or float
+        A float for a 1-D sample, else one value per row, ``NaN`` where nothing
+        carries weight.
+
+    Examples
+    --------
+    >>> weighted_percentiles([1.0, 2.0, 3.0], [1.0, 1.0, 1.0], 50.0)
+    2.0
+    >>> weighted_percentiles([[1.0, 2.0], [3.0, 4.0]], [[1.0, 1.0], [1.0, 3.0]], 50.0)
+    array([1.5, 3.5])
+    """
+    values_array = np.asarray(values, dtype=float)
+    weights_array = np.asarray(weights, dtype=float)
+    if values_array.shape != weights_array.shape:
+        raise ValueError(
+            f"values and weights must have the same shape, got {values_array.shape} and {weights_array.shape}."
+        )
+    single = values_array.ndim == 1
+    if single:
+        values_array = values_array[None, :]
+        weights_array = weights_array[None, :]
+    if values_array.ndim != 2:
+        raise ValueError(f"values must be 1-D or 2-D, got shape {values_array.shape}.")
+
+    carries = (weights_array > 0.0) & np.isfinite(values_array)
+    counts = carries.sum(axis=1)
+    out = np.full(len(values_array), np.nan)
+
+    # Sorting puts the weighted, finite values first: everything else is +inf.
+    sortable = np.where(carries, values_array, np.inf)
+    order = np.argsort(sortable, axis=1, kind="stable")
+    sorted_values = np.take_along_axis(sortable, order, axis=1)
+    sorted_weights = np.take_along_axis(np.where(carries, weights_array, 0.0), order, axis=1)
+
+    one_point = counts == 1
+    if one_point.any():
+        out[one_point] = sorted_values[one_point, 0]
+
+    several = counts > 1
+    if several.any():
+        width = int(counts.max())
+        columns = np.arange(width)[None, :]
+        valid = columns < counts[:, None]
+        sample = np.where(valid, sorted_values[:, :width], np.nan)
+        weight = np.where(valid, sorted_weights[:, :width], 0.0)
+        # The lightest value sits at zero, and the total excludes it, exactly as
+        # the scalar definition does; padding is +inf so it can never bracket the
+        # percentile.
+        cdf = np.cumsum(weight, axis=1)
+        total = cdf[:, -1] - cdf[:, 0]
+        with np.errstate(invalid="ignore", divide="ignore"):
+            cdf = (cdf - cdf[:, :1]) / total[:, None]
+        cdf = np.where(valid, cdf, np.inf)
+
+        # np.interp's lookup, done for every row at once: the bracket is the entry
+        # the percentile falls into, and a target on a knot interpolates to it.
+        rows = np.arange(len(values_array))
+        target = float(percentile) / 100.0
+        index = np.clip((cdf < target).sum(axis=1), 1, width - 1)
+        low, high = cdf[rows, index - 1], cdf[rows, index]
+        below, above = sample[rows, index - 1], sample[rows, index]
+        with np.errstate(invalid="ignore", divide="ignore"):
+            fraction = np.where(high > low, (target - low) / (high - low), 0.0)
+        interpolated = below + np.nan_to_num(fraction) * (above - below)
+        out[several] = interpolated[several]
+
+    return float(out[0]) if single else out
+
+
 # ---------------------------------------------------------------------------
 # Built-in statistics
 # ---------------------------------------------------------------------------
@@ -395,18 +490,7 @@ class Percentile(BinStatisticBase):
         a = _as_float(arr)
         if weight is None:
             return float(np.percentile(a, self.percentile))
-        idx = np.argsort(a)
-        a_sorted = a[idx]
-        w_sorted = _as_float(weight)[idx]
-        cdf = np.cumsum(w_sorted)
-        cdf -= cdf[0]
-        total = float(cdf[-1])
-        if total == 0.0:
-            # The weights put everything on the first value (or on none of them):
-            # a one-point distribution's percentile is that point, not a NaN.
-            return float(a_sorted[0]) if w_sorted[0] != 0.0 else float("nan")
-        cdf /= total
-        return float(np.interp(self.percentile / 100.0, cdf, a_sorted))
+        return float(weighted_percentiles(a, _as_float(weight), self.percentile))
 
     @classmethod
     def valid(cls, key: str) -> Percentile | None:
@@ -422,9 +506,10 @@ class Median(BinStatisticBase):
     """Median (equivalent to p50)."""
 
     example_name = "median"
+    percentile = 50.0
 
     def __call__(self, arr: np.ndarray, weight: np.ndarray | None) -> float:
-        return Percentile("p50", 50.0)(arr, weight)
+        return Percentile("p50", self.percentile)(arr, weight)
 
     @classmethod
     def valid(cls, key: str) -> Median | None:

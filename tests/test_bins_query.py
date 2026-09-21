@@ -64,3 +64,28 @@ def test_a_weighted_percentile_of_one_particle_is_that_particle() -> None:
     assert Percentile("p16", 16.0)(values, weights) == 42.0
     assert Median("median")(values, weights) == 42.0
     assert np.isnan(Percentile("p16", 16.0)(values, np.zeros(1)))
+
+
+def test_vectorised_percentiles_agree_with_the_statistic_row_by_row() -> None:
+    """``weighted_percentiles`` is the statistics' one definition, done in bulk."""
+    import pytest
+
+    from pynbodyext.core.calculate.bins.statistics import Percentile, weighted_percentiles
+
+    rng = np.random.default_rng(3)
+    values = rng.normal(size=(200, 17))
+    weights = rng.uniform(0.0, 2.0, size=(200, 17))
+    weights[rng.random(weights.shape) < 0.3] = 0.0  # particles outside the support
+    values[0] = np.nan  # nothing usable
+    values[1, 1:] = np.nan  # one usable point
+    weights[2, 1:] = 0.0  # one positive weight
+
+    for percentile in (0.0, 16.0, 50.0, 84.0, 100.0):
+        statistic = Percentile(f"p{percentile:g}", percentile)
+        bulk = weighted_percentiles(values, weights, percentile)
+        row_by_row = np.array([statistic(values[i], weights[i]) for i in range(len(values))])
+
+        np.testing.assert_allclose(bulk, row_by_row, rtol=1e-12, atol=1e-12, equal_nan=True)
+    assert isinstance(weighted_percentiles(values[3], weights[3], 50.0), float)
+    with pytest.raises(ValueError, match="same shape"):
+        weighted_percentiles(np.ones(3), np.ones(4), 50.0)

@@ -138,8 +138,8 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   unequal y/z resolution that trips pynbody's z-pixel bug warns rather than
   returning something different, the mean-likes are kernel sums while
   `median`/`pXX` are weighted quantiles over the 64 nearest particles per cell
-  (same statistics objects, so the definitions cannot drift), and the C++ KD-tree
-  underneath comes from scipy/pynbody rather than a new extension.
+  (same definition, reduced for all cells in one vectorised call), and the C++
+  KD-tree underneath comes from scipy/pynbody rather than a new extension.
 
 ## Image layer (`pynbodyext/plot/image/`)
 

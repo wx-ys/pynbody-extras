@@ -54,10 +54,11 @@ Two engines share that query, because not every statistic is a sum:
 - **the quantiles** — ``median`` and the percentiles ``pXX`` — take a weighted
   quantile over the :attr:`SphRender.neighbours` particles nearest each cell
   centre, since a quantile is not linear in the weights and so cannot be a kernel
-  sum.  They reuse the *same* statistic objects the strict query uses, so a
-  quantile means the same thing in both: ``"vz.abs.p16@mass"`` is the
-  mass-weighted 16th percentile of ``|vz|``, and ``"vz.median"`` is the weighted
-  median, which need not equal ``"vz.mean"``.
+  sum.  They reuse the *same* definition the strict query uses — through
+  :func:`~.statistics.weighted_percentiles`, which reduces every cell in one
+  vectorised call — so a quantile means the same thing in both:
+  ``"vz.abs.p16@mass"`` is the mass-weighted 16th percentile of ``|vz|``, and
+  ``"vz.median"`` is the weighted median, which need not equal ``"vz.mean"``.
 
 Requirements
 ------------
@@ -94,7 +95,6 @@ import numpy as np
 from .query import _wrap
 from .statistics import (
     RMS,
-    BinStatisticBase,
     Dispersion,
     Mean,
     Median,
@@ -102,6 +102,7 @@ from .statistics import (
     Sum,
     apply_pipeline,
     parse_pipeline_key,
+    weighted_percentiles,
 )
 
 if TYPE_CHECKING:
@@ -260,7 +261,7 @@ class SphRender:
         raise TypeError(f"{statistic!r} has no kernel-weighted form.")
 
     def _quantile(
-        self, statistic: BinStatisticBase, values: np.ndarray, weights: np.ndarray | None, plan: dict[str, Any]
+        self, statistic: Percentile | Median, values: np.ndarray, weights: np.ndarray | None, plan: dict[str, Any]
     ) -> np.ndarray:
         """A kernel-weighted quantile per cell, over that cell's nearest particles.
 
@@ -302,15 +303,12 @@ class SphRender:
         weight = np.where(missing, 0.0, weight * plan["measure"])
         if weights is not None:
             weight = weight * weights[neighbour]
-        field = values[neighbour]
-        quantiles = np.full(len(centres), np.nan)
-        for index in range(len(centres)):
-            # Only the particles the kernel actually reaches: a zero-weight entry
-            # would still sit in the cumulative distribution and can drag the
-            # interpolation onto a plateau.
-            reached = weight[index] > 0.0
-            quantiles[index] = statistic(field[index][reached], weight[index][reached])
-        return quantiles.reshape(shape)
+        # One call for every cell: the reduction is the same weighted percentile
+        # the scalar statistic computes, parameterised differently.  Particles the
+        # kernel does not reach (or whose value is not finite) carry no weight and
+        # drop out there.
+        quantiles = weighted_percentiles(values[neighbour], weight, statistic.percentile)
+        return np.asarray(quantiles, dtype=float).reshape(shape)
 
     # ------------------------------------------------------------------ plan
     def _layout(self) -> dict[str, Any]:
