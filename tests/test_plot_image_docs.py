@@ -9,6 +9,7 @@ that from drifting back.
 from __future__ import annotations
 
 import inspect
+import re
 
 import pytest
 
@@ -62,6 +63,52 @@ def public_methods(cls: type) -> list[tuple[str, object]]:
     ]
 
 
+#: Phrases that push a reader to another function instead of explaining the argument.
+POINTER_STARTS = ("as in ", "forwarded to ", "forwarded ", "see ", "cf.", "same as ", "as for ")
+
+
+def parameter_entry(doc: str, parameter: str) -> str:
+    """The description of *parameter* from a NumPy-style ``Parameters`` block.
+
+    Handles the grouped form (``vmin, vmax : float``) and multi-line descriptions,
+    so a caller can ask "does this argument actually say what it does?".
+    """
+    lines = doc.splitlines()
+    try:
+        start = next(index for index, line in enumerate(lines) if line.strip() == "Parameters")
+    except StopIteration:
+        return ""
+
+    def is_header(index: int) -> bool:
+        """A section header is a title line underlined with dashes."""
+        return index + 1 < len(lines) and set(lines[index + 1].strip()) == {"-"} and bool(lines[index + 1].strip())
+
+    block: list[tuple[int, str]] = []
+    for index in range(start + 1, len(lines)):
+        if is_header(index):
+            break
+        block.append((index, lines[index]))
+
+    for position, (index, line) in enumerate(block):
+        header, colon, description = line.partition(":")
+        if not colon:
+            continue
+        names = [name.strip().strip("*") for name in header.split(",")]
+        if parameter not in names:
+            continue
+        indent = len(line) - len(line.lstrip())
+        text = [description.strip()]
+        for _, following in block[position + 1 :]:
+            if not following.strip():
+                text.append("")
+                continue
+            if len(following) - len(following.lstrip()) <= indent:
+                break
+            text.append(following.strip())
+        return " ".join(part for part in text if part).strip()
+    return ""
+
+
 @pytest.mark.parametrize("cls", USER_FACING, ids=lambda cls: cls.__name__)
 def test_every_method_documents_summary_parameters_returns_and_an_example(cls: type) -> None:
     missing = []
@@ -92,9 +139,26 @@ def test_every_docstring_names_its_parameters(cls: type) -> None:
         for parameter, spec in inspect.signature(member).parameters.items():
             if parameter == "self" or spec.kind in (spec.VAR_KEYWORD, spec.VAR_POSITIONAL):
                 continue  # ``*args``/``**kwargs`` are described as one block
-            if f"{parameter} " not in doc and f"{parameter}:" not in doc and f"{parameter}," not in doc:
+            if not parameter_entry(doc, parameter):
                 undocumented.append(f"{name}({parameter})")
     assert not undocumented, f"{cls.__name__} does not describe: {', '.join(undocumented)}"
+
+
+@pytest.mark.parametrize("cls", USER_FACING, ids=lambda cls: cls.__name__)
+def test_parameter_descriptions_are_self_contained(cls: type) -> None:
+    """No "As in ``the_function``" — the method has to explain its own arguments."""
+    pointing = []
+    for name, member in public_methods(cls):
+        doc = inspect.getdoc(member) or ""
+        for parameter, spec in inspect.signature(member).parameters.items():
+            if parameter == "self" or spec.kind in (spec.VAR_KEYWORD, spec.VAR_POSITIONAL):
+                continue
+            entry = parameter_entry(doc, parameter)
+            if not entry:
+                continue  # reported by the test above
+            if entry.lower().startswith(POINTER_STARTS):
+                pointing.append(f"{name}({parameter}) -> {entry[:60]!r}")
+    assert not pointing, f"{cls.__name__} sends readers to another function: {'; '.join(pointing)}"
 
 
 @pytest.mark.parametrize(
@@ -104,4 +168,6 @@ def test_every_docstring_names_its_parameters(cls: type) -> None:
 )
 def test_methods_name_the_function_that_implements_them(cls: type, method: str) -> None:
     doc = inspect.getdoc(getattr(cls, method)) or ""
-    assert IMPLEMENTED_BY[(cls, method)] in doc, f"{cls.__name__}.{method} should point at {IMPLEMENTED_BY[(cls, method)]}"
+    assert IMPLEMENTED_BY[(cls, method)] in doc, (
+        f"{cls.__name__}.{method} should point at {IMPLEMENTED_BY[(cls, method)]}"
+    )

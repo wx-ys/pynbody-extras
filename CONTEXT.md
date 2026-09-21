@@ -198,6 +198,12 @@ object a caller normally holds.
   levels become geometric as well), and `norm="symlog"`, `"logit"`, `"asinh"` and
   `"linear"` are accepted where this matplotlib has them; an unknown name is an
   error rather than a silently linear scale.
+- **Every user-facing method documents its own arguments.** The free functions stay
+  the detailed reference, but a method may not answer a parameter with "as in
+  :func:`the_function`" — it lists its own `Parameters`, `Returns` and an `Examples`
+  block, and names the function that implements it. `tests/test_plot_image_docs.py`
+  enforces that, rejecting pointer-style parameter entries, because the methods are
+  what users read.
   A `MapStyle` may carry a `norm` too (or a `stretch`, not both), and
   `MapStyle.norm_for(data)` — used by `compose.imshow` — returns a norm matching the
   stretch exactly (`FuncNorm` over the data range, per `stretch_functions`), so a

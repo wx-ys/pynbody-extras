@@ -505,18 +505,39 @@ class ComposeOps(ImageOps):
         """
         return create_map_mask(self.data, line_angle=line_angle, width=width, center=center)
 
-    def imshow(self, other: Any, **kwargs: Any) -> Any:
+    def imshow(
+        self,
+        other: Any,
+        *,
+        ax: Any = None,
+        extent: tuple[float, float, float, float] | None = None,
+        colorbars: bool = True,
+        style: MapStyle | str | dict[str, Any] | None = None,
+        other_style: MapStyle | str | dict[str, Any] | None = None,
+        label1: str | None = None,
+        label2: str | None = None,
+        **kwargs: Any,
+    ) -> Any:
         """Draw this image stitched with *other*, with one colour bar each.
 
         Parameters
         ----------
         other : ImageData or array_like
             The second map.
+        ax : matplotlib.axes.Axes, optional
+            Axes to draw on; a new figure is created when omitted.
+        extent : (float, float, float, float), optional
+            ``(xmin, xmax, ymin, ymax)`` of the maps.
+        colorbars : bool, default: True
+            Draw one colour bar per map, on the left and right of the image.
         style, other_style : MapStyle, str or dict, optional
-            How each map becomes colours; *style* describes this image.
+            How each map becomes colours; *style* describes this image.  The same
+            styles decide what the two colour bars show, including their norm.
+        label1, label2 : str, optional
+            Colour-bar labels, e.g. ``"gas"`` and ``"dark matter"``.
         **kwargs
-            Forwarded to :func:`imshow_compose`, e.g. ``ax``, ``extent``,
-            ``label1``/``label2``.
+            Forwarded to :func:`imshow_compose` beyond the above, e.g. ``line_angle``,
+            ``width``, ``mask`` or ``figsize``.
 
         Returns
         -------
@@ -538,11 +559,18 @@ class ComposeOps(ImageOps):
         :func:`~pynbodyext.plot.image.compose.imshow_compose` :
             The array-level form.
         """
-        # ``style``/``other_style`` are this image's names for the pair; the free
-        # function's ``style1``/``style2`` are accepted as well.
-        style1 = kwargs.pop("style1", kwargs.pop("style", None))
-        style2 = kwargs.pop("style2", kwargs.pop("other_style", None))
-        return imshow_compose(self.data, _values(other), style1=style1, style2=style2, **kwargs)
+        return imshow_compose(
+            self.data,
+            _values(other),
+            ax=ax,
+            extent=extent,
+            colorbars=colorbars,
+            style1=style,
+            style2=other_style,
+            label1=label1,
+            label2=label2,
+            **kwargs,
+        )
 
 
 def _values(value: Any) -> np.ndarray:

@@ -1046,7 +1046,23 @@ class DisplayOps(ImageOps):
             **kwargs,
         )
 
-    def add_colorbar(self, mappable: Any = None, ax: Axes | None = None, **kwargs: Any) -> Colorbar:
+    def add_colorbar(
+        self,
+        mappable: Any = None,
+        ax: Axes | None = None,
+        *,
+        loc: str = "right",
+        size: str = "5%",
+        pad: float = 0.05,
+        label: str | None = None,
+        label_pad: float = 2.0,
+        tick_label_size: float = 10.0,
+        norm: Normalize | str | None = None,
+        log: bool = False,
+        vmin: float | None = None,
+        vmax: float | None = None,
+        **kwargs: Any,
+    ) -> Colorbar:
         """Dock a colour bar to the panel showing this image.
 
         Parameters
@@ -1057,10 +1073,28 @@ class DisplayOps(ImageOps):
             drawing.
         ax : matplotlib.axes.Axes, optional
             Panel to dock to; defaults to the artist's axes, then the current axes.
+        loc : {"right", "left", "top", "bottom"}, default: "right"
+            Side of the panel to dock to; top and bottom give a horizontal bar.
+        size : str, default: "5%"
+            Thickness of the bar relative to the panel.
+        pad : float, default: 0.05
+            Gap between the panel and the bar, in inches.
+        label : str, optional
+            Axis label of the bar; defaults to the image's ``label`` and ``units``.
+        label_pad : float, default: 2.0
+            Padding between the ticks and their labels.
+        tick_label_size : float, default: 10.0
+            Font size of the tick labels.
+        norm : matplotlib.colors.Normalize or str, optional
+            Colour scale for a bar built from an image, e.g. ``LogNorm()`` or
+            ``"log"``.  A drawn artist brings its own.
+        log : bool, default: False
+            Build a logarithmic bar over the positive values (or *vmin*/*vmax*); it
+            must agree with the artist when one is given.
+        vmin, vmax : float, optional
+            Limits for that logarithmic scale.
         **kwargs
-            Forwarded to :func:`~pynbodyext.plot.image.display.add_colorbar`: ``loc``,
-            ``size``, ``pad``, ``label``, ``label_pad``, ``tick_label_size``, and
-            ``norm=``/``log=`` when the bar is built from an image.
+            Forwarded to ``Figure.colorbar``, e.g. ``format`` or ``ticks``.
 
         Returns
         -------
@@ -1072,7 +1106,21 @@ class DisplayOps(ImageOps):
         >>> density.display.draw(cmap="inferno")  # doctest: +SKIP
         >>> density.display.add_colorbar(loc="bottom", size="6%")  # doctest: +SKIP
         """
-        return add_colorbar(self.image if mappable is None else mappable, ax=ax, **kwargs)
+        return add_colorbar(
+            self.image if mappable is None else mappable,
+            ax=ax,
+            loc=loc,
+            size=size,
+            pad=pad,
+            label=label,
+            label_pad=label_pad,
+            tick_label_size=tick_label_size,
+            norm=norm,
+            log=log,
+            vmin=vmin,
+            vmax=vmax,
+            **kwargs,
+        )
 
 
 register_ops("display", DisplayOps)

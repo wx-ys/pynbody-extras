@@ -355,9 +355,24 @@ class PsfOps(ImageOps):
         Parameters
         ----------
         psf : array_like, optional
-            Measured kernel; or give ``fwhm``/``sigma`` for a Gaussian one.
-        fwhm, sigma, mode, method, mask, normalize, **psf_kwargs :
-            As in :func:`convolve_psf`.
+            The kernel to convolve with — from :func:`gaussian_psf` or a measured
+            PSF.  Give either *psf* or ``fwhm``/``sigma``.
+        fwhm, sigma : float, optional
+            Width of a Gaussian kernel built on the fly, in the units of the axes when
+            the grid is evenly spaced, and in pixels otherwise.  Give one of the two.
+        mode : str, default: "same"
+            Output size, as in ``scipy.signal.fftconvolve``.
+        method : {"auto", "fft", "direct"}, default: "auto"
+            Convolution implementation; ``"auto"`` uses FFT for kernels larger than 64
+            pixels and a direct convolution otherwise.
+        mask : array_like of bool, optional
+            Pixels to include; the rest neither contribute nor receive signal, and an
+            image-like mask is oriented for you.
+        normalize : bool, default: True
+            Scale the kernel to unit sum first, so that flux is preserved.
+        **psf_kwargs
+            Forwarded to :func:`gaussian_psf` when a Gaussian kernel is built, e.g.
+            ``e``, ``theta``, ``size`` or ``pixel_scale``.
 
         Returns
         -------

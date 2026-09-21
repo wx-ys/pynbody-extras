@@ -465,15 +465,43 @@ class AdaptiveOps(ImageOps):
     ) -> AdaptiveMap:
         """Bin this image adaptively by *signal*, keeping its geometry.
 
+        Pixels are merged into regions of comparable signal — a Voronoi-like
+        tessellation — and every binned pixel is painted with its region's value: a
+        noisy map comes out clean where there is signal, and stays empty where there
+        is none.
+
         Parameters
         ----------
         signal : ImageData or array_like
-            Signal strength driving the bin size, e.g. the ``mass.sum`` map that
-            goes with this ``vz.mean`` map.
+            Signal strength driving the bin size, e.g. the ``mass.sum`` map that goes
+            with this ``vz.mean`` map.  A binned array is oriented for you.
         noise : ImageData or array_like, optional
-            Per-pixel noise, turning the capacity into ``(S/N)**2``.
-        target_capacity, target_signal, target_nbins, mask, min_signal, method, regul, maxiter, verbose :
-            As in :func:`adaptive_bin_map`; give exactly one target.
+            Per-pixel noise, which turns the capacity into ``(signal / noise)**2`` —
+            the usual ``(S/N)**2``.
+        target_capacity : float, optional
+            Capacity every bin should reach, in capacity units.  Give exactly one of
+            the three targets.
+        target_signal : float, optional
+            Total signal every bin should reach.  Without *noise* that is the same
+            thing as *target_capacity*; with a noise map the capacity is
+            ``(S/N)**2`` and the two differ, so pass a capacity instead.
+        target_nbins : int, optional
+            Number of bins to aim for; the capacity then follows from the total
+            signal.
+        mask : array_like of bool, optional
+            Pixels that may be binned; the rest stay unbinned and transparent.
+        min_signal : float, optional
+            Drop pixels fainter than this — the "only show the high-signal region"
+            switch.
+        method : {"mean", "median", "sum", "weighted"}, default: "mean"
+            How the pixels of a region are reduced to its value; ``"weighted"``
+            weights pixels by their capacity.
+        regul : bool, default: True
+            Let PowerBin regularise the bin shapes; off means accretion only.
+        maxiter : int, default: 50
+            Maximum number of regularisation iterations.
+        verbose : int, default: 0
+            PowerBin verbosity; the default keeps the library quiet.
 
         Returns
         -------
@@ -484,8 +512,17 @@ class AdaptiveOps(ImageOps):
         --------
         >>> velocity = ImageData.from_bins(bins2d, "vz.mean")  # doctest: +SKIP
         >>> mass = ImageData.from_bins(bins2d, "mass.sum")  # doctest: +SKIP
-        >>> binned = velocity.adaptive.bin(mass, target_nbins=200)  # doctest: +SKIP
-        >>> binned.display.draw(cmap="sauron", symmetric=True)  # doctest: +SKIP
+        >>> binned = velocity.process.adaptive.bin(mass, target_nbins=200)  # doctest: +SKIP
+        >>> binned.display.draw(cmap="sauron", symmetric=True, colorbar=True)  # doctest: +SKIP
+        >>> binned.n_bins  # doctest: +SKIP
+        196
+
+        See Also
+        --------
+        :func:`~pynbodyext.plot.image.adaptive.adaptive_bin_map` :
+            The array-level form, with the binning details.
+        :class:`~pynbodyext.plot.image.adaptive.AdaptiveMap` :
+            What comes back: the regions, their statistics and the painted map.
         """
         return adaptive_bin_map(
             self.data,
