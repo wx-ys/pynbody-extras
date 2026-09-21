@@ -155,6 +155,27 @@ def test_unknown_keys_are_rejected() -> None:
         bins.sph_render["nonsense"]
 
 
+def test_a_quantile_is_refused_unless_the_exact_engine_is_asked_for() -> None:
+    """The default reaches only what a kernel sum can hold."""
+    bins = make_bins(make_sim(500))
+
+    with pytest.raises(ValueError, match="exact=True"):
+        bins.sph_render["vz.median"]
+
+    assert np.isfinite(np.asarray(bins.sph_render_exact["vz.median"])).any()
+
+
+def test_the_kernel_sums_do_not_depend_on_the_engine_choice() -> None:
+    """``exact`` is about the quantiles: the sums are the renderer either way."""
+    bins = make_bins(make_sim(500))
+
+    for key in ("count", "mass.sum", "vz.mean", "vz.mean@mass", "vz.disp"):
+        plain = np.asarray(bins.sph_render[key])
+        exact = np.asarray(SphRender(bins, exact=True)[key])
+
+        np.testing.assert_allclose(plain, exact, equal_nan=True)
+
+
 # ---------------------------------------------------------------------------
 # the two-dimensional (projected) engine
 # ---------------------------------------------------------------------------
@@ -363,7 +384,7 @@ def test_a_median_of_one_particle_is_that_particle() -> None:
     sim["smooth"] = SimArray([1.0], "kpc")
     bins = make_bins(sim)
 
-    median = np.asarray(bins.sph_render["vz.median"])
+    median = np.asarray(bins.sph_render_exact["vz.median"])
     count = np.asarray(bins.sph_render["count"])
 
     np.testing.assert_allclose(median[count > 0.0], 42.0)
@@ -375,7 +396,7 @@ def test_a_constant_field_has_the_same_median_as_mean() -> None:
     sim = make_sim(2000)
     sim["const"] = SimArray(np.full(len(sim), 7.0), "km s**-1")
     bins = make_bins(sim)
-    render = SphRender(bins)
+    render = SphRender(bins, exact=True)
 
     count = np.asarray(bins.sph_render["count"])
     for key in ("const.median", "const.p16", "const.mean"):
@@ -396,7 +417,7 @@ def test_quantiles_match_a_brute_force_weighted_quantile() -> None:
     y = Bin1D("y", vmin=-span / 2, vmax=span / 2, nbins=nbins, alias="y")
     bins = (x @ y)(sim)
 
-    rendered = np.asarray(bins.sph_render["vz.abs.p16@mass"])
+    rendered = np.asarray(SphRender(bins, exact=True)["vz.abs.p16@mass"])
 
     reference = reference_quantile(
         np.asarray(sim["pos"]),
@@ -427,7 +448,7 @@ def test_a_grid_taller_than_one_slab_is_scattered_correctly() -> None:
     y = Bin1D("y", vmin=-span / 2, vmax=span / 2, nbins=nbins_y, alias="y")
     bins = (x @ y)(sim)
 
-    rendered = np.asarray(bins.sph_render["vz.median"])
+    rendered = np.asarray(SphRender(bins, exact=True)["vz.median"])
 
     reference = reference_quantile(
         np.asarray(sim["pos"]),
@@ -448,7 +469,7 @@ def test_quantiles_respect_transforms_weights_and_units() -> None:
     sim = make_sim(3000)
     bins = make_bins(sim)
 
-    render = SphRender(bins)
+    render = SphRender(bins, exact=True)
     absolute = render["vz.abs.p16"]
     weighted = render["vz.abs.p16@mass"]
 
@@ -465,7 +486,7 @@ def test_a_quantile_then_a_kernel_sum_still_works() -> None:
     """pynbody caches its kernel table per kernel: ask for it in its own dtype."""
     bins = make_bins(make_sim(500))
 
-    median = np.asarray(bins.sph_render["vz.median"])
+    median = np.asarray(bins.sph_render_exact["vz.median"])
     mean = np.asarray(bins.sph_render["vz.mean"])
 
     assert median.shape == mean.shape == (NBINS, NBINS)
@@ -496,10 +517,10 @@ def make_periodic_sim(boxsize: float, *, span: float = 1000.0, h: float = 20.0, 
 
 
 def test_a_quantile_accepts_coordinates_outside_the_box() -> None:
-    """scipy's periodic tree wants [0, L); snapshots are not written that way."""
+    """Snapshots put particles outside [0, L); the scatter handles that."""
     bins = make_periodic_sim(1000.0, count=200)
 
-    median = np.asarray(bins.sph_render["vz.median"])
+    median = np.asarray(bins.sph_render_exact["vz.median"])
 
     assert median.shape == (32, 32)
     assert np.isfinite(median).any()
@@ -510,7 +531,7 @@ def test_the_box_wraps_the_quantile_neighbours_as_the_sums_do() -> None:
     bins = make_periodic_sim(1000.0)
 
     count = np.asarray(bins.sph_render["count"])
-    median = np.asarray(bins.sph_render["vz.median"])
+    median = np.asarray(bins.sph_render_exact["vz.median"])
 
     for cell in (0, -1):  # either side of the periodic boundary
         assert count[cell, 16] > 0.0
@@ -518,7 +539,7 @@ def test_the_box_wraps_the_quantile_neighbours_as_the_sums_do() -> None:
     # without a box, the far side is simply far away
     open_bins = make_periodic_sim(0.0)
     assert np.asarray(open_bins.sph_render["count"])[-1, 16] == 0.0
-    assert np.isnan(np.asarray(open_bins.sph_render["vz.median"])[-1, 16])
+    assert np.isnan(np.asarray(open_bins.sph_render_exact["vz.median"])[-1, 16])
 
 
 def test_a_mixed_particle_set_points_at_the_family_with_smoothing() -> None:

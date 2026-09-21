@@ -46,11 +46,12 @@ With those in mind:
 - ``transform``s act on the *particle* values before smoothing, so
   ``"vz.abs.mean@mass"`` is the mass-weighted mean of ``|vz|``.
 
-Two engines share that query, because not every statistic is a sum:
+Two engines share that query, because not every statistic is a sum, and only one of
+them is on by default:
 
 - **the kernel sums** — ``count``, ``sum`` and the mean-likes (``mean``, ``rms``,
   ``disp``) — accumulate over the whole kernel support, which is what pynbody's
-  renderer does;
+  renderer does in C.  They are the default, and they are exact;
 - **the quantiles** — ``median`` and the percentiles ``pXX`` — are weighted
   quantiles over **every particle the kernel reaches**, since a quantile is not
   linear in the weights and so cannot be a kernel sum.  They are built by
@@ -66,6 +67,13 @@ Two engines share that query, because not every statistic is a sum:
   a real snapshot holds hundreds inside ``2h``, so that truncated the weight by up
   to 44% and moved medians by tens of km/s.  Scattering is why there is no such
   parameter now.)
+
+  Scattering is not free — it must gather and sort every particle-cell pair, tens
+  of times the cost of a kernel sum — so it is **opt-in**: ``SphRender(...,
+  exact=True)``, or the :attr:`BinNDResult.sph_render_exact` shortcut.  With the
+  default view a quantile query raises and says so, rather than being answered by
+  something cheaper that means something else.  ``exact`` affects the quantiles
+  only; the kernel sums are identical either way.
 
 Requirements
 ------------
@@ -164,6 +172,14 @@ class SphRender:
         renderer does.  Turning it off restricts the render to the box.  The
         quantiles wrap the query into the box for the same reason (they search
         their own tree), so both engines agree across a boundary.
+    exact : bool, default: False
+        Whether the *quantiles* may use the exact scattering engine.  The kernel
+        sums — ``count``, ``sum``, ``mean``, ``rms``, ``disp`` — never need it:
+        pynbody's C renderer accumulates exactly those.  A quantile (``median``,
+        ``pXX``) is not a kernel sum, so with ``exact=False`` it is refused rather
+        than approximated; passing ``True`` builds each cell's complete set of
+        ``(value, weight)`` pairs by scattering, which is exact and costs tens of
+        times a kernel sum.
 
     Examples
     --------
@@ -178,11 +194,13 @@ class SphRender:
         kernel: str | KernelBase | None = None,
         smooth_floor: float = 0.0,
         wrap: bool = True,
+        exact: bool = False,
     ) -> None:
         self._result = result
         self._kernel_spec = kernel
         self._smooth_floor = float(smooth_floor)
         self._wrap = bool(wrap)
+        self._exact = bool(exact)
         self._renders: dict[str, BinsArray] = {}
         self._plan: dict[str, Any] | None = None
 
@@ -232,6 +250,13 @@ class SphRender:
                     f"sph_render does not support the {statistic.key!r} statistic: it is neither a ratio "
                     "of kernel sums nor a weighted quantile. Use 'sum', 'mean', 'rms', 'disp', 'median' "
                     "or 'pXX'."
+                )
+            if isinstance(statistic, _QUANTILE_STATISTICS) and not self._exact:
+                raise ValueError(
+                    f"{statistic.key!r} is a weighted quantile, which no kernel sum can express, so it "
+                    "needs the exact engine: construct the view with SphRender(..., exact=True), or call "
+                    "bins.sph_render_exact[key].  The default reaches only the kernel sums (count, sum, "
+                    "mean, rms, disp), which pynbody's renderer accumulates in C."
                 )
             raw = sim[field]
             units = getattr(raw, "units", None)
@@ -590,7 +615,10 @@ class BinSphRenderMixin:
         kernel instead of counted in their cell: cells borrow from their
         neighbours, so a noisy map comes out smooth and a sparse one keeps its
         neighbours' signal.  ``bins.s.sph_render[...]`` does it for one family or
-        sub-result.
+        sub-result.  The kernel sums (``count``, ``sum``, ``mean``, ``rms``,
+        ``disp``) come from pynbody's renderer; the quantiles (``median``,
+        ``pXX``) need :attr:`sph_render_exact`, since no kernel sum can express
+        them.
 
         Returns
         -------
@@ -603,8 +631,9 @@ class BinSphRenderMixin:
         ------
         ValueError
             If the result is not two or three spatial axes with evenly spaced
-            bins, or the snapshot has no smoothing lengths.  Raised on the first
-            query, not here.
+            bins, or the snapshot has no smoothing lengths, or a quantile is asked
+            for here rather than from :attr:`sph_render_exact`.  All raised on the
+            first query, not on this property.
 
         Examples
         --------
@@ -615,6 +644,31 @@ class BinSphRenderMixin:
         if render is None:
             render = SphRender(cast("BinNDResult", self))
             self._sph_render = render
+        return render
+
+    @property
+    def sph_render_exact(self) -> SphRender:
+        """As :attr:`sph_render`, but with the exact engine for quantiles enabled.
+
+        ``bins.sph_render["mass.sum"]`` accumulates with pynbody's renderer, which
+        is what a kernel sum is; ``bins.sph_render_exact["vz.median"]`` additionally
+        allows the quantiles, which no kernel sum can express and which therefore
+        have to scatter every particle over the cells its kernel reaches —
+        ``SphRender(..., exact=True)`` under a shorter name.
+
+        Returns
+        -------
+        SphRender
+            The same view, with ``exact=True``.
+
+        Examples
+        --------
+        >>> bins.sph_render_exact["vz.median"]  # doctest: +SKIP
+        """
+        render = self.__dict__.get("_sph_render_exact")
+        if render is None:
+            render = SphRender(cast("BinNDResult", self), exact=True)
+            self._sph_render_exact = render
         return render
 
 

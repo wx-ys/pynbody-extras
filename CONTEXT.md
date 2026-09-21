@@ -146,6 +146,10 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   to 44% of a cell's weight on a real snapshot).  The reduction is segmented
   (`weighted_percentiles(..., segments=counts)`, one length per cell, no padding)
   and the grid is processed in slabs of rows to bound memory.
+  It is **opt-in**: the default view answers only the kernel sums (pynbody's C
+  renderer) and refuses a quantile with a message pointing at `exact=True` /
+  `bins.sph_render_exact`, because the scattering costs tens of times a kernel sum
+  and a cheaper quantile would mean something else.
 
 ## Image layer (`pynbodyext/plot/image/`)
 
