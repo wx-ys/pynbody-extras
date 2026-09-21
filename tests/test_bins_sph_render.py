@@ -59,6 +59,36 @@ def one_particle(h: float, *, nbins: int = 21, span: float = 10.5):
     return (x @ y)(sim)
 
 
+def reference_quantile(
+    position: np.ndarray,
+    mass: np.ndarray,
+    value: np.ndarray,
+    *,
+    h: float,
+    x_edges: np.ndarray,
+    y_edges: np.ndarray,
+    percentile: float,
+    weight_by_mass: bool,
+) -> np.ndarray:
+    """Brute force: every particle over every cell its kernel reaches, by hand."""
+    centres_x = 0.5 * (x_edges[:-1] + x_edges[1:])
+    centres_y = 0.5 * (y_edges[:-1] + y_edges[1:])
+    area = float(x_edges[1] - x_edges[0]) * float(y_edges[1] - y_edges[0])
+    table = np.asarray(kernels.Kernel2D(kernels.CubicSplineKernel()).get_samples(dtype=float))
+    statistic = Percentile(f"p{percentile:g}", percentile)
+    reference = np.full((len(centres_x), len(centres_y)), np.nan)
+    for i, x_centre in enumerate(centres_x):
+        for j, y_centre in enumerate(centres_y):
+            distance = np.hypot(position[:, 0] - x_centre, position[:, 1] - y_centre)
+            index = ((distance / h) ** 2 / 4.0 * len(table)).astype(int)
+            kernel_value = np.where(index < len(table), table[np.clip(index, 0, len(table) - 1)], 0.0)
+            weight = kernel_value / h**2 * area
+            if weight_by_mass:
+                weight = weight * mass
+            reference[i, j] = statistic(value[weight > 0.0], weight[weight > 0.0])
+    return reference
+
+
 # ---------------------------------------------------------------------------
 # what can and cannot be rendered
 # ---------------------------------------------------------------------------
@@ -333,7 +363,7 @@ def test_a_median_of_one_particle_is_that_particle() -> None:
     sim["smooth"] = SimArray([1.0], "kpc")
     bins = make_bins(sim)
 
-    median = np.asarray(SphRender(bins, neighbours=1)["vz.median"])
+    median = np.asarray(bins.sph_render["vz.median"])
     count = np.asarray(bins.sph_render["count"])
 
     np.testing.assert_allclose(median[count > 0.0], 42.0)
@@ -345,7 +375,7 @@ def test_a_constant_field_has_the_same_median_as_mean() -> None:
     sim = make_sim(2000)
     sim["const"] = SimArray(np.full(len(sim), 7.0), "km s**-1")
     bins = make_bins(sim)
-    render = SphRender(bins, neighbours=len(sim))  # every neighbour, so no cap
+    render = SphRender(bins)
 
     count = np.asarray(bins.sph_render["count"])
     for key in ("const.median", "const.p16", "const.mean"):
@@ -366,37 +396,59 @@ def test_quantiles_match_a_brute_force_weighted_quantile() -> None:
     y = Bin1D("y", vmin=-span / 2, vmax=span / 2, nbins=nbins, alias="y")
     bins = (x @ y)(sim)
 
-    rendered = np.asarray(SphRender(bins, neighbours=n)["vz.abs.p16@mass"])
+    rendered = np.asarray(bins.sph_render["vz.abs.p16@mass"])
 
-    edge = span / nbins
-    centres = -span / 2 + (np.arange(nbins) + 0.5) * edge
-    table = np.asarray(kernels.Kernel2D(kernels.CubicSplineKernel()).get_samples(dtype=float))
-    position = np.asarray(sim["pos"])
-    mass, vz = np.asarray(sim["mass"]), np.abs(np.asarray(sim["vz"]))
-    statistic = Percentile("p16", 16.0)
-    reference = np.full((nbins, nbins), np.nan)
-    for i, x_centre in enumerate(centres):
-        for j, y_centre in enumerate(centres):
-            distance = np.hypot(position[:, 0] - x_centre, position[:, 1] - y_centre)
-            # the same table lookup the renderer (and the engine) uses
-            index = ((distance / h) ** 2 / 4.0 * len(table)).astype(int)
-            inside = index < len(table)
-            kernel_value = np.where(inside, table[np.clip(index, 0, len(table) - 1)], 0.0)
-            weight = kernel_value / h**2 * edge**2 * mass
-            reference[i, j] = statistic(vz[weight > 0.0], weight[weight > 0.0])
+    reference = reference_quantile(
+        np.asarray(sim["pos"]),
+        np.asarray(sim["mass"]),
+        np.abs(np.asarray(sim["vz"])),
+        h=h,
+        x_edges=np.linspace(-span / 2, span / 2, nbins + 1),
+        y_edges=np.linspace(-span / 2, span / 2, nbins + 1),
+        percentile=16.0,
+        weight_by_mass=True,
+    )
 
-    # The engine sums the neighbours in distance order and the reference in
-    # particle order, so the two agree to floating-point, not bit-for-bit.
+    # The engine sums the neighbours in its own order and the reference in particle
+    # order, so the two agree to floating-point, not bit-for-bit.
     np.testing.assert_allclose(rendered, reference, rtol=1e-6, atol=1e-6)
+
+
+def test_a_grid_taller_than_one_slab_is_scattered_correctly() -> None:
+    """Slabs are an implementation detail: the answer cannot depend on the split."""
+    h, nbins_x, nbins_y, span, n = 0.6, 40, 4, 8.0, 400
+    rng = np.random.default_rng(17)
+    sim = pynbody.new(dm=n)
+    sim["pos"] = SimArray(rng.uniform(-3, 3, (n, 3)), "kpc")
+    sim["mass"] = SimArray(rng.uniform(0.5, 2.0, n), "Msol")
+    sim["vz"] = SimArray(rng.normal(0.0, 100.0, n), "km s**-1")
+    sim["smooth"] = SimArray(np.full(n, h), "kpc")
+    x = Bin1D("x", vmin=-span / 2, vmax=span / 2, nbins=nbins_x, alias="x")
+    y = Bin1D("y", vmin=-span / 2, vmax=span / 2, nbins=nbins_y, alias="y")
+    bins = (x @ y)(sim)
+
+    rendered = np.asarray(bins.sph_render["vz.median"])
+
+    reference = reference_quantile(
+        np.asarray(sim["pos"]),
+        np.asarray(sim["mass"]),
+        np.asarray(sim["vz"]),
+        h=h,
+        x_edges=np.linspace(-span / 2, span / 2, nbins_x + 1),
+        y_edges=np.linspace(-span / 2, span / 2, nbins_y + 1),
+        percentile=50.0,
+        weight_by_mass=False,
+    )
+    assert rendered.shape == (nbins_x, nbins_y)
+    # rows 0-31 are one slab and the rest another, so this pins the row bookkeeping
+    np.testing.assert_allclose(rendered, reference, rtol=1e-4, atol=1e-4)
 
 
 def test_quantiles_respect_transforms_weights_and_units() -> None:
     sim = make_sim(3000)
     bins = make_bins(sim)
 
-    # The kernel holds more particles than the default cap in this dense grid, so
-    # ask for all of them: this test is about the transform and the weight.
-    render = SphRender(bins, neighbours=len(sim))
+    render = SphRender(bins)
     absolute = render["vz.abs.p16"]
     weighted = render["vz.abs.p16@mass"]
 
@@ -407,42 +459,6 @@ def test_quantiles_respect_transforms_weights_and_units() -> None:
     np.testing.assert_allclose(
         np.asarray(render["vz.p50"]), np.asarray(render["vz.median"]), equal_nan=True
     )
-
-
-def test_the_neighbour_count_must_be_positive() -> None:
-    bins = make_bins(make_sim(200))
-
-    with pytest.raises(ValueError, match="neighbours"):
-        SphRender(bins, neighbours=0)
-
-
-def test_the_neighbour_cap_is_reported_when_it_truncates() -> None:
-    """A dense kernel holds far more than 64 particles; say so rather than bias."""
-    dense = make_bins(make_sim(3000, h=0.5))
-
-    with pytest.warns(UserWarning, match="truncated"):
-        dense.sph_render["vz.median"]
-
-    sparse = make_bins(make_sim(300, h=0.5))
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")  # a sparse kernel holds fewer than the cap
-        assert np.isfinite(np.asarray(sparse.sph_render["vz.median"])).any()
-
-
-def test_lifting_the_neighbour_cap_changes_the_truncated_quantile() -> None:
-    """The cap is not cosmetic: it can move the answer by more than a km/s."""
-    sim = make_sim(3000, h=0.5)
-    bins = make_bins(sim)
-
-    with pytest.warns(UserWarning, match="truncated"):
-        truncated = np.asarray(bins.sph_render["vz.median"])
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")  # every particle, so nothing is dropped
-        exact = np.asarray(SphRender(bins, neighbours=len(sim))["vz.median"])
-
-    both = np.isfinite(truncated) & np.isfinite(exact)
-    assert both.any()
-    assert np.max(np.abs(truncated[both] - exact[both])) > 1.0
 
 
 def test_a_quantile_then_a_kernel_sum_still_works() -> None:
@@ -494,7 +510,7 @@ def test_the_box_wraps_the_quantile_neighbours_as_the_sums_do() -> None:
     bins = make_periodic_sim(1000.0)
 
     count = np.asarray(bins.sph_render["count"])
-    median = np.asarray(SphRender(bins, neighbours=1)["vz.median"])
+    median = np.asarray(bins.sph_render["vz.median"])
 
     for cell in (0, -1):  # either side of the periodic boundary
         assert count[cell, 16] > 0.0
@@ -502,7 +518,7 @@ def test_the_box_wraps_the_quantile_neighbours_as_the_sums_do() -> None:
     # without a box, the far side is simply far away
     open_bins = make_periodic_sim(0.0)
     assert np.asarray(open_bins.sph_render["count"])[-1, 16] == 0.0
-    assert np.isnan(np.asarray(SphRender(open_bins, neighbours=1)["vz.median"])[-1, 16])
+    assert np.isnan(np.asarray(open_bins.sph_render["vz.median"])[-1, 16])
 
 
 def test_a_mixed_particle_set_points_at_the_family_with_smoothing() -> None:

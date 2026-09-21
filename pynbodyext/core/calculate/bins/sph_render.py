@@ -51,27 +51,21 @@ Two engines share that query, because not every statistic is a sum:
 - **the kernel sums** — ``count``, ``sum`` and the mean-likes (``mean``, ``rms``,
   ``disp``) — accumulate over the whole kernel support, which is what pynbody's
   renderer does;
-- **the quantiles** — ``median`` and the percentiles ``pXX`` — take a weighted
-  quantile over the :attr:`SphRender.neighbours` particles nearest each cell
-  centre, since a quantile is not linear in the weights and so cannot be a kernel
-  sum.  They reuse the *same* definition the strict query uses — through
-  :func:`~.statistics.weighted_percentiles`, which reduces every cell in one
-  vectorised call — so a quantile means the same thing in both:
-  ``"vz.abs.p16@mass"`` is the mass-weighted 16th percentile of ``|vz|``, and
-  ``"vz.median"`` is the weighted median, which need not equal ``"vz.mean"``.
-  **The cap is a real approximation, not a formality.**  A cell's weight is
-  carried by every particle the kernel reaches, and a normal SPH snapshot puts
-  *hundreds* of them there — in a test snapshot the median cell has 190, and 91%
-  of particles have more than 64 within ``2h``.  So looking at the nearest 64 can
-  truncate badly, and the engine measures it: the exact weight of a cell is one
-  kernel sum away, and when the neighbour list carries less than
-  :data:`_TRUNCATION_TOLERANCE` of it a :class:`UserWarning` says so.  On that
-  snapshot the 64 nearest carry 56% of the weight, and the truncated median
-  differs from the complete one by up to 35 km/s where the field's own spread is
-  34 km/s.  Raise ``neighbours`` while the warning fires (or use the kernel sums,
-  which reach everything); an engine that scatters every particle onto the cells
-  its kernel touches — no cap, and the segmented reduction for it is already in
-  :func:`~.statistics.weighted_percentiles` — is the planned replacement.
+- **the quantiles** — ``median`` and the percentiles ``pXX`` — are weighted
+  quantiles over **every particle the kernel reaches**, since a quantile is not
+  linear in the weights and so cannot be a kernel sum.  They are built by
+  *scattering*: each particle lays its kernel over the cells it touches — the same
+  thing pynbody's renderer does internally, periodic images included — and the
+  resulting ``(value, weight)`` pairs are reduced cell by cell with
+  :func:`~.statistics.weighted_percentiles`, which is the strict query's own
+  definition and takes a length per cell so nothing is padded.  A cell therefore
+  sees exactly the neighbours its kernel sums see, and ``"vz.abs.p16@mass"`` is
+  the mass-weighted 16th percentile of ``|vz|`` over all of them, while
+  ``"vz.median"`` is the weighted median — which need not equal ``"vz.mean"``.
+  (An earlier version looked at the *nearest* particles, capped at a fixed number;
+  a real snapshot holds hundreds inside ``2h``, so that truncated the weight by up
+  to 44% and moved medians by tens of km/s.  Scattering is why there is no such
+  parameter now.)
 
 Requirements
 ------------
@@ -100,6 +94,7 @@ y and z bin counts until it is fixed upstream.
 
 from __future__ import annotations
 
+import itertools
 import warnings
 from typing import TYPE_CHECKING, Any, cast
 
@@ -135,18 +130,16 @@ _SUM_STATISTICS = (Sum, Mean, RMS, Dispersion)
 #: Statistics that need the per-cell neighbour lists: a weighted quantile.
 _QUANTILE_STATISTICS = (Median, Percentile)
 
-#: Particles per cell the quantile engine looks at, by default — pynbody's own
-#: ``KDTree.nn`` default, and about what a 64-neighbour SPH kernel reaches, so a
-#: normal snapshot's kernel support is covered in full.
-_NEIGHBOURS = 64
+#: Column of :attr:`BinResultModel.position` each spatial axis lives in.
+_AXIS_COLUMN = {"x": 0, "y": 1, "z": 2}
 
-#: Share of a cell's kernel weight the neighbour list must carry before the
-#: quantiles are considered converged.  A normal snapshot has far more than 64
-#: particles inside ``2h``, so this is a real check, not a formality.
-_TRUNCATION_TOLERANCE = 0.99
+#: Rows of cells the quantile engine scatters at a time.  Peak memory is set by the
+#: particle-cell pairs inside one slab, so this trades passes over the particles
+#: for memory.
+_SLAB_ROWS = 32
 
-#: Cache key for the weight-only render the truncation check needs.
-_WEIGHT_KEY = "__sph_render_weight__"
+#: Particle-cell pairs in one quantile before we warn about the cost.
+_ENTRY_WARNING = 50_000_000
 
 
 class SphRender:
@@ -171,17 +164,6 @@ class SphRender:
         renderer does.  Turning it off restricts the render to the box.  The
         quantiles wrap the query into the box for the same reason (they search
         their own tree), so both engines agree across a boundary.
-    neighbours : int, default: 64
-        How many particles the *quantile* statistics (``median``, ``pXX``) look at
-        per cell, nearest first.  The kernel sums (``count``, ``sum``, ``mean``,
-        ``rms``, ``disp``) do not use this: they reach exactly as far as the
-        kernel does.  Raise it for a snapshot whose kernel support holds more
-        particles than this, or lower it to trade accuracy for speed.  How to tell:
-        the quantiles compare their neighbour list against the cell's exact kernel
-        weight and warn when the list is short of it, and ``64`` — plenty for a
-        particle's own 64-neighbour smoothing — is *not* usually enough for a cell,
-        because the kernel support (``2h``) reaches many more particles than ``h``
-        does.  With every particle in the list the quantile is exact.
 
     Examples
     --------
@@ -196,15 +178,11 @@ class SphRender:
         kernel: str | KernelBase | None = None,
         smooth_floor: float = 0.0,
         wrap: bool = True,
-        neighbours: int = _NEIGHBOURS,
     ) -> None:
         self._result = result
         self._kernel_spec = kernel
         self._smooth_floor = float(smooth_floor)
         self._wrap = bool(wrap)
-        if neighbours < 1:
-            raise ValueError(f"neighbours must be at least 1, got {neighbours!r}.")
-        self._neighbours = int(neighbours)
         self._renders: dict[str, BinsArray] = {}
         self._plan: dict[str, Any] | None = None
 
@@ -291,88 +269,106 @@ class SphRender:
     def _quantile(
         self, statistic: Percentile | Median, values: np.ndarray, weights: np.ndarray | None, plan: dict[str, Any]
     ) -> np.ndarray:
-        """A kernel-weighted quantile per cell, over that cell's nearest particles.
+        r"""A kernel-weighted quantile per cell, from every particle the kernel reaches.
 
-        A quantile is not a ratio of kernel sums, so it needs the neighbours of
-        each cell rather than an accumulation: the particles nearest the cell
-        centre are found with a KD-tree (``scipy``'s, which handles a periodic
-        ``boxsize`` the same way pynbody's does), weighted with the same kernel and
-        the same ``@weight`` as the kernel sums, and handed to the very statistic
-        object the strict query uses — so ``median`` and ``p16`` keep their
-        definition, and ``"vz.abs.p16@mass"`` is the mass-weighted 16th percentile
-        of ``|vz|``.
+        A quantile is not linear in the weights, so — unlike the kernel sums, which
+        pynbody's renderer accumulates cell by cell on the fly — it needs each
+        cell's *set* of ``(value, weight)`` pairs.  Those come from scattering: every
+        particle lays its kernel over the cells it touches, exactly as the renderer
+        does internally, its periodic images included, so a cell sees the same
+        neighbours the kernel sums see and nothing is truncated.
 
-        Only the :attr:`neighbours` particles nearest each cell are considered, so
-        a quantile costs ``cells × neighbours`` rather than the whole kernel
-        support; raise ``neighbours`` when that is not enough.
+        The pairs are reduced one *slab* of cells at a time, which bounds peak
+        memory by the slab rather than the grid; within a slab they are sorted
+        cell-major and handed to :func:`~.statistics.weighted_percentiles` with a
+        length per cell, so no padding to the busiest cell is needed.  The
+        definition is therefore the strict query's own, only smoothed:
+        ``"vz.abs.p16@mass"`` is the mass-weighted 16th percentile of ``|vz|`` over
+        everything the kernel reaches.
         """
-        from scipy.spatial import cKDTree
-
         present = plan["present"]
-        coordinates = {"x": 0, "y": 1, "z": 2}
-        points = plan["position"][:, [coordinates[prop] for prop in present]]
-        boxsize = plan["boxsize"]
-        shape = tuple(plan["axes"][prop].nbins for prop in present)
-        grid = np.meshgrid(*[_cell_centres(plan["axes"][prop]) for prop in present], indexing="ij")
-        centres = np.stack([axis.ravel() for axis in grid], axis=-1)
-        if boxsize is not None:
-            # scipy's periodic tree refuses coordinates outside [0, boxsize), and
-            # snapshots (gadget ones especially) sit in [-L/2, L/2).  Shifting by
-            # whole boxes does not change a minimum-image distance, so wrapping
-            # both the particles and the query points is exactly pynbody's wrap.
-            points = points % boxsize
-            centres = centres % boxsize
+        axes = plan["axes"]
+        shape = tuple(axes[prop].nbins for prop in present)
+        columns = [_AXIS_COLUMN[prop] for prop in present]
+        centres = [_cell_centres(axes[prop]) for prop in present]
+        origins = [float(axes[prop].edges[0]) for prop in present]
+        widths = [plan["widths"][prop] for prop in present]
+        strides = [int(np.prod(shape[index + 1 :], dtype=int)) for index in range(len(shape))]
+        quantity = np.asarray(values, dtype=float)
+        extra = np.ones_like(quantity) if weights is None else np.asarray(weights, dtype=float)
 
-        tree = plan.get("tree")
-        if tree is None:
-            span = None if boxsize is None else [boxsize] * len(present)
-            tree = plan["tree"] = cKDTree(points, boxsize=span)
-        distance, neighbour = tree.query(centres, k=self._neighbours)
-        # ``k=1`` comes back one-dimensional, and a k larger than the particle
-        # count pads with infinities; neither has a neighbour to weight.
-        distance = np.reshape(distance, (len(centres), self._neighbours))
-        neighbour = np.reshape(neighbour, (len(centres), self._neighbours))
-        missing = ~np.isfinite(distance)
-        neighbour = np.where(missing, 0, neighbour)
+        particle, shift = self._images(plan)
+        position = plan["position"][particle][:, columns] + shift
+        smoothing = self._smoothing(plan["smooth"])[particle]
+        support = 2.0 * smoothing
+        value = quantity[particle]
+        weight = extra[particle]
+        kernel = self._kernel(projected=len(present) == 2)
+        measure = plan["measure"]
+        self._warn_if_expensive(position, support, widths, shape)
 
-        weight = _kernel_weights(distance, plan["smooth"][neighbour], self._kernel(projected=len(present) == 2))
-        weight = np.where(missing, 0.0, weight * plan["measure"])
-        if weights is not None:
-            weight = weight * weights[neighbour]
-        self._warn_if_truncated(weight, values, weights)
-        # One call for every cell: the reduction is the same weighted percentile
-        # the scalar statistic computes, parameterised differently.  Particles the
-        # kernel does not reach (or whose value is not finite) carry no weight and
-        # drop out there.
-        quantiles = weighted_percentiles(values[neighbour], weight, statistic.percentile)
-        return np.asarray(quantiles, dtype=float).reshape(shape)
+        out = np.empty(shape, dtype=float)
+        row = strides[0]
+        for low in range(0, shape[0], _SLAB_ROWS):
+            high = min(low + _SLAB_ROWS, shape[0])
+            cell, entry_value, entry_weight = _scatter(
+                position,
+                smoothing,
+                support,
+                value,
+                weight,
+                centres,
+                origins,
+                widths,
+                strides,
+                low,
+                high,
+                kernel,
+                measure,
+            )
+            counts = np.bincount(cell, minlength=(high - low) * row)
+            reduced = weighted_percentiles(entry_value, entry_weight, statistic.percentile, segments=counts)
+            out[low:high] = np.asarray(reduced, dtype=float).reshape((high - low, *shape[1:]))
+        return out
 
-    def _warn_if_truncated(self, weight: np.ndarray, values: np.ndarray, weights: np.ndarray | None) -> None:
-        """Say so when the ``neighbours`` nearest particles are not enough.
+    def _images(self, plan: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
+        """Particle indices and per-axis shifts for every image that can reach the grid.
 
-        The kernel sums reach every particle the kernel touches; the quantiles look
-        at a fixed number of nearest neighbours, so a dense region — the middle of
-        a halo, say — can hold more of them than that.  The exact weight of each
-        cell is one kernel sum away (a render of the weight field), so the share the
-        neighbour list actually carries is measurable: compare them, and warn when
-        the list is missing weight.
+        A periodic box means a particle near one edge reaches cells at the other, so
+        a handful of shifted copies are needed — the same repeats pynbody's renderer
+        uses.  Only the particles an image brings within reach are kept, so the
+        common case costs one pass and no copies.
         """
-        quantity = np.ones_like(values) if weights is None else np.asarray(weights, float)
-        exact = self._renders.get(_WEIGHT_KEY)
-        if exact is None:
-            exact = self._renders[_WEIGHT_KEY] = self._render_cells(quantity)
-        kept = weight.sum(axis=1)
-        reachable = np.asarray(exact, dtype=float).ravel()
-        usable = reachable > 0.0
-        if not usable.any():
-            return
-        share = kept[usable] / reachable[usable]
-        if np.median(share) < _TRUNCATION_TOLERANCE:
+        present = plan["present"]
+        columns = [_AXIS_COLUMN[prop] for prop in present]
+        position = plan["position"][:, columns]
+        support = 2.0 * self._smoothing(plan["smooth"])
+        bounds = [(float(plan["axes"][prop].edges[0]), float(plan["axes"][prop].edges[-1])) for prop in present]
+        parts: list[np.ndarray] = []
+        shifts: list[np.ndarray] = []
+        for shift in _offset_vectors(plan["boxsize"], [plan["axes"][prop] for prop in present]):
+            reaches = np.ones(len(position), dtype=bool)
+            for axis, (low, high) in enumerate(bounds):
+                moved = position[:, axis] + shift[axis]
+                reaches &= (moved + support > low) & (moved - support < high)
+            if reaches.any():
+                picked = np.flatnonzero(reaches)
+                parts.append(picked)
+                shifts.append(np.tile(shift, (len(picked), 1)))
+        return np.concatenate(parts), np.concatenate(shifts)
+
+    def _warn_if_expensive(
+        self, position: np.ndarray, support: np.ndarray, widths: list[float], shape: tuple[int, ...]
+    ) -> None:
+        """Warn when a scatter would touch an unreasonable number of pairs."""
+        reach = np.ones(len(position), dtype=float)
+        for axis, width in enumerate(widths):
+            reach *= np.clip(np.ceil(2.0 * support / width) + 1.0, 0.0, float(shape[axis]))
+        entries = float(reach.sum())
+        if entries > _ENTRY_WARNING:
             warnings.warn(
-                f"the {self._neighbours} nearest neighbours carry only {np.median(share):.0%} of the kernel "
-                f"weight that reaches a typical cell, so this quantile is truncated — raise "
-                f"SphRender(neighbours=...) (e.g. to a few hundred for a normal SPH snapshot) or use the "
-                f"kernel sums, which see all of it.",
+                f"this sph_render scatters about {entries / 1e6:.0f} million particle-cell pairs: the smoothing "
+                "lengths are large next to the cells. Use smooth_floor, or a coarser grid, to bound it.",
                 UserWarning,
                 stacklevel=3,
             )
@@ -630,6 +626,95 @@ def _is_uniform(axis: Any) -> bool:
 def _cell_centres(axis: Any) -> np.ndarray:
     edges = np.asarray(axis.edges, dtype=float)
     return 0.5 * (edges[:-1] + edges[1:])
+
+
+def _offset_vectors(boxsize: float | None, axes: list[Any]) -> list[tuple[float, ...]]:
+    """Every combination of per-axis periodic shifts that could matter.
+
+    pynbody's renderer repeats particles by whole boxes when a snapshot is periodic
+    (``_calculate_wrapping_repeat_array``); the same repeats are needed here, and
+    ``boxsize is None`` means the single, unshifted case.
+    """
+    if boxsize is None:
+        return [tuple(0.0 for _ in axes)]
+    per_axis = []
+    for axis in axes:
+        span = float(axis.edges[-1] - axis.edges[0])
+        repeats = int(round(span / (2.0 * boxsize))) + 1
+        per_axis.append(np.linspace(-repeats * boxsize, repeats * boxsize, 2 * repeats + 1))
+    return [tuple(float(component) for component in combination) for combination in itertools.product(*per_axis)]
+
+
+def _scatter(
+    position: np.ndarray,
+    smoothing: np.ndarray,
+    support: np.ndarray,
+    value: np.ndarray,
+    weight: np.ndarray,
+    centres: list[np.ndarray],
+    origins: list[float],
+    widths: list[float],
+    strides: list[int],
+    low_row: int,
+    high_row: int,
+    kernel: Any,
+    measure: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Every ``(cell, value, weight)`` inside one slab of rows.
+
+    Each particle's cell range comes from its own support (``2h``) and the uniform
+    grid, so the block of cells one particle touches is a rectangular range;
+    the ranges of all particles are then expanded into flat arrays at once
+    (``np.repeat`` and a mixed-radix decomposition) rather than in a Python loop.
+    The result is sorted cell-major and value-sorted within each cell, ready for
+    :func:`~.statistics.weighted_percentiles` with a length per cell.
+    """
+    dimensions = len(centres)
+    ranges: list[tuple[np.ndarray, np.ndarray]] = []
+    for axis in range(dimensions):
+        low = np.floor((position[:, axis] - support - origins[axis]) / widths[axis])
+        high = np.ceil((position[:, axis] + support - origins[axis]) / widths[axis])
+        # Clip to the *grid*, so the cell centres are the real ones; the slab is
+        # accounted for when the row index is turned into a cell index below.
+        lower_bound = low_row if axis == 0 else 0
+        upper_bound = high_row if axis == 0 else len(centres[axis])
+        low = np.clip(low, lower_bound, upper_bound)
+        high = np.clip(high, lower_bound, upper_bound)
+        ranges.append((low.astype(np.intp), high.astype(np.intp)))
+
+    sizes = [high - low for low, high in ranges]
+    block = np.prod(np.stack(sizes), axis=0)
+    picked = np.flatnonzero(block > 0)
+    if not len(picked):
+        return (np.empty(0, dtype=np.intp), np.empty(0), np.empty(0))
+
+    per_particle = block[picked]
+    total = int(per_particle.sum())
+    particle = np.repeat(picked, per_particle)
+    within = np.arange(total, dtype=np.intp) - np.repeat(np.cumsum(per_particle) - per_particle, per_particle)
+
+    offsets = []
+    radix = np.ones(total, dtype=np.intp)
+    for axis in reversed(range(dimensions)):
+        size = sizes[axis][particle]
+        offsets.append((axis, (within // radix) % size))
+        radix = radix * size
+
+    cell = np.zeros(total, dtype=np.intp)
+    distance = np.zeros(total, dtype=float)
+    for axis, offset in offsets:
+        index = ranges[axis][0][particle] + offset
+        if axis == 0:
+            cell += (index - low_row) * strides[axis]
+        else:
+            cell += index * strides[axis]
+        displacement = centres[axis][index] - position[particle, axis]
+        distance += displacement**2
+
+    entry_weight = _kernel_weights(np.sqrt(distance), smoothing[particle], kernel) * measure * weight[particle]
+    entry_value = value[particle]
+    order = np.lexsort((entry_value, cell))
+    return cell[order], entry_value[order], entry_weight[order]
 
 
 def _kernel_weights(distance: np.ndarray, smoothing: np.ndarray, kernel: Any) -> np.ndarray:

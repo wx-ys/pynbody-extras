@@ -103,7 +103,7 @@ is the same queries again, for a map that stays smooth where the bins are sparse
 bins.sph_render["mass.sum"]         # per-cell mass, kernel-smoothed, same units
 bins.s.sph_render["count"]          # stars only; fractional — it is a kernel count
 bins.sph_render["vz.abs.mean@mass"] # transform |vz|, then the mass-weighted mean
-bins.sph_render["vz.median"]        # quantiles work too: weighted, over each cell's neighbours
+bins.sph_render["vz.median"]        # quantiles too: every particle the kernel reaches
 ```
 
 It needs two or three spatial axes with evenly spaced bins (`x`/`y`, plus `z`).
