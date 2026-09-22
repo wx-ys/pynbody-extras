@@ -108,10 +108,12 @@ Requirements
   has no SPH geometry to render onto.
 - **Evenly spaced bins** (``mode="linear"``), because the renderer works on the
   cell grid: ``V_cell`` is a single number.  Anything else raises.
-- **An SPH snapshot**: the particles need smoothing lengths, which pynbody
-  derives from the particle distribution on demand as ``sim["smooth"]`` — so any
-  snapshot with particles works, and setting ``smooth`` yourself overrides it.
-  Zeros or non-finite values there are rejected rather than rendered.
+- **An SPH snapshot.**  Every particle needs a smoothing length, read as
+  ``sim["smooth"]``.  pynbody derives one from the particle distribution when a
+  *single family* has none on disk, so ``bins.gas.sph_render[...]`` works on any
+  snapshot; a *mixed* set must carry one for every family it contains — only the
+  gas usually does — and says so when it cannot.  Zeros or non-finite values are
+  rejected rather than rendered.
 
 ``pynbody.sph`` is imported on first use, so importing the bins package stays
 light.
@@ -551,11 +553,17 @@ class SphRender:
         sim = model.sim
         try:
             smooth = np.asarray(sim["smooth"], dtype=float)
-        except (KeyError, ValueError) as exc:
+        except Exception as exc:  # noqa: BLE001 - the spelling of "no such array" is the subclass's business
+            # pynbody spells it KeyError, but a snapshot wrapper may raise anything
+            # (a custom ``__getitem__`` often falls through to TypeError).  Type is
+            # what the caller cannot guess, so it goes in the message; the original
+            # exception stays attached as the cause.
             raise ValueError(
-                "sph_render needs SPH smoothing lengths, and this particle set has no usable 'smooth' array: "
-                "only some families carry one (gas does, the collisionless ones do not), so render a family "
-                "or sub-result that does — bins.gas.sph_render[...] — or give a single-family binning."
+                "sph_render needs a smoothing length for every particle, and this particle set does not "
+                "provide one: pynbody derives 'smooth' on demand for a single family, but a mixed set must "
+                "carry one for each of them (usually only the gas does).  Render a family or sub-result "
+                "that has it — bins.gas.sph_render[...] — or give 'smooth' to every family first.  "
+                f"(reading sim['smooth'] raised {type(exc).__name__}.)"
             ) from exc
         if not np.all(np.isfinite(smooth)) or np.any(smooth <= 0.0):
             raise ValueError(

@@ -141,6 +141,41 @@ def test_unusable_smoothing_lengths_are_rejected() -> None:
         make_bins(sim).sph_render["count"]
 
 
+def test_a_snapshot_that_spells_a_missing_array_as_type_error_still_explains_itself() -> None:
+    """``sim['smooth']`` may fail however the snapshot class likes; say why, and how."""
+
+    class Terse:
+        """A snapshot whose array access answers a missing block with ``TypeError``.
+
+        That is what a custom ``__getitem__`` does when it catches everything and
+        falls through to a bare ``raise TypeError`` — the case this pins down.
+        """
+
+        def __init__(self, sim: Any) -> None:
+            self._sim = sim
+
+        def __getitem__(self, item: Any) -> Any:
+            if item == "smooth":
+                raise TypeError("no such array 'smooth'")
+            return self._sim[item]
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._sim, name)
+
+    sim = pynbody.new(dm=200, gas=200)
+    for family in (sim.dm, sim.gas):
+        family["pos"] = SimArray(np.zeros((200, 3)), "kpc")
+        family["mass"] = SimArray(np.ones(200), "Msol")
+    bins = make_bins(sim)
+    bins.model.sim = Terse(bins.model.sim)
+
+    with pytest.raises(ValueError, match="smoothing length for every particle") as caught:
+        bins.sph_render["mass.sum"]
+
+    assert "TypeError" in str(caught.value), "the message should name what it caught"
+    assert isinstance(caught.value.__cause__, TypeError)
+
+
 def test_quantiles_are_not_implemented_yet() -> None:
     """Statistics that are neither kernel sums nor quantiles are rejected."""
     bins = make_bins(make_sim(500))
