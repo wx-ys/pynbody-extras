@@ -494,7 +494,12 @@ def test_a_quantile_then_a_kernel_sum_still_works() -> None:
 
 def test_the_compiled_pair_builder_matches_the_numpy_one() -> None:
     """The C++ kernel is an optimisation of the fallback, not a second definition."""
-    from pynbodyext.core.calculate.bins.sph_render import _native_pair_builder, _scatter_pairs
+    from pynbodyext.core.calculate.bins.sph_render import (
+        _kernel_table,
+        _kernel_weights,
+        _native_pair_builder,
+        _scatter_pairs,
+    )
 
     builder = _native_pair_builder()
     if builder is None:
@@ -511,11 +516,21 @@ def test_the_compiled_pair_builder_matches_the_numpy_one() -> None:
     origins = [float(plan["axes"][prop].edges[0]) for prop in plan["present"]]
     widths = [plan["widths"][prop] for prop in plan["present"]]
     strides = [NBINS, 1]
+    kernel = render._kernel(projected=True)
+    measure = plan["measure"]
+    rng = np.random.default_rng(3)
+    value = rng.normal(0.0, 100.0, len(position))
+    extra = rng.uniform(0.5, 2.0, len(position))
 
     native = builder(
         np.ascontiguousarray(position),
         np.ascontiguousarray(smoothing),
         np.ascontiguousarray(support),
+        np.ascontiguousarray(value),
+        np.ascontiguousarray(extra),
+        _kernel_table(kernel),
+        int(getattr(kernel, "h_power", 3)),
+        float(measure),
         origins,
         widths,
         [NBINS, NBINS],
@@ -524,11 +539,37 @@ def test_the_compiled_pair_builder_matches_the_numpy_one() -> None:
         NBINS,
         0,
     )
-    fallback = _scatter_pairs(position, smoothing, support, centres, origins, widths, strides, 0, NBINS)
+    cell, distance, found = _scatter_pairs(position, smoothing, support, centres, origins, widths, strides, 0, NBINS)
+    fallback = (
+        cell,
+        value[found],
+        _kernel_weights(np.sqrt(distance), smoothing[found], kernel) * measure * extra[found],
+    )
 
-    for name, compiled, interpreted in zip(("cell", "distance", "row"), native, fallback, strict=True):
-        assert len(compiled) == len(interpreted) > 0, name
-        np.testing.assert_allclose(np.sort(np.asarray(compiled)), np.sort(np.asarray(interpreted)), err_msg=name)
+    assert len(native[0]) == len(fallback[0]) > 0
+    compiled = np.column_stack([np.asarray(part) for part in native])
+    interpreted = np.column_stack([np.asarray(part) for part in fallback])
+    # Compare as multisets: a lexicographic sort of (cell, value, weight) is the
+    # same list whichever engine produced it.  The slight tolerance covers the
+    # fallback's sqrt-then-square round trip into the kernel lookup.
+    order = np.lexsort((compiled[:, 2], compiled[:, 1], compiled[:, 0]))
+    other = np.lexsort((interpreted[:, 2], interpreted[:, 1], interpreted[:, 0]))
+    np.testing.assert_allclose(compiled[order], interpreted[other], rtol=1e-9, atol=1e-12)
+
+
+def test_the_numpy_fallback_answers_the_same_quantile(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without the optional extension the NumPy path still answers the same query."""
+    import pynbodyext.core.calculate.bins.sph_render as module
+
+    sim = make_sim(3000, h=0.5)
+    bins = make_bins(sim)
+    native = np.asarray(SphRender(bins, exact=True)["vz.median"])
+
+    monkeypatch.setattr(module, "_native_pair_builder", lambda: None)
+    fallback = np.asarray(SphRender(bins, exact=True)["vz.median"])
+
+    assert np.isfinite(fallback).sum() == np.isfinite(native).sum() > 0
+    np.testing.assert_allclose(fallback, native, rtol=1e-6, atol=1e-6, equal_nan=True)
 
 
 # ---------------------------------------------------------------------------

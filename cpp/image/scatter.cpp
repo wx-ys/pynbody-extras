@@ -1,7 +1,7 @@
-// Particle-to-cell scattering: the update loop of pynbody's `_render.render_image`,
-// except that instead of accumulating a kernel-weighted scalar into the cell it
-// records the pair — which cell, how far, which particle found it.  The reduction
-// (a weighted quantile, say) then happens in Python.
+// Particle-to-cell scattering: the loop of pynbody's `_render.render_image`, except
+// that instead of accumulating a kernel-weighted scalar into the cell it records
+// the pair — which cell, with what weighted value.  The reduction (a weighted
+// quantile, say) then happens in Python, where the definitions live.
 //
 // The Python fallback in `bins/sph_render.py` does exactly this in NumPy; this is
 // the same arithmetic in a tight C++ loop, which is where the cost is.
@@ -62,10 +62,13 @@ Ranges ranges_of(const double* position, const double* support, std::size_t row,
 
 }  // namespace
 
-// (cell, distance_squared, row) for every particle-cell pair inside one slab.
-// `cell` is local to the slab (row 0 is `low_row`); the entries come out grouped
-// by row, which lets a threaded fill write disjoint slices without a lock.
-py::tuple scatter_pairs(PyArr position, PyArr smoothing, PyArr support,
+// (cell, value, weight) for every particle-cell pair inside one slab.  `cell` is
+// local to the slab (row 0 is `low_row`); the entries come out grouped by row,
+// which lets a threaded fill write disjoint slices without a lock.  The kernel is
+// pynbody's own lookup table, indexed exactly as its renderer indexes it — the
+// table is passed in so the definition stays on the Python side.
+py::tuple scatter_pairs(PyArr position, PyArr smoothing, PyArr support, PyArr value, PyArr extra,
+                        PyArr table, int h_power, double measure,
                         const std::vector<double>& origins, const std::vector<double>& widths,
                         const std::vector<long>& counts, const std::vector<long>& strides, long low_row,
                         long high_row, int threads) {
@@ -76,11 +79,20 @@ py::tuple scatter_pairs(PyArr position, PyArr smoothing, PyArr support,
     if (dims < 2 || dims > 3) throw py::value_error("scatter_pairs handles 2 or 3 dimensions");
     if ((std::size_t)smoothing.shape(0) != rows || (std::size_t)support.shape(0) != rows)
         throw py::value_error("smoothing and support must have one entry per row");
+    if ((std::size_t)value.shape(0) != rows || (std::size_t)extra.shape(0) != rows)
+        throw py::value_error("value and extra must have one entry per row");
+    if (table.ndim() != 1 || h_power < 1)
+        throw py::value_error("table must be one-dimensional and h_power positive");
     if (origins.size() != dims || widths.size() != dims || counts.size() != dims || strides.size() != dims)
         throw py::value_error("origins, widths, counts and strides must have one entry per dimension");
 
     const double* pos = position.data();
     const double* reach = support.data();
+    const double* smoothing_data = smoothing.data();
+    const double* value_data = value.data();
+    const double* extra_data = extra.data();
+    const double* table_data = table.data();
+    const std::size_t table_size = (std::size_t)table.shape(0);
 
     std::vector<Ranges> ranges(rows);
     std::vector<std::size_t> offsets(rows + 1, 0);
@@ -91,11 +103,11 @@ py::tuple scatter_pairs(PyArr position, PyArr smoothing, PyArr support,
     const std::size_t total = offsets[rows];
 
     py::array_t<std::int64_t> cell(total);
-    py::array_t<double> distance(total);
-    py::array_t<std::int64_t> which_row(total);
+    py::array_t<double> weights(total);
+    py::array_t<double> values(total);
     std::int64_t* cell_data = cell.mutable_data();
-    double* distance_data = distance.mutable_data();
-    std::int64_t* row_data = which_row.mutable_data();
+    double* weight_data = weights.mutable_data();
+    double* value_out = values.mutable_data();
 
 #pragma omp parallel for num_threads(threads > 0 ? threads : omp_get_max_threads()) schedule(static)
     for (std::int64_t row = 0; row < (std::int64_t)rows; ++row) {
@@ -113,9 +125,13 @@ py::tuple scatter_pairs(PyArr position, PyArr smoothing, PyArr support,
                 squared += delta * delta;
                 flat += j * strides[axis];
             }
+            const double h = smoothing_data[row];
+            const std::size_t table_index = (std::size_t)(squared / (4.0 * h * h) * (double)table_size);
+            const double kernel_value =
+                table_index < table_size ? table_data[table_index] / std::pow(h, (double)h_power) : 0.0;
             cell_data[at] = flat - low_row * strides[0];
-            distance_data[at] = squared;
-            row_data[at] = row;
+            value_out[at] = value_data[row];
+            weight_data[at] = kernel_value * measure * extra_data[row];
             ++at;
             for (std::size_t axis = dims; axis-- > 0;) {  // last axis varies fastest
                 if (++index[axis] < r.high[axis] - r.low[axis]) break;
@@ -123,14 +139,15 @@ py::tuple scatter_pairs(PyArr position, PyArr smoothing, PyArr support,
             }
         }
     }
-    return py::make_tuple(cell, distance, which_row);
+    return py::make_tuple(cell, values, weights);
 }
 
 void register_scatter(py::module_& m) {
     m.def("scatter_pairs", &scatter_pairs, py::arg("position"), py::arg("smoothing"), py::arg("support"),
+          py::arg("value"), py::arg("extra"), py::arg("table"), py::arg("h_power"), py::arg("measure"),
           py::arg("origins"), py::arg("widths"), py::arg("counts"), py::arg("strides"), py::arg("low_row"),
           py::arg("high_row"), py::arg("threads") = 0,
-          "Every (cell, distance^2, row) particle-cell pair inside one slab of rows.");
+          "Every (cell, value, weight) particle-cell pair inside one slab of rows.");
 }
 
 }  // namespace image

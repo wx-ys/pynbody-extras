@@ -71,10 +71,12 @@ them is on by default:
   parameter now.)
 
   The pair loop itself is ``cpp/image/scatter.cpp`` — pynbody's ``result[...] +=
-  ...`` walk writing pair records rather than sums — with a NumPy fallback, and
-  the pair build costs about what a kernel sum costs (22 ms against 21 ms for a
-  million pairs).  A whole quantile query is still several times a kernel sum,
-  because it also weighs the pairs and reduces them — so it is **opt-in**:
+  ...`` walk writing ``(cell, value, weight)`` records rather than sums, the
+  kernel lookup included — with a NumPy fallback that weighs the pairs the same
+  way.  Building and weighing the million pairs of a 32² grid off 200k particles
+  costs about what a kernel sum costs (23 ms against 12 ms); the rest of a
+  quantile query is the reduction, so it stays several times a kernel sum and is
+  **opt-in**:
   ``SphRender(..., exact=True)``, or the :attr:`BinNDResult.sph_render_exact`
   shortcut.  With the default view a quantile query raises and says so, rather
   than being answered by something cheaper that means something else.  ``exact``
@@ -353,11 +355,21 @@ class SphRender:
         for low in range(0, shape[0], _SLAB_ROWS):
             high = min(low + _SLAB_ROWS, shape[0])
             slab_cells = (high - low) * row
-            cell, distance, found = self._pairs(
-                position, smoothing, support, centres, origins, widths, strides, low, high
+            cell, entry_value, entry_weight = self._pairs(
+                position,
+                smoothing,
+                support,
+                value,
+                weight,
+                centres,
+                origins,
+                widths,
+                strides,
+                low,
+                high,
+                kernel,
+                measure,
             )
-            entry_value = value[found]
-            entry_weight = _kernel_weights(np.sqrt(distance), smoothing[found], kernel) * measure * weight[found]
             # Bucketing reduces the slab in O(pairs) instead of ordering it; the
             # answer is the same one :func:`weighted_percentiles` gives.
             bins = int(np.clip(_BUCKET_BUDGET // max(slab_cells, 1), _MIN_BUCKETS, _MAX_BUCKETS))
@@ -372,26 +384,36 @@ class SphRender:
         position: np.ndarray,
         smoothing: np.ndarray,
         support: np.ndarray,
+        value: np.ndarray,
+        extra: np.ndarray,
         centres: list[np.ndarray],
         origins: list[float],
         widths: list[float],
         strides: list[int],
         low: int,
         high: int,
+        kernel: Any,
+        measure: float,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """``(cell, distance², row)`` for every particle-cell pair in one slab.
+        """``(cell, value, weight)`` for every particle-cell pair in one slab.
 
-        The compiled kernel does the same arithmetic as :func:`_scatter_pairs` — the
-        ``result[...] += ...`` loop of pynbody's renderer, writing pair records
-        instead of sums — and is roughly an order of magnitude faster; the NumPy
-        fallback keeps the layer working without the optional extension.
+        The compiled kernel does the work of :func:`_scatter_pairs` *and* pynbody's
+        kernel lookup — the ``result[...] += ...`` loop of its renderer, writing
+        pair records instead of sums — and is roughly an order of magnitude faster;
+        the NumPy fallback keeps the layer working without the optional extension
+        and weighs the pairs with the same lookup in :func:`_kernel_weights`.
         """
         builder = _native_pair_builder()
         if builder is not None:
-            cell, distance, found = builder(
+            cell, values, weights = builder(
                 np.ascontiguousarray(position, dtype=float),
                 np.ascontiguousarray(smoothing, dtype=float),
                 np.ascontiguousarray(support, dtype=float),
+                np.ascontiguousarray(value, dtype=float),
+                np.ascontiguousarray(extra, dtype=float),
+                _kernel_table(kernel),
+                int(getattr(kernel, "h_power", 3)),
+                float(measure),
                 list(origins),
                 list(widths),
                 [len(centre) for centre in centres],
@@ -400,12 +422,12 @@ class SphRender:
                 int(high),
                 0,
             )
-            return (
-                np.asarray(cell, dtype=np.intp),
-                np.asarray(distance, dtype=float),
-                np.asarray(found, dtype=np.intp),
-            )
-        return _scatter_pairs(position, smoothing, support, centres, origins, widths, strides, low, high)
+            return (np.asarray(cell, dtype=np.intp), np.asarray(values, dtype=float), np.asarray(weights, dtype=float))
+        cell, distance, found = _scatter_pairs(
+            position, smoothing, support, centres, origins, widths, strides, low, high
+        )
+        weight = _kernel_weights(np.sqrt(distance), smoothing[found], kernel) * measure * extra[found]
+        return cell, value[found], weight
 
     def _images(self, plan: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
         """Particle indices and per-axis shifts for every image that can reach the grid.
@@ -828,25 +850,32 @@ def _native_pair_builder() -> Callable[..., tuple[np.ndarray, np.ndarray, np.nda
     return cast("Callable[..., tuple[np.ndarray, np.ndarray, np.ndarray]] | None", builder)
 
 
+def _kernel_table(kernel: Any) -> np.ndarray:
+    """pynbody's kernel lookup table as float64, for the compiled pair builder.
+
+    Passing the table — rather than a kernel id — keeps the kernel definition on the
+    Python side: the C loop indexes the same numbers pynbody's renderer indexes.
+    """
+    return np.ascontiguousarray(kernel.get_samples(), dtype=float)
+
+
 def _kernel_weights(distance: np.ndarray, smoothing: np.ndarray, kernel: Any) -> np.ndarray:
     r"""``W(distance, h)`` for a grid of separations and a matching grid of ``h``.
 
-    A three-dimensional kernel evaluates its own vectorised ``value``; a projected
-    one (``Kernel2D``, used for the two-dimensional render) only has the scalar
-    numerical quadrature pynbody builds its lookup table from, so the table is
-    indexed exactly as the renderer indexes it — the same table, the same lookup —
-    so a quantile weighs its neighbours with the very weights the kernel sums use.
+    The kernel is indexed exactly as pynbody's renderer indexes it — its own
+    lookup table, ``index = len(table) * d²/(2h)²``, zero beyond — so a quantile
+    weighs its neighbours with the very weights the kernel sums use, whether the
+    kernel is three-dimensional or the projected one.  (The C kernel in
+    ``cpp/image/scatter.cpp`` does this same indexing.)
     """
-    if getattr(kernel, "h_power", 3) != 2:
-        return np.asarray(kernel.value(distance, smoothing), dtype=float)
     # pynbody caches the sample table per kernel and *not* per dtype, and its C
     # renderer asks for it as float32 — so ask for the same thing it will, or a
     # later kernel sum trips over a float64 table.
     samples = np.asarray(kernel.get_samples(), dtype=float)
-    # ``_render.get_kernel``: index = num_samples * d**2 / (2h)**2, and zero beyond.
     index = ((distance / smoothing) ** 2 / 4.0 * len(samples)).astype(np.intp)
     inside = index < len(samples)
-    return np.where(inside, samples[np.clip(index, 0, len(samples) - 1)], 0.0) / smoothing**2
+    table = samples[np.clip(index, 0, len(samples) - 1)]
+    return np.where(inside, table, 0.0) / smoothing ** int(getattr(kernel, "h_power", 3))
 
 
 def _position_array(sim: Any, axes: dict[str, Any]) -> np.ndarray:
