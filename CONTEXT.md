@@ -129,7 +129,8 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   `BinND`) is the one binning implementation, so profile building has a single
   statistics vocabulary (`"mass.sum"`, `"vz.disp"`, …) and the chunked-array
   experiment (dask, the `chunk` extra) is no longer carried.
-- [ADR-0013](docs/adr/0013-sph-render-smoothes-the-binned-queries.md):
+- [ADR-0013](docs/adr/0013-sph-render-smoothes-the-binned-queries.md), extended by
+  [ADR-0014](docs/adr/0014-one-entry-point-for-sph-render.md):
   `bins.sph_render[...]` answers the same queries through an SPH kernel instead of
   cell membership — a *view*, so the result is a `BinsArray` on the same grid and
   the units match the strict query.  Two or three spatial axes with evenly spaced
@@ -137,9 +138,7 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   both dimensions render with pynbody (2-D projected, 3-D `to_3d_grid`), the
   unequal y/z resolution that trips pynbody's z-pixel bug warns rather than
   returning something different, the mean-likes are kernel sums while
-  `median`/`pXX` are weighted quantiles over the 64 nearest particles per cell
-  (same definition, reduced for all cells in one vectorised call), and the C++
-  KD-tree underneath comes from scipy/pynbody rather than a new extension.
+  `median`/`pXX` are weighted quantiles.
   The quantiles *scatter* rather than gather: every particle spreads its kernel
   over the cells it reaches, so a cell sees exactly the neighbours its kernel sums
   see — no nearest-neighbour cap (an earlier version had one, and it truncated up
@@ -147,11 +146,9 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   kernel (`cpp/image/scatter.cpp`, with a NumPy fallback), the reduction counts
   weights into value bins and orders only the entries a percentile falls between
   (`bucketed_weighted_percentiles`), and the grid is processed in slabs of rows to
-  bound memory.
-  It is **opt-in**: the default view answers only the kernel sums (pynbody's C
-  renderer) and refuses a quantile with a message pointing at `exact=True` /
-  `bins.sph_render_exact`, because the scattering costs tens of times a kernel sum
-  and a cheaper quantile would mean something else.
+  bound memory.  One entry point, no mode: the statistic picks the engine, so the
+  kernel sums stay cheap and a quantile pays for itself — about a dozen kernel
+  sums, with a `UserWarning` when the scatter would be huge.
 
 ## Image layer (`pynbodyext/plot/image/`)
 

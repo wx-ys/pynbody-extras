@@ -155,25 +155,15 @@ def test_unknown_keys_are_rejected() -> None:
         bins.sph_render["nonsense"]
 
 
-def test_a_quantile_is_refused_unless_the_exact_engine_is_asked_for() -> None:
-    """The default reaches only what a kernel sum can hold."""
+def test_one_view_answers_the_kernel_sums_and_the_quantiles() -> None:
+    """The statistic picks the engine; there is no second entry point to remember."""
     bins = make_bins(make_sim(500))
 
-    with pytest.raises(ValueError, match="exact=True"):
-        bins.sph_render["vz.median"]
+    mean = np.asarray(bins.sph_render["vz.mean"])
+    median = np.asarray(bins.sph_render["vz.median"])
 
-    assert np.isfinite(np.asarray(bins.sph_render_exact["vz.median"])).any()
-
-
-def test_the_kernel_sums_do_not_depend_on_the_engine_choice() -> None:
-    """``exact`` is about the quantiles: the sums are the renderer either way."""
-    bins = make_bins(make_sim(500))
-
-    for key in ("count", "mass.sum", "vz.mean", "vz.mean@mass", "vz.disp"):
-        plain = np.asarray(bins.sph_render[key])
-        exact = np.asarray(SphRender(bins, exact=True)[key])
-
-        np.testing.assert_allclose(plain, exact, equal_nan=True)
+    assert mean.shape == median.shape == (NBINS, NBINS)
+    assert np.isfinite(mean).any() and np.isfinite(median).any()
 
 
 # ---------------------------------------------------------------------------
@@ -384,7 +374,7 @@ def test_a_median_of_one_particle_is_that_particle() -> None:
     sim["smooth"] = SimArray([1.0], "kpc")
     bins = make_bins(sim)
 
-    median = np.asarray(bins.sph_render_exact["vz.median"])
+    median = np.asarray(bins.sph_render["vz.median"])
     count = np.asarray(bins.sph_render["count"])
 
     np.testing.assert_allclose(median[count > 0.0], 42.0)
@@ -396,7 +386,7 @@ def test_a_constant_field_has_the_same_median_as_mean() -> None:
     sim = make_sim(2000)
     sim["const"] = SimArray(np.full(len(sim), 7.0), "km s**-1")
     bins = make_bins(sim)
-    render = SphRender(bins, exact=True)
+    render = SphRender(bins)
 
     count = np.asarray(bins.sph_render["count"])
     for key in ("const.median", "const.p16", "const.mean"):
@@ -417,7 +407,7 @@ def test_quantiles_match_a_brute_force_weighted_quantile() -> None:
     y = Bin1D("y", vmin=-span / 2, vmax=span / 2, nbins=nbins, alias="y")
     bins = (x @ y)(sim)
 
-    rendered = np.asarray(SphRender(bins, exact=True)["vz.abs.p16@mass"])
+    rendered = np.asarray(SphRender(bins)["vz.abs.p16@mass"])
 
     reference = reference_quantile(
         np.asarray(sim["pos"]),
@@ -448,7 +438,7 @@ def test_a_grid_taller_than_one_slab_is_scattered_correctly() -> None:
     y = Bin1D("y", vmin=-span / 2, vmax=span / 2, nbins=nbins_y, alias="y")
     bins = (x @ y)(sim)
 
-    rendered = np.asarray(SphRender(bins, exact=True)["vz.median"])
+    rendered = np.asarray(SphRender(bins)["vz.median"])
 
     reference = reference_quantile(
         np.asarray(sim["pos"]),
@@ -469,7 +459,7 @@ def test_quantiles_respect_transforms_weights_and_units() -> None:
     sim = make_sim(3000)
     bins = make_bins(sim)
 
-    render = SphRender(bins, exact=True)
+    render = SphRender(bins)
     absolute = render["vz.abs.p16"]
     weighted = render["vz.abs.p16@mass"]
 
@@ -486,7 +476,7 @@ def test_a_quantile_then_a_kernel_sum_still_works() -> None:
     """pynbody caches its kernel table per kernel: ask for it in its own dtype."""
     bins = make_bins(make_sim(500))
 
-    median = np.asarray(bins.sph_render_exact["vz.median"])
+    median = np.asarray(bins.sph_render["vz.median"])
     mean = np.asarray(bins.sph_render["vz.mean"])
 
     assert median.shape == mean.shape == (NBINS, NBINS)
@@ -506,7 +496,7 @@ def test_the_compiled_pair_builder_matches_the_numpy_one() -> None:
         pytest.skip("the optional C++ extension is not built")
     sim = make_sim(4000, h=0.5)
     bins = make_bins(sim)
-    render = SphRender(bins, exact=True)
+    render = SphRender(bins)
     plan = render._layout()
     particle, shift = render._images(plan)
     position = plan["position"][particle][:, [0, 1]] + shift
@@ -563,10 +553,10 @@ def test_the_numpy_fallback_answers_the_same_quantile(monkeypatch: pytest.Monkey
 
     sim = make_sim(3000, h=0.5)
     bins = make_bins(sim)
-    native = np.asarray(SphRender(bins, exact=True)["vz.median"])
+    native = np.asarray(SphRender(bins)["vz.median"])
 
     monkeypatch.setattr(module, "_native_pair_builder", lambda: None)
-    fallback = np.asarray(SphRender(bins, exact=True)["vz.median"])
+    fallback = np.asarray(SphRender(bins)["vz.median"])
 
     assert np.isfinite(fallback).sum() == np.isfinite(native).sum() > 0
     np.testing.assert_allclose(fallback, native, rtol=1e-6, atol=1e-6, equal_nan=True)
@@ -600,7 +590,7 @@ def test_a_quantile_accepts_coordinates_outside_the_box() -> None:
     """Snapshots put particles outside [0, L); the scatter handles that."""
     bins = make_periodic_sim(1000.0, count=200)
 
-    median = np.asarray(bins.sph_render_exact["vz.median"])
+    median = np.asarray(bins.sph_render["vz.median"])
 
     assert median.shape == (32, 32)
     assert np.isfinite(median).any()
@@ -611,7 +601,7 @@ def test_the_box_wraps_the_quantile_neighbours_as_the_sums_do() -> None:
     bins = make_periodic_sim(1000.0)
 
     count = np.asarray(bins.sph_render["count"])
-    median = np.asarray(bins.sph_render_exact["vz.median"])
+    median = np.asarray(bins.sph_render["vz.median"])
 
     for cell in (0, -1):  # either side of the periodic boundary
         assert count[cell, 16] > 0.0
@@ -619,7 +609,7 @@ def test_the_box_wraps_the_quantile_neighbours_as_the_sums_do() -> None:
     # without a box, the far side is simply far away
     open_bins = make_periodic_sim(0.0)
     assert np.asarray(open_bins.sph_render["count"])[-1, 16] == 0.0
-    assert np.isnan(np.asarray(open_bins.sph_render_exact["vz.median"])[-1, 16])
+    assert np.isnan(np.asarray(open_bins.sph_render["vz.median"])[-1, 16])
 
 
 def test_a_mixed_particle_set_points_at_the_family_with_smoothing() -> None:
