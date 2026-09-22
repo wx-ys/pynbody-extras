@@ -19,6 +19,7 @@ ext_modules = [
             str(ROOT / "cpp" / "bindings" / "module.cpp"),
             *[str(p) for p in (ROOT / "cpp" / "gravity").glob("*.cpp")],
             *[str(p) for p in (ROOT / "cpp" / "gravity" / "multipole").glob("*.cpp")],
+            *[str(p) for p in (ROOT / "cpp" / "image").glob("*.cpp")],
         ],
         include_dirs=[str(ROOT / "cpp")],
         cxx_std=17,

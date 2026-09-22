@@ -54,6 +54,7 @@ __all__ = [
     "get_statistic",
     "evaluate_statistic",
     "is_statistic_name",
+    "bucketed_weighted_percentiles",
     "weighted_percentiles",
     "register_pipeline_transform",
     # built-in statistics
@@ -449,6 +450,151 @@ def weighted_percentiles(values: Any, weights: Any, percentile: float, *, segmen
         out[samples[order][hit]] = interpolated
 
     return float(out[0]) if single else out
+
+
+def _lightest_weight(
+    sample: np.ndarray, value: np.ndarray, weight: np.ndarray, which: np.ndarray, first_bin: np.ndarray, samples: int
+) -> np.ndarray:
+    """Weight of each sample's smallest value, which the definition excludes.
+
+    Only the first occupied bin can hold it, so only that bin is ordered.
+    """
+    in_first = np.flatnonzero(which == first_bin[sample])
+    in_first = in_first[np.lexsort((value[in_first], sample[in_first]))]
+    heads = np.unique(sample[in_first], return_index=True)[1]
+    lightest = np.full(samples, np.nan)
+    lightest[sample[in_first[heads]]] = weight[in_first[heads]]
+    return lightest
+
+
+def _bracket(
+    sample: np.ndarray, which: np.ndarray, cumulative: np.ndarray, occupied: np.ndarray, crossing: np.ndarray, bins: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Weight below the bracketing bins, and the entries that bracket the crossing.
+
+    The value just below the crossing is the largest one in the highest *occupied*
+    bin under it — not simply "the bin below", since a lumpy distribution can leave
+    several bins empty between the two values a percentile falls between.
+    """
+    positions = np.arange(bins)[None, :]
+    occupied_below = np.where(occupied & (positions < crossing[:, None]), positions, -1)
+    below_bin = occupied_below.max(axis=1)
+    has_below = below_bin >= 0
+    rows = np.arange(len(cumulative))
+    base = np.where(has_below, np.where(below_bin > 0, cumulative[rows, np.maximum(below_bin - 1, 0)], 0.0), 0.0)
+    picked = which == crossing[sample]
+    picked |= has_below[sample] & (which == below_bin[sample])
+    return base, picked
+
+
+def bucketed_weighted_percentiles(
+    values: Any, weights: Any, percentile: float, *, sample_of: Any, samples: int, bins: int = 1024
+) -> np.ndarray:
+    """``weighted_percentiles(..., segments=...)`` without ordering every sample.
+
+    The sorted path pays ``O(n log n)`` per cell for the *values*, and in the SPH
+    quantile engine that is the single largest cost after the particle-cell pairs
+    themselves are built.  Ordering is not actually needed: counting the weights
+    into value *bins* is one ``O(n)`` pass, and the percentile is the bin where the
+    cumulative weight crosses the target.  Only the entries in that bin — and the
+    one below it, for the case where the crossing straddles a bin edge — are
+    ordered, which the bins keep small.
+
+    The answer is the sorted path's own, exactly, including its two edge
+    conventions: the lightest value's weight is excluded from the distribution (so
+    a single-point sample is that point) and the percentile is interpolated
+    linearly between the two values it falls between.  Entries with a non-positive
+    weight or a non-finite value are dropped, as there.
+
+    Parameters
+    ----------
+    values, weights : array_like
+        Flat per-entry values and weights, the same shape.  Entries need **not** be
+        ordered — that is the point of this function: the sorted path needs a value
+        ordering per sample, this one counts into bins and orders only the handful
+        of entries a percentile falls between.
+    percentile : float
+        Percentile in ``[0, 100]``.
+    sample_of : array_like of int
+        Which sample each entry belongs to, in ``[0, samples)``.
+    samples : int
+        How many samples there are.
+    bins : int, default: 1024
+        How many value bins to count into.  More bins make the refinement cheaper
+        (fewer entries per bin) and the counting pass no slower; memory is
+        ``len(segments) * bins`` weights, so the engine lowers this for a wide slab.
+
+    Returns
+    -------
+    numpy.ndarray
+        One value per sample, ``NaN`` where nothing carries weight.
+
+    Examples
+    --------
+    >>> bucketed_weighted_percentiles([3.0, 1.0, 2.0], [1.0, 1.0, 1.0], 50.0, sample_of=[0, 0, 0], samples=1)
+    array([2.])
+    """
+    values_array = np.asarray(values, dtype=float)
+    weights_array = np.asarray(weights, dtype=float)
+    sample_all = np.asarray(sample_of, dtype=np.intp)
+    if values_array.shape != weights_array.shape or values_array.shape != sample_all.shape:
+        raise ValueError(
+            "values, weights and sample_of must have the same shape, got "
+            f"{values_array.shape}, {weights_array.shape} and {sample_all.shape}."
+        )
+    out = np.full(samples, np.nan)
+
+    carries = (weights_array > 0.0) & np.isfinite(values_array)
+    sample = sample_all[carries]
+    value = values_array[carries]
+    weight = weights_array[carries]
+    if not len(sample):
+        return out
+
+    low = float(value.min())
+    high = float(value.max())
+    if high <= low:  # every value is the same: no distribution to invert
+        out[np.unique(sample)] = low
+        return out
+
+    which = np.clip(((value - low) / (high - low) * bins).astype(np.intp), 0, bins - 1)
+    histogram = np.bincount(sample * bins + which, weights=weight, minlength=samples * bins).reshape(samples, bins)
+    cumulative = np.cumsum(histogram, axis=1)
+    total = cumulative[:, -1]
+    occupied = histogram > 0
+    lightest = _lightest_weight(sample, value, weight, which, np.argmax(occupied, axis=1), samples)
+
+    target = float(percentile) / 100.0
+    threshold = lightest + target * (total - lightest)
+    crossing = np.clip((cumulative < threshold[:, None]).sum(axis=1), 0, bins - 1)
+    # The lightest bin has already served its purpose and must stay out of the
+    # walk, where its weight is part of ``base``.
+    base, picked = _bracket(sample, which, cumulative, occupied, crossing, bins)
+    selected = np.flatnonzero(picked)
+    selected = selected[np.lexsort((value[selected], sample[selected]))]
+    starts = np.searchsorted(sample[selected], np.arange(samples))
+    stops = np.searchsorted(sample[selected], np.arange(samples), side="right")
+
+    for index in range(samples):
+        if not np.isfinite(threshold[index]):
+            continue
+        block = selected[starts[index] : stops[index]]
+        if not len(block):
+            continue
+        running = base[index] + np.cumsum(weight[block])
+        reached = np.flatnonzero(running >= threshold[index])
+        at = int(reached[0]) if len(reached) else len(block) - 1
+        if at == 0:
+            out[index] = value[block[0]]
+            continue
+        previous_value, next_value = value[block[at - 1]], value[block[at]]
+        below, above = running[at - 1], running[at]
+        out[index] = (
+            next_value
+            if above <= below
+            else previous_value + (threshold[index] - below) / (above - below) * (next_value - previous_value)
+        )
+    return out
 
 
 # ---------------------------------------------------------------------------

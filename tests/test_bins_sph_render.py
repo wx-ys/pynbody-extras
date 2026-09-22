@@ -492,6 +492,45 @@ def test_a_quantile_then_a_kernel_sum_still_works() -> None:
     assert median.shape == mean.shape == (NBINS, NBINS)
 
 
+def test_the_compiled_pair_builder_matches_the_numpy_one() -> None:
+    """The C++ kernel is an optimisation of the fallback, not a second definition."""
+    from pynbodyext.core.calculate.bins.sph_render import _native_pair_builder, _scatter_pairs
+
+    builder = _native_pair_builder()
+    if builder is None:
+        pytest.skip("the optional C++ extension is not built")
+    sim = make_sim(4000, h=0.5)
+    bins = make_bins(sim)
+    render = SphRender(bins, exact=True)
+    plan = render._layout()
+    particle, shift = render._images(plan)
+    position = plan["position"][particle][:, [0, 1]] + shift
+    smoothing = render._smoothing(plan["smooth"])[particle]
+    support = 2.0 * smoothing
+    centres = [np.asarray(plan["axes"][prop].edges[:-1] + plan["axes"][prop].edges[1:]) / 2 for prop in plan["present"]]
+    origins = [float(plan["axes"][prop].edges[0]) for prop in plan["present"]]
+    widths = [plan["widths"][prop] for prop in plan["present"]]
+    strides = [NBINS, 1]
+
+    native = builder(
+        np.ascontiguousarray(position),
+        np.ascontiguousarray(smoothing),
+        np.ascontiguousarray(support),
+        origins,
+        widths,
+        [NBINS, NBINS],
+        strides,
+        0,
+        NBINS,
+        0,
+    )
+    fallback = _scatter_pairs(position, smoothing, support, centres, origins, widths, strides, 0, NBINS)
+
+    for name, compiled, interpreted in zip(("cell", "distance", "row"), native, fallback, strict=True):
+        assert len(compiled) == len(interpreted) > 0, name
+        np.testing.assert_allclose(np.sort(np.asarray(compiled)), np.sort(np.asarray(interpreted)), err_msg=name)
+
+
 # ---------------------------------------------------------------------------
 # periodic boxes
 # ---------------------------------------------------------------------------

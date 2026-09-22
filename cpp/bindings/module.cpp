@@ -16,6 +16,7 @@
 #include "gravity/traversal.hpp"
 #include "gravity/kernel.hpp"
 #include "gravity/vec3.hpp"
+#include "image/scatter.hpp"
 
 namespace py = pybind11;
 using namespace gravity;
@@ -287,4 +288,6 @@ PYBIND11_MODULE(_native, m) {
     m.def("direct_potentials_at_points_py", &direct_potentials_at_points_py, py::arg("positions"),
           py::arg("targets"), py::arg("masses") = py::none(), py::arg("threads") = 0,
           py::arg("softenings") = py::none(), py::arg("kernel") = py::none());
+
+    image::register_scatter(m);
 }

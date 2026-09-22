@@ -57,9 +57,11 @@ them is on by default:
   linear in the weights and so cannot be a kernel sum.  They are built by
   *scattering*: each particle lays its kernel over the cells it touches — the same
   thing pynbody's renderer does internally, periodic images included — and the
-  resulting ``(value, weight)`` pairs are reduced cell by cell with
-  :func:`~.statistics.weighted_percentiles`, which is the strict query's own
-  definition and takes a length per cell so nothing is padded.  A cell therefore
+  resulting ``(value, weight)`` pairs are reduced by
+  :func:`~.statistics.bucketed_weighted_percentiles`, which is the strict query's
+  own definition: it counts the weights into value bins, finds the bin the
+  percentile falls in and orders only the entries there, so a cell's answer is what
+  ``bins[...]`` would give for the same neighbours, smoothed.  A cell therefore
   sees exactly the neighbours its kernel sums see, and ``"vz.abs.p16@mass"`` is
   the mass-weighted 16th percentile of ``|vz|`` over all of them, while
   ``"vz.median"`` is the weighted median — which need not equal ``"vz.mean"``.
@@ -68,12 +70,15 @@ them is on by default:
   to 44% and moved medians by tens of km/s.  Scattering is why there is no such
   parameter now.)
 
-  Scattering is not free — it must gather and sort every particle-cell pair, tens
-  of times the cost of a kernel sum — so it is **opt-in**: ``SphRender(...,
-  exact=True)``, or the :attr:`BinNDResult.sph_render_exact` shortcut.  With the
-  default view a quantile query raises and says so, rather than being answered by
-  something cheaper that means something else.  ``exact`` affects the quantiles
-  only; the kernel sums are identical either way.
+  The pair loop itself is ``cpp/image/scatter.cpp`` — pynbody's ``result[...] +=
+  ...`` walk writing pair records rather than sums — with a NumPy fallback, and
+  the pair build costs about what a kernel sum costs (22 ms against 21 ms for a
+  million pairs).  A whole quantile query is still several times a kernel sum,
+  because it also weighs the pairs and reduces them — so it is **opt-in**:
+  ``SphRender(..., exact=True)``, or the :attr:`BinNDResult.sph_render_exact`
+  shortcut.  With the default view a quantile query raises and says so, rather
+  than being answered by something cheaper that means something else.  ``exact``
+  affects the quantiles only; the kernel sums are identical either way.
 
 Requirements
 ------------
@@ -104,6 +109,7 @@ from __future__ import annotations
 
 import itertools
 import warnings
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -117,11 +123,13 @@ from .statistics import (
     Percentile,
     Sum,
     apply_pipeline,
+    bucketed_weighted_percentiles,
     parse_pipeline_key,
-    weighted_percentiles,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pynbody.sph.kernels import KernelBase
 
     from .arrays import BinsArray
@@ -148,6 +156,14 @@ _SLAB_ROWS = 32
 
 #: Particle-cell pairs in one quantile before we warn about the cost.
 _ENTRY_WARNING = 50_000_000
+
+#: Buckets (cells x value bins) the quantile reduction may allocate at once.  The
+#: bin count follows from the slab; it affects only speed, never the answer.
+_BUCKET_BUDGET = 4_000_000
+
+#: Bounds on that bin count, for a slab of very many or very few cells.
+_MIN_BUCKETS = 64
+_MAX_BUCKETS = 4096
 
 
 class SphRender:
@@ -336,25 +352,60 @@ class SphRender:
         row = strides[0]
         for low in range(0, shape[0], _SLAB_ROWS):
             high = min(low + _SLAB_ROWS, shape[0])
-            cell, entry_value, entry_weight = _scatter(
-                position,
-                smoothing,
-                support,
-                value,
-                weight,
-                centres,
-                origins,
-                widths,
-                strides,
-                low,
-                high,
-                kernel,
-                measure,
+            slab_cells = (high - low) * row
+            cell, distance, found = self._pairs(
+                position, smoothing, support, centres, origins, widths, strides, low, high
             )
-            counts = np.bincount(cell, minlength=(high - low) * row)
-            reduced = weighted_percentiles(entry_value, entry_weight, statistic.percentile, segments=counts)
+            entry_value = value[found]
+            entry_weight = _kernel_weights(np.sqrt(distance), smoothing[found], kernel) * measure * weight[found]
+            # Bucketing reduces the slab in O(pairs) instead of ordering it; the
+            # answer is the same one :func:`weighted_percentiles` gives.
+            bins = int(np.clip(_BUCKET_BUDGET // max(slab_cells, 1), _MIN_BUCKETS, _MAX_BUCKETS))
+            reduced = bucketed_weighted_percentiles(
+                entry_value, entry_weight, statistic.percentile, sample_of=cell, samples=slab_cells, bins=bins
+            )
             out[low:high] = np.asarray(reduced, dtype=float).reshape((high - low, *shape[1:]))
         return out
+
+    def _pairs(
+        self,
+        position: np.ndarray,
+        smoothing: np.ndarray,
+        support: np.ndarray,
+        centres: list[np.ndarray],
+        origins: list[float],
+        widths: list[float],
+        strides: list[int],
+        low: int,
+        high: int,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """``(cell, distance², row)`` for every particle-cell pair in one slab.
+
+        The compiled kernel does the same arithmetic as :func:`_scatter_pairs` — the
+        ``result[...] += ...`` loop of pynbody's renderer, writing pair records
+        instead of sums — and is roughly an order of magnitude faster; the NumPy
+        fallback keeps the layer working without the optional extension.
+        """
+        builder = _native_pair_builder()
+        if builder is not None:
+            cell, distance, found = builder(
+                np.ascontiguousarray(position, dtype=float),
+                np.ascontiguousarray(smoothing, dtype=float),
+                np.ascontiguousarray(support, dtype=float),
+                list(origins),
+                list(widths),
+                [len(centre) for centre in centres],
+                list(strides),
+                int(low),
+                int(high),
+                0,
+            )
+            return (
+                np.asarray(cell, dtype=np.intp),
+                np.asarray(distance, dtype=float),
+                np.asarray(found, dtype=np.intp),
+            )
+        return _scatter_pairs(position, smoothing, support, centres, origins, widths, strides, low, high)
 
     def _images(self, plan: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
         """Particle indices and per-axis shifts for every image that can reach the grid.
@@ -699,29 +750,27 @@ def _offset_vectors(boxsize: float | None, axes: list[Any]) -> list[tuple[float,
     return [tuple(float(component) for component in combination) for combination in itertools.product(*per_axis)]
 
 
-def _scatter(
+def _scatter_pairs(
     position: np.ndarray,
     smoothing: np.ndarray,
     support: np.ndarray,
-    value: np.ndarray,
-    weight: np.ndarray,
     centres: list[np.ndarray],
     origins: list[float],
     widths: list[float],
     strides: list[int],
     low_row: int,
     high_row: int,
-    kernel: Any,
-    measure: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Every ``(cell, value, weight)`` inside one slab of rows.
+    """Every ``(cell, distance², row)`` inside one slab of rows, in NumPy.
 
     Each particle's cell range comes from its own support (``2h``) and the uniform
     grid, so the block of cells one particle touches is a rectangular range;
     the ranges of all particles are then expanded into flat arrays at once
     (``np.repeat`` and a mixed-radix decomposition) rather than in a Python loop.
-    The result is sorted cell-major and value-sorted within each cell, ready for
-    :func:`~.statistics.weighted_percentiles` with a length per cell.
+    Nothing is ordered: the caller reduces with a per-entry sample index, which is
+    what :func:`~.statistics.bucketed_weighted_percentiles` takes.  The compiled
+    kernel in ``cpp/image/scatter.cpp`` does the same arithmetic; this is the
+    fallback for an install without it.
     """
     dimensions = len(centres)
     ranges: list[tuple[np.ndarray, np.ndarray]] = []
@@ -740,7 +789,7 @@ def _scatter(
     block = np.prod(np.stack(sizes), axis=0)
     picked = np.flatnonzero(block > 0)
     if not len(picked):
-        return (np.empty(0, dtype=np.intp), np.empty(0), np.empty(0))
+        return (np.empty(0, dtype=np.intp), np.empty(0), np.empty(0, dtype=np.intp))
 
     per_particle = block[picked]
     total = int(per_particle.sum())
@@ -765,10 +814,18 @@ def _scatter(
         displacement = centres[axis][index] - position[particle, axis]
         distance += displacement**2
 
-    entry_weight = _kernel_weights(np.sqrt(distance), smoothing[particle], kernel) * measure * weight[particle]
-    entry_value = value[particle]
-    order = np.lexsort((entry_value, cell))
-    return cell[order], entry_value[order], entry_weight[order]
+    return cell, distance, particle
+
+
+@lru_cache(maxsize=1)
+def _native_pair_builder() -> Callable[..., tuple[np.ndarray, np.ndarray, np.ndarray]] | None:
+    """The compiled pair builder, or ``None`` without the optional extension."""
+    try:
+        from pynbodyext import _native
+    except ImportError:
+        return None
+    builder = getattr(_native, "scatter_pairs", None)
+    return cast("Callable[..., tuple[np.ndarray, np.ndarray, np.ndarray]] | None", builder)
 
 
 def _kernel_weights(distance: np.ndarray, smoothing: np.ndarray, kernel: Any) -> np.ndarray:

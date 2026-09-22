@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 
 def test_model_derives_shape_and_root() -> None:
@@ -89,3 +90,27 @@ def test_vectorised_percentiles_agree_with_the_statistic_row_by_row() -> None:
     assert isinstance(weighted_percentiles(values[3], weights[3], 50.0), float)
     with pytest.raises(ValueError, match="same shape"):
         weighted_percentiles(np.ones(3), np.ones(4), 50.0)
+
+
+def test_bucketed_percentiles_agree_with_the_sorted_ones() -> None:
+    """The bucket fast path is the sorted definition, only cheaper."""
+    from pynbodyext.core.calculate.bins.statistics import bucketed_weighted_percentiles, weighted_percentiles
+
+    rng = np.random.default_rng(9)
+    for _ in range(5):
+        lengths = rng.integers(0, 50, 60)
+        size = int(lengths.sum())
+        values = rng.normal(size=size)
+        weights = rng.uniform(0.0, 2.0, size)
+        weights[rng.random(size) < 0.2] = 0.0  # particles outside the support
+        values[rng.random(size) < 0.05] = np.nan  # and values with nothing to say
+        sample_of = np.repeat(np.arange(len(lengths)), lengths)
+        for percentile in (0.0, 5.0, 16.0, 50.0, 84.0, 99.0, 100.0):
+            sorted_result = weighted_percentiles(values, weights, percentile, segments=lengths)
+            bucketed = bucketed_weighted_percentiles(
+                values, weights, percentile, sample_of=sample_of, samples=len(lengths), bins=256
+            )
+            np.testing.assert_allclose(bucketed, sorted_result, rtol=1e-9, atol=1e-9, equal_nan=True)
+
+    with pytest.raises(ValueError, match="same shape"):
+        bucketed_weighted_percentiles(np.ones(3), np.ones(3), 50.0, sample_of=np.ones(4, dtype=int), samples=2)
