@@ -409,8 +409,8 @@ class BinNDResult(BinPlotMixin, BinSphRenderMixin):
 
         Examples
         --------
-        >>> bins.queries.names()          # all query keys, e.g. "mass.sum"
-        >>> bins.queries.properties()     # registered derived-property keys
+        >>> bins.queries.names()  # all query keys, e.g. "mass.sum"
+        >>> bins.queries.properties()  # registered derived-property keys
         >>> bins.queries.explicit("mass", "sum")
         """
         return BinQueriesView(self)
@@ -626,7 +626,9 @@ class BinNDResult(BinPlotMixin, BinSphRenderMixin):
         Examples
         --------
         >>> bins.queries.apply(lambda sub: sub["vz"].mean())  # per-bin mean of vz
-        >>> bins.queries.apply(lambda sim, pb: np.bincount(pb, minlength=bins.nbins), vectorized=True)  # fast vectorized count
+        >>> bins.queries.apply(
+        ...     lambda sim, pb: np.bincount(pb, minlength=bins.nbins), vectorized=True
+        ... )  # fast vectorized count
         """
         return self._query_service.apply(query, name=name, empty=empty, vectorized=vectorized)
 
@@ -725,6 +727,7 @@ class BinNDResult(BinPlotMixin, BinSphRenderMixin):
         name: None = None,
         scope: str = "derived",
         condition: BinDerivedCondition | None = None,
+        allow_sph: bool = False,
         overwrite: bool = False,
     ) -> BinDerivedFunc: ...
     @overload
@@ -736,6 +739,7 @@ class BinNDResult(BinPlotMixin, BinSphRenderMixin):
         name: None = None,
         scope: str = "derived",
         condition: BinDerivedCondition | None = None,
+        allow_sph: bool = False,
         overwrite: bool = False,
     ) -> Callable[[BinDerivedFunc], BinDerivedFunc]: ...
     @overload
@@ -747,6 +751,7 @@ class BinNDResult(BinPlotMixin, BinSphRenderMixin):
         name: str | None = None,
         scope: str = "derived",
         condition: BinDerivedCondition | None = None,
+        allow_sph: bool = False,
         overwrite: bool = False,
     ) -> Callable[[BinDerivedFunc], BinDerivedFunc]: ...
     @classmethod
@@ -757,6 +762,7 @@ class BinNDResult(BinPlotMixin, BinSphRenderMixin):
         name: str | None = None,
         scope: str = "derived",
         condition: BinDerivedCondition | None = None,
+        allow_sph: bool = False,
         overwrite: bool = False,
     ) -> Any:
         """Register a derived per-bin property.
@@ -776,6 +782,14 @@ class BinNDResult(BinPlotMixin, BinSphRenderMixin):
             Query scope; ``geometry``/``axis`` results are shared with sub-results.
         condition : callable, optional
             ``lambda result -> bool`` gating availability.
+        allow_sph : bool, default: False
+            Whether :attr:`sph_render` may answer this property too.  Set it when
+            the callback is a *per-cell* function of the quantities it reads — the
+            same callback then runs against smoothed queries, so e.g. a ratio of
+            two ``mass.sum`` maps becomes the ratio of two SPH maps.  Leave it
+            off for anything order-dependent across cells (a cumulative sum) or
+            defined on the strict particle census, where smoothing would change
+            what the number means.
         overwrite : bool, default: False
             Whether to replace an existing property with the same name.
 
@@ -788,9 +802,17 @@ class BinNDResult(BinPlotMixin, BinSphRenderMixin):
         ...     return np.full(result.nbins, float(axis.maxs[-1] - axis.mins[0]))
         >>> "x_span" in Bin1D("x", vmin=0, vmax=6, nbins=3)(sim).keys()
         True
+
+        A property that is a pointwise function of smoothed queries can be
+        rendered too::
+
+        >>> @BinNDResult.derived("mass_ratio", allow_sph=True, overwrite=True)
+        ... def mass_ratio(result):
+        ...     return result.gas["mass.sum"] / result["mass.sum"]
+        >>> bins.sph_render["mass_ratio"]  # doctest: +SKIP
         """
         return cls._extensions.register_derived(
-            cls, fn, name=name, scope=scope, condition=condition, overwrite=overwrite
+            cls, fn, name=name, scope=scope, condition=condition, allow_sph=allow_sph, overwrite=overwrite
         )
 
     derived = register_derived
@@ -929,9 +951,13 @@ def _density(bins: BinNDResult) -> np.ndarray:
     return bins["mass.sum.density"]
 
 
-@BinNDResult.derived("number_density", overwrite=False)
+@BinNDResult.derived("number_density", overwrite=False, allow_sph=True)
 def _number_density(bins: BinNDResult) -> np.ndarray:
-    """Per-bin number density: particle count divided by physical measure."""
+    """Per-bin number density: particle count divided by physical measure.
+
+    A pointwise ratio of two per-cell quantities, so the smoothed version is the
+    kernel-integrated count over the same cell measure.
+    """
     with np.errstate(divide="ignore", invalid="ignore"):
         return bins["count"] / bins["measure"]
 
@@ -941,8 +967,14 @@ def _enclosed_mass(bins: BinNDResult) -> np.ndarray:
     return bins["mass.sum"].cumsum()
 
 
-@BinNDResult.derived("gas_fraction", condition=_has_family("gas"))
+@BinNDResult.derived("gas_fraction", condition=_has_family("gas"), allow_sph=True)
 def gas_fraction(bins: BinNDResult) -> np.ndarray:
+    """Per-bin gas mass fraction, available through :attr:`sph_render` too.
+
+    Each family's mass is summed in its own cell, so the smoothed version is the
+    ratio of the two *kernel-integrated* masses — a gas fraction that a cell
+    borrows from its neighbours, like every other sph_render query.
+    """
     gas_mass_sum = bins.gas["mass.sum"]
     total_mass_sum = bins["mass.sum"]
     numerator = np.nan_to_num(np.asarray(gas_mass_sum).ravel(), nan=0.0)

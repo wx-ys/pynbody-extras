@@ -37,17 +37,22 @@ class BinExtensionRegistry:
         name: str | None = None,
         scope: str = "derived",
         condition: BinDerivedCondition | None = None,
+        allow_sph: bool = False,
         overwrite: bool = False,
     ) -> Any:
         if isinstance(fn, str):
-            return self.register_derived(owner_cls, name=fn, scope=scope, condition=condition, overwrite=overwrite)
+            return self.register_derived(
+                owner_cls, name=fn, scope=scope, condition=condition, allow_sph=allow_sph, overwrite=overwrite
+            )
 
         def decorator(func: BinDerivedFunc) -> BinDerivedFunc:
             query_name = name or func.__name__
             bucket = self._derived_specs[owner_cls]
             if not overwrite and query_name in bucket:
                 raise KeyError(f"BinNDResult derived property {query_name!r} is already registered.")
-            bucket[query_name] = BinDerivedSpec(name=query_name, func=func, scope=scope, condition=condition)
+            bucket[query_name] = BinDerivedSpec(
+                name=query_name, func=func, scope=scope, condition=condition, allow_sph=allow_sph
+            )
             return func
 
         if fn is None:

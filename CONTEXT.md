@@ -130,14 +130,14 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   statistics vocabulary (`"mass.sum"`, `"vz.disp"`, …) and the chunked-array
   experiment (dask, the `chunk` extra) is no longer carried.
 - [ADR-0013](docs/adr/0013-sph-render-smoothes-the-binned-queries.md), extended by
-  [ADR-0014](docs/adr/0014-one-entry-point-for-sph-render.md):
+  [ADR-0014](docs/adr/0014-one-entry-point-for-sph-render.md) and
+  [ADR-0015](docs/adr/0015-sph-render-answers-derived-properties.md):
   `bins.sph_render[...]` answers the same queries through an SPH kernel instead of
   cell membership — a *view*, so the result is a `BinsArray` on the same grid and
   the units match the strict query.  Two or three spatial axes with evenly spaced
   bins (anything else raises), `count` is the kernel-integrated particle number,
-  both dimensions render with pynbody (2-D projected, 3-D `to_3d_grid`), the
-  unequal y/z resolution that trips pynbody's z-pixel bug warns rather than
-  returning something different, the mean-likes are kernel sums while
+  both dimensions render with pynbody (2-D projected, 3-D `to_3d_grid`, whose z
+  pixels upstream now follow `nz`), the mean-likes are kernel sums while
   `median`/`pXX` are weighted quantiles.
   The quantiles *scatter* rather than gather: every particle spreads its kernel
   over the cells it reaches, so a cell sees exactly the neighbours its kernel sums
@@ -149,6 +149,10 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   bound memory.  One entry point, no mode: the statistic picks the engine, so the
   kernel sums stay cheap and a quantile pays for itself — about a dozen kernel
   sums, with a `UserWarning` when the scatter would be huge.
+  The view answers derived properties too: `<field>.density`, and any property
+  registered `allow_sph=True` (`gas_fraction`, `number_density`) by re-running its
+  own callback against the smoothed queries.  Geometry is shared with the strict
+  result, and a derived property that has not opted in is refused by name.
 
 ## Image layer (`pynbodyext/plot/image/`)
 

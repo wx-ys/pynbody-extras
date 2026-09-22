@@ -9,6 +9,7 @@ pynbody's own kernel where they can be checked exactly.
 from __future__ import annotations
 
 import warnings
+from typing import Any
 
 import numpy as np
 import pynbody
@@ -17,7 +18,7 @@ from pynbody.array import SimArray
 from pynbody.sph import kernels
 
 from pynbodyext.core.calculate import Bin1D
-from pynbodyext.core.calculate.bins import SphRender
+from pynbodyext.core.calculate.bins import BinNDResult, SphRender
 from pynbodyext.core.calculate.bins.statistics import Percentile
 
 #: Cell size of the 2-D test grids: 10 kpc across, 20 bins.
@@ -340,24 +341,33 @@ def test_a_volume_render_matches_a_direct_kernel_sum() -> None:
     np.testing.assert_allclose(rendered, reference, rtol=0.03, atol=0.02 * peak)
 
 
-def test_an_unequal_z_resolution_warns_about_pynbody_grid_bug() -> None:
-    """pynbody sizes z pixels with ``ny``; say so rather than hide it."""
-    sim = make_sim(300, h=0.5)
-    axes = [
-        Bin1D(prop, vmin=-SPAN / 2, vmax=SPAN / 2, nbins=nbins, alias=prop)
-        for prop, nbins in (("x", 5), ("y", 5), ("z", 3))
-    ]
+def test_an_unequal_z_resolution_renders_the_grid_it_was_asked_for() -> None:
+    """``nz != ny`` used to be misplaced (pynbody sized z pixels with ``ny``)."""
+    h, span = 0.5, 3.0
+    counts = {"x": 4, "y": 6, "z": 3}
+    atom = np.array([0.1, 0.1, 1.0])  # inside cell (2, 3, 2) of the grid below
+    sim = pynbody.new(dm=1)
+    sim["pos"] = SimArray([atom], "kpc")
+    sim["mass"] = SimArray([1.0], "Msol")
+    sim["smooth"] = SimArray([h], "kpc")
+    axes = [Bin1D(prop, vmin=-span / 2, vmax=span / 2, nbins=counts[prop], alias=prop) for prop in ("x", "y", "z")]
     bins = (axes[0] @ axes[1] @ axes[2])(sim)
 
-    with pytest.warns(UserWarning, match="z pixels"):
-        bins.sph_render["count"]
-
-    equal = [
-        Bin1D(prop, vmin=-SPAN / 2, vmax=SPAN / 2, nbins=5, alias=prop) for prop in ("x", "y", "z")
-    ]
     with warnings.catch_warnings():
-        warnings.simplefilter("error")  # a matching resolution must stay quiet
-        (equal[0] @ equal[1] @ equal[2])(sim).sph_render["count"]
+        warnings.simplefilter("error")  # the upstream bug this used to warn about is fixed
+        count = np.asarray(bins.sph_render["count"])
+
+    assert count.shape == (4, 6, 3)
+    assert np.unravel_index(count.argmax(), count.shape) == (2, 3, 2)
+    assert count[:, :, 2].sum() == pytest.approx(count.sum()), "the kernel belongs in the containing z layer"
+
+    centre = np.array(
+        [-span / 2 + (index + 0.5) * (span / counts[prop]) for prop, index in zip(("x", "y", "z"), (2, 3, 2))]
+    )
+    volume = (span / counts["x"]) * (span / counts["y"]) * (span / counts["z"])
+    expected = kernels.CubicSplineKernel().value(float(np.linalg.norm(centre - atom)), h) * volume
+    # the renderer reads its kernel from a 0.02-step table, as the sibling tests note
+    assert count[2, 3, 2] == pytest.approx(expected, rel=0.03)
 
 
 # ---------------------------------------------------------------------------
@@ -560,6 +570,87 @@ def test_the_numpy_fallback_answers_the_same_quantile(monkeypatch: pytest.Monkey
 
     assert np.isfinite(fallback).sum() == np.isfinite(native).sum() > 0
     np.testing.assert_allclose(fallback, native, rtol=1e-6, atol=1e-6, equal_nan=True)
+
+
+# ---------------------------------------------------------------------------
+# derived quantities: densities and the properties that opt in with allow_sph
+# ---------------------------------------------------------------------------
+
+
+def make_two_family_sim(n: int = 2000, *, h: float = 0.5) -> pynbody.SimSnap:
+    """A snapshot whose gas and dark matter can be smoothed separately."""
+    rng = np.random.default_rng(31)
+    sim = pynbody.new(dm=n, gas=n)
+    for family in (sim.dm, sim.gas):
+        family["pos"] = SimArray(rng.uniform(-3.5, 3.5, (n, 3)), "kpc")
+        family["mass"] = SimArray(rng.uniform(0.5, 2.0, n), "Msol")
+        family["smooth"] = SimArray(np.full(n, h), "kpc")
+    return sim
+
+
+def test_a_density_query_divides_the_smoothed_map_by_the_cell_measure() -> None:
+    """``<field>.density`` is the strict suffix, with the smoothed numerator."""
+    bins = make_bins(make_sim(3000))
+    density = bins.sph_render["mass.sum.density"]
+
+    expected = np.asarray(bins.sph_render["mass.sum"]) / np.asarray(bins["measure"])
+
+    np.testing.assert_allclose(np.asarray(density), expected)
+    assert density.units == bins["mass.sum.density"].units
+    # a smoothed numerator is a different map from the strict one
+    assert not np.allclose(
+        np.nan_to_num(np.asarray(density)), np.nan_to_num(np.asarray(bins["mass.sum.density"]))
+    )
+
+
+def test_a_derived_property_declared_allow_sph_is_smoothed() -> None:
+    """``gas_fraction`` runs its own callback against the smoothed queries."""
+    bins = make_bins(make_two_family_sim())
+    rendered = np.asarray(bins.sph_render["gas_fraction"])
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        expected = np.asarray(bins.gas.sph_render["mass.sum"]) / np.asarray(bins.sph_render["mass.sum"])
+
+    np.testing.assert_allclose(rendered, expected, rtol=1e-12, equal_nan=True)
+    # each family is smoothed with its own particles, so this is not the strict ratio
+    assert not np.allclose(np.nan_to_num(rendered), np.nan_to_num(np.asarray(bins["gas_fraction"])))
+
+
+def test_a_user_registered_property_can_opt_in_to_sph() -> None:
+    """The flag is public: registering is how a plugin says "smooth this too"."""
+    from pynbodyext.core.calculate.bins.extensions import BIN_RESULT_EXTENSIONS
+
+    @BinNDResult.derived("dm_mass_fraction", allow_sph=True, overwrite=True)
+    def dm_mass_fraction(result: Any) -> np.ndarray:
+        return result.dm["mass.sum"] / result["mass.sum"]
+
+    try:
+        bins = make_bins(make_two_family_sim())
+
+        with np.errstate(invalid="ignore", divide="ignore"):
+            rendered = np.asarray(bins.sph_render["dm_mass_fraction"])
+            expected = np.asarray(bins.dm.sph_render["mass.sum"]) / np.asarray(bins.sph_render["mass.sum"])
+
+        assert dm_mass_fraction is not None
+        np.testing.assert_allclose(rendered, expected, rtol=1e-12, equal_nan=True)
+    finally:
+        # a test-only property must not leak into the rest of the suite
+        BIN_RESULT_EXTENSIONS._derived_specs[BinNDResult].pop("dm_mass_fraction", None)
+
+
+def test_a_derived_property_without_allow_sph_is_refused() -> None:
+    """Order-dependent properties are refused by name, not quietly mixed in."""
+    bins = make_bins(make_sim(500))
+
+    with pytest.raises(KeyError, match="allow_sph=True"):
+        bins.sph_render["enclosed_mass"]
+
+
+def test_geometry_is_the_same_map_on_both_views() -> None:
+    """The grid is the one the strict query used, so its measure is not smoothed."""
+    bins = make_bins(make_sim(300))
+
+    np.testing.assert_allclose(np.asarray(bins.sph_render["measure"]), np.asarray(bins["measure"]))
 
 
 # ---------------------------------------------------------------------------

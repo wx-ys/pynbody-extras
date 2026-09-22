@@ -116,6 +116,7 @@ class _BinNodeBase(CalculatorBase[BinNDResult, BinNDResult]):
         name: str | None = None,
         scope: str = "derived",
         condition: Callable[[Any], bool] | None = None,
+        allow_sph: bool = False,
         overwrite: bool = False,
     ) -> Callable[[Any], Any] | Callable[[Callable[[Any], Any]], Callable[[Any], Any]]:
         """Register a derived per-bin property on this node's results.
@@ -134,6 +135,10 @@ class _BinNodeBase(CalculatorBase[BinNDResult, BinNDResult]):
             Query scope.
         condition : callable, optional
             ``lambda result -> bool`` gating availability.
+        allow_sph : bool, default: False
+            Whether :attr:`~.result.BinNDResult.sph_render` may answer this
+            property as well — set it for a per-cell function of the quantities
+            it reads, which is then evaluated against smoothed queries.
         overwrite : bool, default: False
             Whether to replace an existing property.
 
@@ -148,7 +153,12 @@ class _BinNodeBase(CalculatorBase[BinNDResult, BinNDResult]):
         True
         """
         return BinNDResult.derived(
-            cast("Any", fn), name=cast("Any", name), scope=scope, condition=condition, overwrite=overwrite
+            cast("Any", fn),
+            name=cast("Any", name),
+            scope=scope,
+            condition=condition,
+            allow_sph=allow_sph,
+            overwrite=overwrite,
         )
 
     derived = register_derived

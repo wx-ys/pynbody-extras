@@ -114,6 +114,24 @@ def _wrap(
     return BinsArray(owner, values, name=name, field=field, mode=mode)
 
 
+def evaluate_derived(owner: BinNDResult, spec: BinDerivedSpec, model: Any) -> BinsArray:
+    """Run a derived callback against *model* and wrap its answer for *owner*.
+
+    Derived callbacks operate on a :class:`~.model.BinResultModel`; they reach the
+    result-level read API (``bins[...]``, ``.gas``, ``.centers``) through it.  The
+    sph view calls this too, with a model whose queries come back smoothed, so the
+    same callback answers both the strict and the smoothed version of itself.
+    """
+    values = spec.func(model)
+    result = values if isinstance(values, BinsArray) else _wrap(owner, values, name=spec.name)
+    if result.shape[: model.ndim] != model.shape_bins:
+        raise ValueError(
+            f"Derived query {spec.name!r} returned shape {result.shape!r}; "
+            f"leading dimensions must match the bin grid {model.shape_bins!r}."
+        )
+    return result
+
+
 def weight_cache_token(weight: str | Callable[[Any], Any] | Any | None) -> Any:
     if weight is None or isinstance(weight, str):
         return weight
@@ -413,17 +431,7 @@ class BinQueryService:
         )
 
     def compute_derived(self, spec: BinDerivedSpec) -> BinsArray:
-        model = self._model
-        # Derived property callbacks operate on the data model; they reach the
-        # result-level read API (bins[...], .gas, .centers) through the model.
-        values = spec.func(model)
-        result = values if isinstance(values, BinsArray) else self.wrap(values, name=spec.name)
-        if result.shape[: model.ndim] != model.shape_bins:
-            raise ValueError(
-                f"Derived query {spec.name!r} returned shape {result.shape!r}; "
-                f"leading dimensions must match the bin grid {model.shape_bins!r}."
-            )
-        return result
+        return evaluate_derived(self._owner, spec, self._model)
 
     def stat_pipeline(
         self,

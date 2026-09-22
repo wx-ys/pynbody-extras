@@ -80,6 +80,27 @@ The statistic picks the engine, so there is no mode to remember:
   that would touch an unreasonable number of pairs warns instead of being refused
   — see ``smooth_floor`` below, which is what bounds it.
 
+Derived quantities
+------------------
+The view answers the result's *derived* properties too, wherever smoothing leaves
+their meaning alone:
+
+- ``<field>.density`` — the strict suffix with the smoothed numerator, so
+  ``"mass.sum.density"`` is a kernel-smoothed mass per cell over that same cell
+  measure, in the units ``bins["mass.sum.density"]`` carries (and ``"count.density"``,
+  ``"mass.density"`` and ``"density"`` work as they do on the result);
+- a property registered ``allow_sph=True`` — its own callback runs again, against
+  the queries above, so there is no second definition of it to keep in step.
+  ``gas_fraction`` and ``number_density`` ship that way.  The flag belongs on a
+  per-cell function of what the callback reads: a ratio of two ``mass.sum`` maps
+  becomes the ratio of two SPH maps, but a cumulative sum or a statistic of the
+  strict particle census would mean something else once cells borrow from their
+  neighbours;
+- geometry (``measure``) — the grid's own, identical either way.
+
+A derived property that is not declared sph-renderable is refused by name, rather
+than answered with the strict map and left to look smoothed.
+
 Requirements
 ------------
 - **Two or three spatial axes.**  The bin axes must be ``x``, ``y`` and — for a
@@ -94,15 +115,6 @@ Requirements
 
 ``pynbody.sph`` is imported on first use, so importing the bins package stays
 light.
-
-Known upstream caveat
----------------------
-pynbody's three-dimensional renderer sizes its z pixels with the *y* resolution
-(``pixel_dz = (z2 - z1) / ny``), so a 3-D grid with ``nz != ny`` comes out
-misplaced — and can lose contributions altogether.  That renderer is still the one
-used here (its kernel, its wrapping and its conventions are what this view is meant
-to reproduce), and a :class:`UserWarning` says so whenever ``nz != ny``; use equal
-y and z bin counts until it is fixed upstream.
 """
 
 from __future__ import annotations
@@ -114,7 +126,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
-from .query import _wrap
+from .model import BinResultModel
+from .query import DensityResolver, QueryCache, _wrap, evaluate_derived
 from .statistics import (
     RMS,
     Dispersion,
@@ -133,6 +146,7 @@ if TYPE_CHECKING:
     from pynbody.sph.kernels import KernelBase
 
     from .arrays import BinsArray
+    from .axes import BinDerivedSpec
     from .result import BinNDResult
 
 __all__ = ["BinSphRenderMixin", "SphRender"]
@@ -209,6 +223,8 @@ class SphRender:
         self._wrap = bool(wrap)
         self._renders: dict[str, BinsArray] = {}
         self._plan: dict[str, Any] | None = None
+        # The strict query's density definition, reading its numerator from here.
+        self._density_resolver = DensityResolver(result, QueryCache(), self.__getitem__)
 
     def __repr__(self) -> str:
         return f"<SphRender {self._kernel_spec!r} of {self._result!r}>"
@@ -227,7 +243,11 @@ class SphRender:
         -------
         BinsArray
             The smoothed values on the result's own bin grid, so ``.image``,
-            ``.plot`` and the image layer work unchanged.
+            ``.plot`` and the image layer work unchanged.  Besides the per-particle
+            queries this answers ``"<field>.density"`` and any derived property
+            registered ``allow_sph=True`` — the callback runs again against the
+            smoothed queries, so e.g. ``"gas_fraction"`` is the ratio of the two
+            *kernel-integrated* masses.  See the module docstring.
         """
         cached = self._renders.get(key)
         if cached is not None:
@@ -238,12 +258,11 @@ class SphRender:
 
     def _compute(self, key: str) -> BinsArray:
         sim = self._result.model.sim
-        self._warn_about_z_resolution(self._layout())
         parsed = parse_pipeline_key(key)
 
         if parsed is None:
             if key != "count":
-                raise KeyError(f"Unknown sph_render query {key!r}; use 'count' or a '<field>.<stat>' query.")
+                return self._derived(key)
             statistic: Any = Sum("sum")
             units = None
             field = None
@@ -267,6 +286,58 @@ class SphRender:
         if units is not None:
             result.units = units
         return result
+
+    # ---------------------------------------------------------------- derived
+    def _derived(self, key: str) -> BinsArray:
+        """Answer a key that is not a per-particle query.
+
+        Three kinds reach here.  ``<field>.density`` divides a smoothed map by the
+        cell measure, because a density is a per-cell ratio and the grid is the
+        one the strict query uses.  A property registered ``allow_sph=True`` runs
+        its own callback — the very one the strict result runs — against a model
+        whose queries come back smoothed.  Geometry (``measure``) is the grid's
+        own, identical either way, so it is passed through unchanged.
+        """
+        base = DensityResolver.strip(key)
+        if base is not None or key == "density":
+            return self._density(key, key if base is None else base)
+
+        spec = type(self._result)._extensions.get_derived_spec(self._result, key)
+        if spec is None:
+            raise KeyError(
+                f"Unknown sph_render query {key!r}; use 'count', a '<field>.<stat>' query, a "
+                "'<field>.density' query, or a derived property the result declares allow_sph=True."
+            )
+        if spec.allow_sph:
+            return self._render_derived(spec)
+        if spec.scope == "geometry":
+            return self._result[key]
+        raise KeyError(
+            f"{key!r} is a derived property that is not declared sph-renderable.  Register it with "
+            "allow_sph=True if it is a per-cell function of the quantities it reads; a smoothed "
+            "version of it would otherwise mean something else."
+        )
+
+    def _density(self, key: str, base: str) -> BinsArray:
+        """``<field>.density``: the smoothed map divided by the cell measure.
+
+        Reuses :class:`~.query.DensityResolver` — the strict query's own definition
+        of the suffix — with this view as its numerator source, so ``"mass.density"``,
+        ``"mass.sum.density"`` and ``"count.density"`` behave exactly as they do on
+        the result, only smoothed.
+        """
+        return self._density_resolver.resolve(key, base)
+
+    def _render_derived(self, spec: BinDerivedSpec) -> BinsArray:
+        """Run a derived callback against this view's model."""
+        return evaluate_derived(self._result, spec, _SphModel(self._result.model, self))
+
+    def _sibling(self, model: BinResultModel) -> SphRender:
+        """A view of a sub-result, with this view's own settings."""
+        owner = model.owner
+        if owner is None:
+            raise RuntimeError(f"sph_render reached a sub-result of {model!r} with no owning result.")
+        return SphRender(owner, kernel=self._kernel_spec, smooth_floor=self._smooth_floor, wrap=self._wrap)
 
     def _statistic(self, statistic: Any, values: np.ndarray, weights: np.ndarray | None) -> np.ndarray:
         """One kernel sum for ``sum``/``count``, a ratio of two for the mean-likes."""
@@ -586,11 +657,7 @@ class SphRender:
 
         Same convention as the projected path — pynbody's kernel, ``mass``/``rho``
         set to one so nothing is weighted twice, multiplied by the cell volume to
-        keep the units of the strict query.  pynbody's
-        :func:`~pynbody.sph._render.to_3d_grid` sizes its z pixels with the *y*
-        resolution (``pixel_dz = (z2 - z1) / ny``, `_render.pyx`), so anything but
-        ``nz == ny`` is suspect; :meth:`_warn_about_z_resolution` says so rather
-        than quietly returning a different map.
+        keep the units of the strict query.
         """
         from pynbody.sph import _render
 
@@ -626,28 +693,6 @@ class SphRender:
         )
         return np.asarray(volume) * plan["measure"]
 
-    def _warn_about_z_resolution(self, plan: dict[str, Any]) -> None:
-        """Flag a 3-D render that hits pynbody's z-pixel bug.
-
-        ``to_3d_grid`` divides the z range by ``ny`` instead of ``nz``, so the z
-        cells it uses are not the cells asked for unless the two happen to match:
-        values are misplaced, and with small smoothing lengths they can vanish
-        altogether.  Warning beats silently returning a different map; the fix is
-        upstream, and until then equal y/z resolutions are the safe case.
-        """
-        if len(plan["present"]) < 3:
-            return
-        y_cells, z_cells = plan["axes"]["y"].nbins, plan["axes"]["z"].nbins
-        if y_cells == z_cells:
-            return
-        warnings.warn(
-            f"pynbody's 3-D renderer sizes its z pixels with the y resolution, so a grid with "
-            f"nz={z_cells} != ny={y_cells} renders misplaced cells (and can lose contributions "
-            "entirely). Use the same number of bins on y and z, or a 2-D projection, for now.",
-            UserWarning,
-            stacklevel=3,
-        )
-
     # ------------------------------------------------------------------ wrap
     def _wrap_offsets(self, axis: Any, boxsize: float | None) -> list[float]:
         """The offsets along one axis, as pynbody's renderer builds them."""
@@ -676,14 +721,18 @@ class BinSphRenderMixin:
         are exact and cheap; the quantiles (``median``, ``pXX``) are not kernel
         sums, so they scatter every particle over the cells its kernel reaches —
         exact, and about a dozen kernel sums.  Both answer ``bins[...]``'s own
-        query grammar, so one view answers whatever the strict result would.
+        query grammar, so one view answers whatever the strict result would.  The
+        result's derived properties join in too: ``"mass.sum.density"``, and any
+        property registered ``allow_sph=True`` such as ``"gas_fraction"``, which
+        is then the ratio of the kernel-integrated masses.
 
         Returns
         -------
         SphRender
             A view; index it with a query such as ``"mass.sum"``, ``"count"`` or
-            ``"vz.median"``, ``"vz.mean@mass"``.  See :class:`SphRender` for what
-            each part means and which results can be rendered.
+            ``"vz.median"``, ``"vz.mean@mass"``, or a derived key such as
+            ``"mass.sum.density"``.  See :class:`SphRender` for what each part
+            means and which results can be rendered.
 
         Raises
         ------
@@ -696,6 +745,7 @@ class BinSphRenderMixin:
         --------
         >>> bins.sph_render["count"]  # doctest: +SKIP
         >>> bins.sph_render["vz.median"]  # doctest: +SKIP
+        >>> bins.sph_render["mass.sum.density"]  # doctest: +SKIP
         >>> bins.s.sph_render["vz.mean"]  # doctest: +SKIP
         """
         render = self.__dict__.get("_sph_render")
@@ -797,6 +847,32 @@ def _scatter_pairs(
         distance += displacement**2
 
     return cell, distance, particle
+
+
+class _SphModel:
+    """A :class:`~.model.BinResultModel` whose queries come back smoothed.
+
+    A derived property is written once, against the query API — ``result["mass.sum"]``,
+    ``result.gas["count"]`` — so handing the callback this wrapper instead of the
+    model answers the smoothed version of the same property, with no second
+    definition of it anywhere.  Sub-result access (``.gas``, ``.star``) recurses to
+    that sub-result's own render, so a family ratio smooths each family with its own
+    particles.  Anything that is not a query of this view (a model attribute, an
+    axis) is passed through untouched.
+    """
+
+    def __init__(self, model: BinResultModel, render: SphRender) -> None:
+        self._model = model
+        self._render = render
+
+    def __getitem__(self, key: str) -> BinsArray:
+        return self._render[key]
+
+    def __getattr__(self, name: str) -> Any:
+        value = getattr(self._model, name)
+        if isinstance(value, BinResultModel):
+            return _SphModel(value, self._render._sibling(value))
+        return value
 
 
 @lru_cache(maxsize=1)

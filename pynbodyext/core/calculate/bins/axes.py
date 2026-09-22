@@ -29,6 +29,10 @@ class BinDerivedSpec:
     func: BinDerivedFunc
     condition: BinDerivedCondition | None = None
     scope: str = "geometry"
+    #: Whether ``sph_render`` may answer this property.  True means the callback
+    #: is a per-cell function of its inputs (a version of the same callback runs
+    #: against smoothed queries), so the smoothed value means the same thing.
+    allow_sph: bool = False
 
     def is_available(self, bins: Any) -> bool:
         return True if self.condition is None else bool(self.condition(bins))

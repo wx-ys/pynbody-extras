@@ -104,13 +104,18 @@ bins.sph_render["mass.sum"]         # per-cell mass, kernel-smoothed, same units
 bins.s.sph_render["count"]          # stars only; fractional — it is a kernel count
 bins.sph_render["vz.abs.mean@mass"] # transform |vz|, then the mass-weighted mean
 bins.sph_render["vz.median"]        # a quantile: every particle the kernel reaches
+bins.sph_render["mass.sum.density"] # derived densities too, smoothed before the ratio
+bins.gas.sph_render["gas_fraction"] # any property registered with allow_sph=True
 ```
 
 It needs two or three spatial axes with evenly spaced bins (`x`/`y`, plus `z`).
 The statistic picks the engine: the kernel sums (`count`, `sum`, `mean`, `rms`,
 `disp`) are accumulated by pynbody's C renderer, while the quantiles (`median`,
 `pXX`) scatter every particle over the cells its kernel reaches — exact, about a
-dozen times a kernel sum, and they warn when the scatter would be huge.
+dozen times a kernel sum, and they warn when the scatter would be huge. Derived
+densities (`mass.sum.density`) and properties declared `allow_sph=True`
+(`gas_fraction`, `number_density`) are answered the same way, by re-running their
+own definition against the smoothed queries.
 
 ### Image post-processing and visualization
 
