@@ -299,6 +299,7 @@ class EvalEngine:
         ctx = _MinimalBatchContext(sim, options, self)
         work = NodeInput(sim_raw=sim, sim_current=sim)
         try:
+            self._check_node_input(node, work)
             raw = node.execute(ctx, work)  # type: ignore[arg-type]
             raw = node.materialize(ctx, raw)  # type: ignore[arg-type]
             public = node.public_value(raw)
@@ -388,6 +389,7 @@ class EvalEngine:
         ctx._node_stack.append(node_result)
         try:
             work = self._apply_node_scope(node, ctx, work)
+            self._check_node_input(node, work)
             state.raw_value = node.execute(ctx, work)
             state.raw_value = node.materialize(ctx, state.raw_value)
             state.public_value = node.public_value(state.raw_value)
@@ -397,6 +399,20 @@ class EvalEngine:
         finally:
             ctx._node_stack.pop()
         return state
+
+    @staticmethod
+    def _check_node_input(node: CalculatorBase[Any, Any], work: NodeInput) -> None:
+        """Let a node look over the particles it is about to be computed from.
+
+        This lives here, where every node's ``execute`` is called, rather than on a
+        base class: :meth:`CalculatorBase.execute` is abstract and every concrete
+        node overrides it — including ones that never go through
+        :class:`RuntimeCalculatorBase` (``Pipeline``, ``CombinedCalculator``, the
+        bin nodes) — so an implementation there would cover one branch of the class
+        tree instead of all of it.  See :meth:`CalculatorBase.check_input` for what
+        the default does.
+        """
+        node.check_input(work.active_sim)
 
     def _apply_node_scope(self, node: CalculatorBase[Any, Any], ctx: ExecutionContext, work: NodeInput) -> NodeInput:
         """Apply ``node.scope`` (transforms then filter) to ``work`` before execution.
@@ -619,6 +635,7 @@ class EvalEngine:
             with ctx.observe_node_access(node_result, node):
                 try:
                     work = self._apply_node_scope(node, ctx, work)
+                    self._check_node_input(node, work)
                     state.raw_value = node.execute(ctx, work)
                     with observation_phase("materialize"):
                         state.raw_value = node.materialize(ctx, state.raw_value)

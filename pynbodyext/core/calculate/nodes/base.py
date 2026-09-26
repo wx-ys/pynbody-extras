@@ -245,9 +245,11 @@ class CalculatorBase(
     def check_input(self, sim: Any) -> None:
         """Look over the particle set this node is about to be computed from.
 
-        Called by the runtime lifecycle (:meth:`RuntimeCalculatorBase.execute`)
-        just before :meth:`compute`, so every calculator gets the same look at its
-        input without writing anything itself.
+        Called by the executor just before :meth:`execute`, so *every* node gets
+        the same look at its input without writing anything itself — including the
+        ones that implement their own ``execute`` and never go through
+        :class:`RuntimeCalculatorBase` (``Pipeline``, ``CombinedCalculator``, the
+        bin nodes).
 
         The default warns when there are no particles at all.  An empty set is a
         legitimate state to be *in* — a filter that matched nothing is the usual

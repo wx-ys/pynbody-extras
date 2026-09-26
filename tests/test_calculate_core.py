@@ -14,6 +14,7 @@ import pynbody
 import pytest
 
 from pynbodyext.core.calculate import FilterBase, Param, Pipeline, PropertyBase
+from pynbodyext.core.calculate.nodes import RuntimeCalculatorBase
 
 
 def make_sim() -> pynbody.SimSnap:
@@ -228,6 +229,25 @@ def test_a_custom_calculator_is_told_when_its_input_has_no_particles() -> None:
 
     with pytest.warns(UserWarning, match="MassSum received a snapshot with no particles"):
         assert MassSum()(empty) == 0.0
+
+
+def test_a_node_outside_the_runtime_base_is_looked_at_too() -> None:
+    """The look belongs to the executor, not to one branch of the class tree.
+
+    ``Pipeline``, ``CombinedCalculator`` and the bin nodes implement their own
+    ``execute`` and never run ``RuntimeCalculatorBase``'s, so a check placed there
+    would miss them.  It is the executor that calls every node's ``execute``.
+    """
+    empty = make_sim()[np.zeros(6, dtype=bool)]
+    combined = MassSum() & MassSum()
+    assert not isinstance(combined, RuntimeCalculatorBase), "this test is about the other branch"
+
+    with pytest.warns(UserWarning) as caught:
+        combined(empty)
+
+    messages = [str(item.message) for item in caught]
+    assert any(message.startswith("CombinedCalculator received") for message in messages)
+    assert any(message.startswith("MassSum received") for message in messages), "its children see it too"
 
 
 def test_the_input_look_can_be_declined_and_overridden() -> None:

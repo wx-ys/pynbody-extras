@@ -155,7 +155,6 @@ class RuntimeCalculatorBase(CalculatorBase[TRaw, TPublic], Generic[TRaw, TPublic
                 params = self.prepare_resolved_params(runtime, values)
 
             with ctx.phase(self, "calculate"):
-                self.check_input(runtime.sim)
                 computed = self.compute(runtime, params)
 
             return self.wrap_raw(runtime, computed)
