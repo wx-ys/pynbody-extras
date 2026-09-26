@@ -689,8 +689,102 @@ def test_geometry_is_the_same_map_on_both_views() -> None:
 
 
 # ---------------------------------------------------------------------------
+# where the smoothing lengths come from
+# ---------------------------------------------------------------------------
+
+
+#: The gadget2 snapshot conftest makes available, whose box the grid below covers.
+GADGET2 = "testdata/gadget2/test_g2_snap"
+BOX = 3000.0
+
+
+def make_box_bins(sim: pynbody.SimSnap, *, nbins: int = 32):
+    """A grid over the gadget2 box — the fixture :data:`SPAN` is far too small."""
+    half = BOX / 2
+    x = Bin1D("x", vmin=-half, vmax=half, nbins=nbins, alias="x")
+    y = Bin1D("y", vmin=-half, vmax=half, nbins=nbins, alias="y")
+    return (x @ y)(sim)
+
+
+def test_a_mixed_snapshot_renders_with_smoothing_from_the_kdtree() -> None:
+    """A set whose families do not all carry ``smooth`` needs the derivation."""
+    sim = pynbody.load(GADGET2)
+    bins = make_box_bins(sim)
+
+    # the default reads one 'smooth' block for the whole set, which pynbody refuses
+    with pytest.raises(ValueError, match="smooth='kdtree'"):
+        SphRender(bins)["mass.sum"]
+
+    rendered = np.asarray(SphRender(bins, smooth="kdtree")["mass.sum"])
+
+    assert rendered.shape == (32, 32)
+    assert np.isfinite(rendered).all()
+    assert rendered.sum() == pytest.approx(np.asarray(sim["mass"]).sum(), rel=0.05)
+
+
+def test_kdtree_smoothing_is_pynbody_s_own_derivation() -> None:
+    """``smooth="kdtree"`` is pynbody's derivation, not a second recipe of ours."""
+    sim = pynbody.load(GADGET2)
+    plan = SphRender(make_box_bins(sim), smooth="kdtree")._layout()
+
+    np.testing.assert_allclose(plan["smooth"], np.asarray(pynbody.sph.smooth(sim), dtype=float))
+
+    stored = np.asarray(sim.gas["smooth"], dtype=float)
+    assert not np.allclose(plan["smooth"][: len(stored)], stored), "on-disk values are disregarded"
+
+
+def test_an_unknown_smoothing_source_is_rejected() -> None:
+    bins = make_bins(make_sim(200))
+
+    with pytest.raises(ValueError, match="snapshot"):
+        SphRender(bins, smooth="guess")
+
+
+def render_with(sim: pynbody.SimSnap, props: tuple[str, ...], **settings: Any) -> np.ndarray:
+    """One ``count`` render of a grid over *props*, with optional view settings."""
+    axes = [Bin1D(prop, vmin=-SPAN / 2, vmax=SPAN / 2, nbins=NBINS, alias=prop) for prop in props]
+    spec = axes[0]
+    for axis in axes[1:]:
+        spec = spec @ axis
+    return np.asarray(SphRender(spec(sim), **settings)["count"])
+
+
+def test_the_smooth_floor_raises_small_smoothing_lengths_rather_than_dropping_them() -> None:
+    """``smooth_floor`` clamps, on either engine — and the volume path has no C-side floor."""
+    for props in (("x", "y"), ("x", "y", "z")):
+        unfloored = render_with(make_sim(2000, h=0.2), props)
+        floored = render_with(make_sim(2000, h=0.2), props, smooth_floor=1.0)
+        reference = render_with(make_sim(2000, h=1.0), props)
+
+        assert not np.allclose(unfloored, floored), "the floor should change the render"
+        np.testing.assert_allclose(floored, reference)
+
+
+# ---------------------------------------------------------------------------
 # periodic boxes
 # ---------------------------------------------------------------------------
+
+
+def test_the_wrapping_offsets_are_pynbody_s_own() -> None:
+    """The tile offsets are derived here; pin them to the renderer's formula."""
+    from pynbody import units
+    from pynbody.sph.renderers import ImageRenderer
+
+    sim = pynbody.new(dm=200)
+    sim["pos"] = SimArray(np.zeros((200, 3)), "kpc")
+    sim["mass"] = SimArray(np.ones(200), "Msol")
+    sim["smooth"] = SimArray(np.full(200, 20.0), "kpc")
+    sim.properties["boxsize"] = 1000.0 * units.kpc
+    x = Bin1D("x", vmin=-500, vmax=500, nbins=32, alias="x")
+    y = Bin1D("y", vmin=-500, vmax=500, nbins=32, alias="y")
+    bins = (x @ y)(sim)
+
+    render = SphRender(bins)
+    plan = render._layout()
+    axis = plan["axes"]["x"]
+    expected = ImageRenderer(sim)._calculate_wrapping_repeat_array(float(axis.edges[0]), float(axis.edges[-1]))
+
+    np.testing.assert_allclose(render._wrap_offsets(axis, plan["boxsize"]), expected)
 
 
 def make_periodic_sim(boxsize: float, *, span: float = 1000.0, h: float = 20.0, count: int = 1):

@@ -101,6 +101,23 @@ their meaning alone:
 A derived property that is not declared sph-renderable is refused by name, rather
 than answered with the strict map and left to look smoothed.
 
+Relationship to pynbody's other renderers
+-----------------------------------------
+The kernel sums call pynbody's own ``_render.render_image`` and
+``_render.to_3d_grid`` — the loops its ``ImageRenderer`` and ``Grid3dRenderer``
+drive — with pynbody's kernels, and for a projection pynbody's
+``KernelBase.projection`` (the ``∫W dz`` two-dimensional kernel).  The high-level
+classes are deliberately *not* used: ``ImageRenderer.render`` reads ``mass``,
+``rho``, ``x``, ``y``, ``z`` and ``smooth`` off the snapshot and accumulates
+``Σ q_i W_i m_i/ρ_i``, whereas this view is defined to keep the strict query's
+units — ``Σ q_i W_i V_cell``, which is what passing ``mass = rho = 1`` gives.  The
+renderer API offers no way to override ``mass``/``rho``, and computing ``rho`` is
+not free: a 32² image of the gas in ``testdata/gadget2`` costs 65 ms that way
+against 2 ms here, most of it the density.  ``make_render_pipeline`` has the same
+convention, and a mixed particle set fails in pynbody's renderer too — on ``rho``
+rather than ``smooth`` (``KeyError: Block rho is not available for all
+families``).
+
 Requirements
 ------------
 - **Two or three spatial axes.**  The bin axes must be ``x``, ``y`` and — for a
@@ -108,12 +125,13 @@ Requirements
   has no SPH geometry to render onto.
 - **Evenly spaced bins** (``mode="linear"``), because the renderer works on the
   cell grid: ``V_cell`` is a single number.  Anything else raises.
-- **An SPH snapshot.**  Every particle needs a smoothing length, read as
-  ``sim["smooth"]``.  pynbody derives one from the particle distribution when a
-  *single family* has none on disk, so ``bins.gas.sph_render[...]`` works on any
-  snapshot; a *mixed* set must carry one for every family it contains — only the
-  gas usually does — and says so when it cannot.  Zeros or non-finite values are
-  rejected rather than rendered.
+- **An SPH snapshot.**  Every particle needs a smoothing length.  By default it is
+  read as ``sim["smooth"]``, which pynbody fills in from the particle distribution
+  when a *single family* has none on disk — so ``bins.gas.sph_render[...]`` works
+  on any snapshot — but a *mixed* set must carry one for every family it contains
+  and says so when it cannot.  Pass ``smooth="kdtree"`` to derive one for the
+  whole set instead, which is the only way to render a mixed set.  Zeros or
+  non-finite values are rejected rather than rendered.
 
 ``pynbody.sph`` is imported on first use, so importing the bins package stays
 light.
@@ -173,6 +191,10 @@ _SLAB_ROWS = 32
 #: Particle-cell pairs in one quantile before we warn about the cost.
 _ENTRY_WARNING = 50_000_000
 
+#: Where a render gets its smoothing lengths: the snapshot's own array, or a
+#: derivation over the whole particle set.  See :meth:`SphRender._smooth_array`.
+_SMOOTH_SOURCES = ("snapshot", "kdtree")
+
 #: Buckets (cells x value bins) the quantile reduction may allocate at once.  The
 #: bin count follows from the slab; it affects only speed, never the answer.
 _BUCKET_BUDGET = 4_000_000
@@ -204,6 +226,16 @@ class SphRender:
         renderer does.  Turning it off restricts the render to the box.  The
         quantiles scatter the same periodic images, so both engines agree across
         a boundary.
+    smooth : {"snapshot", "kdtree"}, default: "snapshot"
+        Where the smoothing lengths come from.  ``"snapshot"`` reads
+        ``sim["smooth"]``: on-disk values where the snapshot has them, and
+        pynbody's k-d tree estimate for a single family that has none.  A *mixed*
+        particle set (gas plus collisionless families) cannot be read that way,
+        because pynbody refuses a block only some families carry; ``"kdtree"``
+        derives a length for every particle with :func:`pynbody.sph.smooth`
+        instead — the run pynbody's own ``rho`` uses, and the only way to render
+        such a set.  It disregards on-disk values, so the numbers differ from
+        ``"snapshot"`` wherever the snapshot has them.
 
     Examples
     --------
@@ -218,11 +250,15 @@ class SphRender:
         kernel: str | KernelBase | None = None,
         smooth_floor: float = 0.0,
         wrap: bool = True,
+        smooth: str = "snapshot",
     ) -> None:
+        if smooth not in _SMOOTH_SOURCES:
+            raise ValueError(f"smooth must be one of {list(_SMOOTH_SOURCES)}; got {smooth!r}.")
         self._result = result
         self._kernel_spec = kernel
         self._smooth_floor = float(smooth_floor)
         self._wrap = bool(wrap)
+        self._smooth_source = smooth
         self._renders: dict[str, BinsArray] = {}
         self._plan: dict[str, Any] | None = None
         # The strict query's density definition, reading its numerator from here.
@@ -339,7 +375,50 @@ class SphRender:
         owner = model.owner
         if owner is None:
             raise RuntimeError(f"sph_render reached a sub-result of {model!r} with no owning result.")
-        return SphRender(owner, kernel=self._kernel_spec, smooth_floor=self._smooth_floor, wrap=self._wrap)
+        return SphRender(
+            owner,
+            kernel=self._kernel_spec,
+            smooth_floor=self._smooth_floor,
+            wrap=self._wrap,
+            smooth=self._smooth_source,
+        )
+
+    def _smooth_array(self, sim: Any) -> np.ndarray:
+        """The smoothing length of every particle, in the position units.
+
+        ``smooth="snapshot"`` (the default) reads ``sim["smooth"]`` — pynbody's
+        on-disk values where they exist, and its k-d tree estimate for a single
+        family that has none.  A *mixed* set can be refused this way; the error
+        names ``smooth="kdtree"``, which derives the whole array with
+        :func:`pynbody.sph.smooth` instead.  That is the same run pynbody's own
+        ``rho`` uses, and the only way to render a particle set whose families do
+        not all carry the block.
+        """
+        if self._smooth_source == "kdtree":
+            from pynbody.sph import smooth as derive_smoothing
+
+            try:
+                return np.asarray(derive_smoothing(sim), dtype=float)
+            except Exception as exc:  # noqa: BLE001 - report whatever it was, with the cause attached
+                raise ValueError(
+                    "sph_render could not derive smoothing lengths for this particle set with "
+                    f"pynbody.sph.smooth: {type(exc).__name__}: {exc}"
+                ) from exc
+        try:
+            return np.asarray(sim["smooth"], dtype=float)
+        except Exception as exc:  # noqa: BLE001 - the spelling of "no such array" is the subclass's business
+            # pynbody spells it KeyError, but a snapshot wrapper may raise anything
+            # (a custom ``__getitem__`` often falls through to TypeError).  Type is
+            # what the caller cannot guess, so it goes in the message; the original
+            # exception stays attached as the cause.
+            raise ValueError(
+                "sph_render needs a smoothing length for every particle, and this particle set does not "
+                "provide one: pynbody derives 'smooth' on demand for a single family, but a mixed set must "
+                "carry one for each of them (usually only the gas does).  Render a family or sub-result "
+                "that has it — bins.gas.sph_render[...] — give 'smooth' to every family first, or pass "
+                "smooth='kdtree' to derive one for the whole set.  "
+                f"(reading sim['smooth'] raised {type(exc).__name__}.)"
+            ) from exc
 
     def _statistic(self, statistic: Any, values: np.ndarray, weights: np.ndarray | None) -> np.ndarray:
         """One kernel sum for ``sum``/``count``, a ratio of two for the mean-likes."""
@@ -551,20 +630,7 @@ class SphRender:
                 )
 
         sim = model.sim
-        try:
-            smooth = np.asarray(sim["smooth"], dtype=float)
-        except Exception as exc:  # noqa: BLE001 - the spelling of "no such array" is the subclass's business
-            # pynbody spells it KeyError, but a snapshot wrapper may raise anything
-            # (a custom ``__getitem__`` often falls through to TypeError).  Type is
-            # what the caller cannot guess, so it goes in the message; the original
-            # exception stays attached as the cause.
-            raise ValueError(
-                "sph_render needs a smoothing length for every particle, and this particle set does not "
-                "provide one: pynbody derives 'smooth' on demand for a single family, but a mixed set must "
-                "carry one for each of them (usually only the gas does).  Render a family or sub-result "
-                "that has it — bins.gas.sph_render[...] — or give 'smooth' to every family first.  "
-                f"(reading sim['smooth'] raised {type(exc).__name__}.)"
-            ) from exc
+        smooth = self._smooth_array(sim)
         if not np.all(np.isfinite(smooth)) or np.any(smooth <= 0.0):
             raise ValueError(
                 "sph_render needs finite, positive smoothing lengths; this snapshot's 'smooth' array "
@@ -652,7 +718,11 @@ class SphRender:
             np.inf,
             -np.inf,
             np.inf,
-            self._smooth_floor,
+            # pynbody's own "min_smooth" clamp, left at 0 because ``_smoothing``
+            # already applied the floor: ``to_3d_grid`` has no such parameter and
+            # the quantile engine needs the floored values too, so the clamp lives
+            # in one place for every path rather than in two here.
+            0.0,
             self._kernel(projected=True),
             self._wrap_offsets(first_axis, plan["boxsize"]),
             self._wrap_offsets(second_axis, plan["boxsize"]),

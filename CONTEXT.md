@@ -153,6 +153,10 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   registered `allow_sph=True` (`gas_fraction`, `number_density`) by re-running its
   own callback against the smoothed queries.  Geometry is shared with the strict
   result, and a derived property that has not opted in is refused by name.
+  Smoothing lengths come from `sim['smooth']` by default, or from pynbody's own
+  k-d tree derivation with `smooth="kdtree"` — the only way to render a snapshot
+  whose families do not all carry the block, and the run pynbody's `rho` uses
+  ([ADR-0016](docs/adr/0016-where-sph-render-gets-its-smoothing-lengths.md)).
 
 ## Image layer (`pynbodyext/plot/image/`)
 

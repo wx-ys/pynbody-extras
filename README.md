@@ -115,7 +115,10 @@ The statistic picks the engine: the kernel sums (`count`, `sum`, `mean`, `rms`,
 dozen times a kernel sum, and they warn when the scatter would be huge. Derived
 densities (`mass.sum.density`) and properties declared `allow_sph=True`
 (`gas_fraction`, `number_density`) are answered the same way, by re-running their
-own definition against the smoothed queries.
+own definition against the smoothed queries. Every particle needs a smoothing
+length; a snapshot whose families do not all carry one — gas plus collisionless
+stars, say — renders with `SphRender(bins, smooth="kdtree")`, which derives them
+the way pynbody's own `rho` does.
 
 ### Image post-processing and visualization
 
