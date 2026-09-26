@@ -7,8 +7,11 @@ modules).
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pynbody
+import pytest
 
 from pynbodyext.core.calculate import FilterBase, Param, Pipeline, PropertyBase
 
@@ -216,3 +219,36 @@ def test_calculator_base_mixin_surface_is_intact() -> None:
 
     # Signature helpers still wired through the signature mixin.
     assert calc.signature() == calc.to_signature().cache_key()
+
+
+def test_a_custom_calculator_is_told_when_its_input_has_no_particles() -> None:
+    """The lifecycle's look at the input reaches user-defined nodes too."""
+    empty = make_sim()[np.zeros(6, dtype=bool)]
+    assert len(empty) == 0
+
+    with pytest.warns(UserWarning, match="MassSum received a snapshot with no particles"):
+        assert MassSum()(empty) == 0.0
+
+
+def test_the_input_look_can_be_declined_and_overridden() -> None:
+    """A node that answers an empty set by design stays quiet, and one that cannot
+    answer it at all refuses in its own words."""
+
+    @PropertyBase.dataclass
+    class Quiet(MassSum):
+        warns_on_empty_input = False
+
+    @PropertyBase.dataclass
+    class Strict(MassSum):
+        def check_input(self, sim):
+            if len(sim) == 0:
+                raise ValueError("MassSum needs particles")
+
+    empty = make_sim()[np.zeros(6, dtype=bool)]
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert Quiet()(empty) == 0.0
+
+    with pytest.raises(ValueError, match="needs particles"):
+        Strict()(empty)

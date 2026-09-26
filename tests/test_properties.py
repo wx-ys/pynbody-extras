@@ -12,7 +12,7 @@ import pytest
 from pynbody.array import SimArray
 
 from pynbodyext.filters import Sphere
-from pynbodyext.properties import ParamContain
+from pynbodyext.properties import ParamContain, ParamSum
 from pynbodyext.properties.base import RadiusAtSurfaceDensity
 
 
@@ -40,6 +40,37 @@ def test_param_contain_says_the_snapshot_it_got_has_no_particles() -> None:
         ParamContain(0.5)(empty_selection(make_galaxy()))
 
     assert "filter matched nothing" in str(caught.value), "the usual cause should be spelled out"
+
+
+def test_the_lifecycle_warns_when_a_calculator_gets_no_particles() -> None:
+    """Every node gets the same look at its input, without writing anything.
+
+    ``ParamSum`` answers an empty set (zero) rather than failing, so for it the
+    warning is the whole diagnosis — the answer would otherwise look like a value.
+    """
+    with pytest.warns(UserWarning, match="ParamSum received a snapshot with no particles"):
+        total = ParamSum("mass")(empty_selection(make_galaxy()))
+
+    assert float(total) == 0.0
+
+
+def test_a_calculator_that_refuses_an_empty_set_does_not_also_warn() -> None:
+    """The refusal is the better message, so the warning would be noise."""
+    import warnings as warnings_module
+
+    with warnings_module.catch_warnings():
+        warnings_module.simplefilter("error")
+        with pytest.raises(ValueError, match="has none"):
+            ParamContain(0.5)(empty_selection(make_galaxy()))
+
+
+def test_a_snapshot_with_particles_is_quiet() -> None:
+    import warnings as warnings_module
+
+    with warnings_module.catch_warnings():
+        warnings_module.simplefilter("error")
+        ParamContain(0.5)(make_galaxy())
+        ParamSum("mass")(make_galaxy())
 
 
 def test_param_contain_distinguishes_no_particles_from_no_weight() -> None:

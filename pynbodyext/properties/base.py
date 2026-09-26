@@ -71,8 +71,11 @@ class ParamContain(PropertyBase[SimArray]):
     cal_key: str = "r"
     parameter: str = "mass"
 
-    def calculate(self, sim, params=None):
+    def check_input(self, sim):
+        """There is no fraction of nothing to locate, so refuse rather than warn."""
         _require_particles(sim, "a containment radius")
+
+    def calculate(self, sim, params=None):
         frac = params.frac
         frac_array, frac_is_scalar = _normalize_frac(frac)
         key = sim[params.cal_key]
@@ -213,6 +216,10 @@ class RadiusAtSurfaceDensity(PropertyBase[SimArray]):
         raw_target = params["target"]
         return self._in_sim_units(raw_target, params.parameter, sim, target_units=surf_units)
 
+    def check_input(self, sim):
+        """Nothing to build a profile from, so refuse rather than warn."""
+        _require_particles(sim, "a surface-density radius")
+
     @staticmethod
     def _sigma_at_radius(r_val: float, r_sorted: np.ndarray, m_cum: np.ndarray, eps: float, mode: str) -> float:
         if r_val <= 0:
@@ -242,7 +249,6 @@ class RadiusAtSurfaceDensity(PropertyBase[SimArray]):
         return 0.0 if area_shell <= 0 else float(m_shell / area_shell)
 
     def calculate(self, sim, params=None):
-        _require_particles(sim, "a surface-density radius")
         r_arr = sim[params.r_key]
         m_arr = sim[params.parameter]
 

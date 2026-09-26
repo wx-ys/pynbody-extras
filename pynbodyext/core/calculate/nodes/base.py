@@ -90,6 +90,7 @@ Most subclasses should not override :meth:`run` or :meth:`__call__`.
 
 from __future__ import annotations
 
+import warnings
 from abc import ABC
 from typing import (
     TYPE_CHECKING,
@@ -141,6 +142,7 @@ TCalc = TypeVar("TCalc", bound="CalculatorBase[Any, Any]")
 TRaw = TypeVar("TRaw")
 TPublic = TypeVar("TPublic")
 
+
 @dataclass_transform(field_specifiers=(Param, Param.static))
 class CalculatorBase(
     _CalculatorSignatureMixin,
@@ -182,6 +184,12 @@ class CalculatorBase(
     # Mapping of dynamic parameter names to unit metadata used for runtime resolution.
     # See :meth:`resolve_dynamic_param` and :mod:`.params` for details.
     dynamic_param_specs: ClassVar[Mapping[str, DynamicParamSpec | str | None]] = {}
+
+    #: Whether :meth:`check_input` should warn about a particle set with no
+    #: particles.  Set False on a node that answers an empty input as a matter of
+    #: design — a transform that is deliberately a no-op, say — where the warning
+    #: would be noise about a supported state.
+    warns_on_empty_input: ClassVar[bool] = True
 
     @overload
     @classmethod
@@ -233,6 +241,38 @@ class CalculatorBase(
     def kind(self) -> NodeKind:
         """Normalized node kind used for display and signatures."""
         return normalize_kind(getattr(self, "node_kind", BuiltinKinds.CALCULATOR))
+
+    def check_input(self, sim: Any) -> None:
+        """Look over the particle set this node is about to be computed from.
+
+        Called by the runtime lifecycle (:meth:`RuntimeCalculatorBase.execute`)
+        just before :meth:`compute`, so every calculator gets the same look at its
+        input without writing anything itself.
+
+        The default warns when there are no particles at all.  An empty set is a
+        legitimate state to be *in* — a filter that matched nothing is the usual
+        way to reach it — and a calculator is entitled to answer it (a sum over
+        nothing is zero).  But most cannot, and what follows is NumPy's report
+        (``index -1 is out of bounds for axis 0 with size 0``), which names
+        neither the calculator nor the reason.  This does, so the two can be read
+        together.
+
+        A calculator that cannot answer an empty set *at all* should say so itself
+        — either by overriding this and raising, or in its own ``compute`` — since
+        that is a fact about the calculation rather than about the input.
+
+        Parameters
+        ----------
+        sim : pynbody.snapshot.SimSnap
+            The snapshot view this node was given, already narrowed by any scope.
+        """
+        if self.warns_on_empty_input and len(sim) == 0:
+            warnings.warn(
+                f"{type(self).__name__} received a snapshot with no particles; anything computed from "
+                "them is empty.  If a filter selected them, that filter matched nothing.",
+                UserWarning,
+                stacklevel=3,
+            )
 
     def execute(self, ctx: ExecutionContext, input: NodeInput) -> TRaw:
         """Execute the calculator against an active :class:`NodeInput`.

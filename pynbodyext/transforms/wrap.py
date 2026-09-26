@@ -16,7 +16,7 @@ apply hooks, and both go through the same wrapping core: ``_apply_to_snapshot``
 
 import warnings
 from collections.abc import Mapping
-from typing import Any, Literal, TypeGuard, cast
+from typing import Any, ClassVar, Literal, TypeGuard, cast
 
 import numpy as np
 from numpy.typing import DTypeLike
@@ -286,6 +286,9 @@ class WrapBox(TransformBase[WrapTransformation]):
     move_all : bool, default True
         Whether to wrap the whole snapshot (the ancestor) rather than the current view.
     """
+
+    #: An empty snapshot is documented as a no-op here, not a mistake.
+    warns_on_empty_input: ClassVar[bool] = False
 
     boxsize: Param[float | units.UnitBase | None] = Param(default=None, field_name="pos")
     convention: Convention = DEFAULT_CONVENTION
