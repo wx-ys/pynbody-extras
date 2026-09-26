@@ -24,6 +24,22 @@ def _normalize_frac(frac: Any) -> tuple[np.ndarray, bool]:
     return frac_array, frac_array.size == 1 and isinstance(frac, (int, float, np.floating))
 
 
+def _require_particles(sim: Any, what: str) -> None:
+    """Refuse to compute from nothing, before NumPy declines in its own words.
+
+    An empty particle set is a normal state to be *in* — a filter that matched no
+    particle is the usual way to reach one — but every property here needs
+    particles, and ``cumulative[-1]`` or ``r_sorted[-1]`` would report that as
+    ``IndexError: index -1 is out of bounds`` with nothing about why.  Name the
+    real cause, and the usual reason for it.
+    """
+    if len(sim) == 0:
+        raise ValueError(
+            f"{what} needs particles, and the snapshot it was given has none.  If a filter selected them, "
+            "that filter matched nothing — check its radius and units against the extent of the snapshot."
+        )
+
+
 @PropertyBase.dataclass
 class ParamContain(PropertyBase[SimArray]):
     """Containment radius for one or more cumulative fractions.
@@ -42,6 +58,13 @@ class ParamContain(PropertyBase[SimArray]):
     -------
     pynbody.array.SimArray
         Radius or radii at the requested containment fractions.
+
+    Raises
+    ------
+    ValueError
+        If the snapshot has no particles — a filter that matched nothing is the
+        usual way to reach that — or if the total weight is not positive, in
+        which case there is no fraction to locate.
     """
 
     frac: Param[float] = Param(default=0.5)
@@ -49,6 +72,7 @@ class ParamContain(PropertyBase[SimArray]):
     parameter: str = "mass"
 
     def calculate(self, sim, params=None):
+        _require_particles(sim, "a containment radius")
         frac = params.frac
         frac_array, frac_is_scalar = _normalize_frac(frac)
         key = sim[params.cal_key]
@@ -166,6 +190,12 @@ class RadiusAtSurfaceDensity(PropertyBase[SimArray]):
     eps: float, default: 0.01
         Radial width to use for the "shell" mode.  Should be small compared to
         the typical radius of interest.
+
+    Raises
+    ------
+    ValueError
+        If the snapshot has no particles, or their radii are all the same, so
+        there is no profile to search.
     """
 
     target: Param[ValueLike]
@@ -212,6 +242,7 @@ class RadiusAtSurfaceDensity(PropertyBase[SimArray]):
         return 0.0 if area_shell <= 0 else float(m_shell / area_shell)
 
     def calculate(self, sim, params=None):
+        _require_particles(sim, "a surface-density radius")
         r_arr = sim[params.r_key]
         m_arr = sim[params.parameter]
 
