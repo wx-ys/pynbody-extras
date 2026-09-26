@@ -118,6 +118,42 @@ convention, and a mixed particle set fails in pynbody's renderer too — on ``rh
 rather than ``smooth`` (``KeyError: Block rho is not available for all
 families``).
 
+The two conventions differ by exactly one factor.  Writing ``v_i = m_i/ρ_i`` for
+the volume one particle occupies, the renderer estimates a *field* — ``Σ_i v_i q_i
+W_i``, the SPH interpolation that gives the constant back for a constant ``q`` —
+while this view counts what lands in a cell, ``V_cell Σ_i q_i W_i``.  So
+``I_ours(q) = V_cell × I_pynbody(q·ρ/m)``, and the same quantity comes out of both
+to float32.  With the same smoothing lengths, on ``testdata/gadget2`` and a 32²
+projected grid::
+
+    bins.sph_render["mass.sum"]          == V_cell  ×  Grid3dRenderer render of "rho"
+    bins.sph_render["count"]             == A_cell  ×  projected render of "rho/mass"
+    bins.sph_render["mass.sum.density"]  ==            projected render of "rho"
+
+(each to ~1e-8 relative).  ``count`` against a render of the constant ``1`` is the
+plainest way to see the difference: their ratio is the number of particles per
+cell, ~4 on that grid, because the renderer is answering "what is the value of the
+field here", not "how many particles are here".
+
+That identity is the way across.  For a *sum* the field convention is already
+spelled ``<field>.density``.  For a *mean* the renderer weights by volume,
+``Σ_i v_i q_i W_i / Σ_i v_i W_i``, which is just a different per-particle weight —
+and ``@<field>`` takes any array the snapshot carries::
+
+    sim["vol"] = sim["mass"] / sim["rho"]  # the volume each particle occupies
+    bins.sph_render["vz.mean@vol"]  # the volume-weighted mean
+
+It is deliberately not a built-in weight.  ``@mass`` is an array the snapshot
+already has; ``v = mass/rho`` costs an SPH density from the k-d tree (65 ms
+against this view's 2 ms on the gadget2 gas) and is refused on a mixed particle
+set, and a weight that silently pays either price does not belong in the query
+grammar.  Writing the array makes the cost visible — the same reason ``@vol`` is
+checked against the renderer in the tests rather than assumed.  (That test also
+pins ``sim["smooth"]`` first: ``rho`` is built with the smoothing lengths
+pynbody's derived arrays choose, which are not necessarily the ones this view
+reads, and a comparison across two sets of them measures the kernels rather than
+the conventions — 30% on the gadget2 gas.)
+
 Requirements
 ------------
 - **Two or three spatial axes.**  The bin axes must be ``x``, ``y`` and — for a
@@ -240,10 +276,23 @@ class SphRender:
         such a set.  It disregards on-disk values, so the numbers differ from
         ``"snapshot"`` wherever the snapshot has them.
 
+    Notes
+    -----
+    A cell holds ``Σ_i q_i W_i V_cell``, so the units are the strict query's and
+    the totals are the strict totals.  pynbody's own ``ImageRenderer`` estimates
+    a *field* instead (``Σ_i q_i W_i m_i/ρ_i``) and differs by the cell measure —
+    reach for it for a physical field, for this view for a cell census.  The
+    module docstring derives the relation, and shows that pynbody's
+    volume-weighted mean is one per-particle weight away::
+
+        sim["vol"] = sim["mass"] / sim["rho"]
+        bins.sph_render["vz.mean@vol"]
+
     Examples
     --------
     >>> bins.sph_render["mass.sum"]  # doctest: +SKIP
     >>> bins.s.sph_render["vz.mean@mass"]  # doctest: +SKIP
+    >>> bins.sph_render["vz.mean@vol"]  # doctest: +SKIP
     """
 
     def __init__(
@@ -324,6 +373,19 @@ class SphRender:
             registered ``allow_sph=True`` — the callback runs again against the
             smoothed queries, so e.g. ``"gas_fraction"`` is the ratio of the two
             *kernel-integrated* masses.  See the module docstring.
+
+        Notes
+        -----
+        ``@<field>`` takes any per-particle array the snapshot carries, so any
+        definition of a weighted average is one assignment away — a
+        volume-weighted mean, the weighting pynbody's own renderers use, is::
+
+            sim["vol"] = sim["mass"] / sim["rho"]
+            bins.sph_render["vz.mean@vol"]
+
+        That one is slow — ``rho`` is an SPH density from the k-d tree — and it is
+        unavailable on a mixed particle set, unlike ``@mass``, which the snapshot
+        already has.
         """
         cached = self._renders.get(key)
         if cached is not None:
@@ -842,6 +904,22 @@ class BinSphRenderMixin:
         property registered ``allow_sph=True`` such as ``"gas_fraction"``, which
         is then the ratio of the kernel-integrated masses.
 
+        Notes
+        -----
+        A render answers "how much of this query lands in the cell", so the units
+        are the strict query's own: ``count`` is a kernel-integrated *number of
+        particles* — fractional by nature — and ``mass.sum`` is a mass.
+        :class:`pynbody.sph.renderers.ImageRenderer` answers a different question,
+        "what is the value of the field here" (it accumulates
+        ``Σ_i q_i W_i m_i/ρ_i``), which is what to reach for when you want a
+        temperature or density map rather than a cell census; the two differ by
+        the cell's measure, and ``bins.sph_render["mass.sum.density"]`` is exactly
+        pynbody's projected render of ``rho``.  The module docstring works the
+        relation out and shows how to reproduce pynbody's volume-weighted mean::
+
+            sim["vol"] = sim["mass"] / sim["rho"]  # the volume a particle takes
+            bins.sph_render["vz.mean@vol"]
+
         Returns
         -------
         SphRender
@@ -865,6 +943,7 @@ class BinSphRenderMixin:
         >>> bins.sph_render["vz.median"]  # doctest: +SKIP
         >>> bins.sph_render["mass.sum.density"]  # doctest: +SKIP
         >>> bins.sph_render(smooth="kdtree")["gas_fraction"]  # doctest: +SKIP
+        >>> bins.sph_render["vz.mean@vol"]  # doctest: +SKIP
         >>> bins.s.sph_render["vz.mean"]  # doctest: +SKIP
         """
         return self._sph_render_view()

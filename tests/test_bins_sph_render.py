@@ -756,6 +756,35 @@ def test_the_view_can_be_reconfigured_from_the_user_facing_spelling() -> None:
     assert default is bins.sph_render
 
 
+def test_the_documented_volume_weight_reproduces_pynbody_s_own_render() -> None:
+    """``@<field>`` takes any per-particle array, so the field convention is one
+    assignment away — the recipe the docstrings give, checked against the renderer."""
+    from pynbody.sph.renderers import ImageRenderer
+
+    sim = pynbody.load(GADGET2)
+    gas = sim.gas
+    # one set of smoothing lengths for both sides: pynbody's rho picks its own
+    # (here the 309 kpc on-disk ones) against the view's, and the two would then
+    # be answering with different kernels rather than different conventions
+    gas["smooth"] = np.asarray(pynbody.sph.smooth(gas), dtype=float)
+    gas["vol"] = np.asarray(gas["mass"], dtype=float) / np.asarray(gas["rho"], dtype=float)
+    bins = make_box_bins(gas)
+
+    ours = np.asarray(bins.sph_render["vz.mean@vol"])
+
+    renderer = ImageRenderer(gas)
+    renderer.set_quantity("vz")
+    renderer.set_resolution(32)
+    half = BOX / 2
+    renderer.geometry.x1, renderer.geometry.x2 = -half, half
+    renderer.geometry.y1, renderer.geometry.y2 = -half, half
+    theirs = np.asarray(renderer.with_volume_weighted_projection().render()).T
+
+    both = np.isfinite(ours) & np.isfinite(theirs)
+    assert both.sum() > 100
+    np.testing.assert_allclose(ours[both], theirs[both], rtol=1e-4)
+
+
 def render_with(sim: pynbody.SimSnap, props: tuple[str, ...], **settings: Any) -> np.ndarray:
     """One ``count`` render of a grid over *props*, with optional view settings."""
     axes = [Bin1D(prop, vmin=-SPAN / 2, vmax=SPAN / 2, nbins=NBINS, alias=prop) for prop in props]
