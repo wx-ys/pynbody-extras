@@ -34,12 +34,15 @@ def empty_selection(sim: pynbody.SimSnap) -> object:
     return sim[Sphere("0.0001 kpc")]
 
 
-def test_param_contain_says_the_snapshot_it_got_has_no_particles() -> None:
-    """An empty selection is a state to name, not an arithmetic accident."""
-    with pytest.raises(ValueError, match="has none") as caught:
-        ParamContain(0.5)(empty_selection(make_galaxy()))
+def test_param_contain_says_which_calculator_got_an_empty_snapshot() -> None:
+    """The lifecycle names the input; what follows is the calculation's own failure.
 
-    assert "filter matched nothing" in str(caught.value), "the usual cause should be spelled out"
+    ``cumulative[-1]`` on an empty array is NumPy's report, and it is left to say
+    so — the warning above it is what makes the report readable.
+    """
+    with pytest.warns(UserWarning, match="ParamContain received a snapshot with no particles"):
+        with pytest.raises(IndexError):
+            ParamContain(0.5)(empty_selection(make_galaxy()))
 
 
 def test_the_lifecycle_warns_when_a_calculator_gets_no_particles() -> None:
@@ -52,16 +55,6 @@ def test_the_lifecycle_warns_when_a_calculator_gets_no_particles() -> None:
         total = ParamSum("mass")(empty_selection(make_galaxy()))
 
     assert float(total) == 0.0
-
-
-def test_a_calculator_that_refuses_an_empty_set_does_not_also_warn() -> None:
-    """The refusal is the better message, so the warning would be noise."""
-    import warnings as warnings_module
-
-    with warnings_module.catch_warnings():
-        warnings_module.simplefilter("error")
-        with pytest.raises(ValueError, match="has none"):
-            ParamContain(0.5)(empty_selection(make_galaxy()))
 
 
 def test_a_snapshot_with_particles_is_quiet() -> None:
@@ -82,9 +75,10 @@ def test_param_contain_distinguishes_no_particles_from_no_weight() -> None:
         ParamContain(0.5)(sim)
 
 
-def test_radius_at_surface_density_says_the_snapshot_it_got_has_no_particles() -> None:
-    with pytest.raises(ValueError, match="has none"):
-        RadiusAtSurfaceDensity(1.0)(empty_selection(make_galaxy()))
+def test_radius_at_surface_density_says_which_calculator_got_an_empty_snapshot() -> None:
+    with pytest.warns(UserWarning, match="RadiusAtSurfaceDensity received a snapshot with no particles"):
+        with pytest.raises(IndexError):
+            RadiusAtSurfaceDensity(1.0)(empty_selection(make_galaxy()))
 
 
 def test_the_properties_still_answer_a_populated_snapshot() -> None:

@@ -24,22 +24,6 @@ def _normalize_frac(frac: Any) -> tuple[np.ndarray, bool]:
     return frac_array, frac_array.size == 1 and isinstance(frac, (int, float, np.floating))
 
 
-def _require_particles(sim: Any, what: str) -> None:
-    """Refuse to compute from nothing, before NumPy declines in its own words.
-
-    An empty particle set is a normal state to be *in* — a filter that matched no
-    particle is the usual way to reach one — but every property here needs
-    particles, and ``cumulative[-1]`` or ``r_sorted[-1]`` would report that as
-    ``IndexError: index -1 is out of bounds`` with nothing about why.  Name the
-    real cause, and the usual reason for it.
-    """
-    if len(sim) == 0:
-        raise ValueError(
-            f"{what} needs particles, and the snapshot it was given has none.  If a filter selected them, "
-            "that filter matched nothing — check its radius and units against the extent of the snapshot."
-        )
-
-
 @PropertyBase.dataclass
 class ParamContain(PropertyBase[SimArray]):
     """Containment radius for one or more cumulative fractions.
@@ -62,18 +46,18 @@ class ParamContain(PropertyBase[SimArray]):
     Raises
     ------
     ValueError
-        If the snapshot has no particles — a filter that matched nothing is the
-        usual way to reach that — or if the total weight is not positive, in
-        which case there is no fraction to locate.
+        If the total weight is not positive, so there is no fraction to locate.
+
+    Notes
+    -----
+    A snapshot with no particles is reported before this runs, by the lifecycle's
+    :meth:`~pynbodyext.core.calculate.nodes.base.CalculatorBase.check_input`; with
+    no cumulative sum to search, the calculation then fails on its own.
     """
 
     frac: Param[float] = Param(default=0.5)
     cal_key: str = "r"
     parameter: str = "mass"
-
-    def check_input(self, sim):
-        """There is no fraction of nothing to locate, so refuse rather than warn."""
-        _require_particles(sim, "a containment radius")
 
     def calculate(self, sim, params=None):
         frac = params.frac
@@ -197,8 +181,14 @@ class RadiusAtSurfaceDensity(PropertyBase[SimArray]):
     Raises
     ------
     ValueError
-        If the snapshot has no particles, or their radii are all the same, so
-        there is no profile to search.
+        If the radii are all the same, or no shell brackets the target, so there
+        is no profile to search.
+
+    Notes
+    -----
+    A snapshot with no particles is reported before this runs, by the lifecycle's
+    :meth:`~pynbodyext.core.calculate.nodes.base.CalculatorBase.check_input`; with
+    no profile to search, the calculation then fails on its own.
     """
 
     target: Param[ValueLike]
@@ -215,10 +205,6 @@ class RadiusAtSurfaceDensity(PropertyBase[SimArray]):
         surf_units = sim[params.parameter].units / sim["pos"].units ** 2
         raw_target = params["target"]
         return self._in_sim_units(raw_target, params.parameter, sim, target_units=surf_units)
-
-    def check_input(self, sim):
-        """Nothing to build a profile from, so refuse rather than warn."""
-        _require_particles(sim, "a surface-density radius")
 
     @staticmethod
     def _sigma_at_radius(r_val: float, r_sorted: np.ndarray, m_cum: np.ndarray, eps: float, mode: str) -> float:
