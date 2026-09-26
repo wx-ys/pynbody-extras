@@ -712,10 +712,10 @@ def test_a_mixed_snapshot_renders_with_smoothing_from_the_kdtree() -> None:
     bins = make_box_bins(sim)
 
     # the default reads one 'smooth' block for the whole set, which pynbody refuses
-    with pytest.raises(ValueError, match="smooth='kdtree'"):
-        SphRender(bins)["mass.sum"]
+    with pytest.raises(ValueError, match=r"bins\.sph_render\(smooth=\"kdtree\"\)"):
+        bins.sph_render["mass.sum"]
 
-    rendered = np.asarray(SphRender(bins, smooth="kdtree")["mass.sum"])
+    rendered = np.asarray(bins.sph_render(smooth="kdtree")["mass.sum"])
 
     assert rendered.shape == (32, 32)
     assert np.isfinite(rendered).all()
@@ -738,6 +738,22 @@ def test_an_unknown_smoothing_source_is_rejected() -> None:
 
     with pytest.raises(ValueError, match="snapshot"):
         SphRender(bins, smooth="guess")
+
+
+def test_the_view_can_be_reconfigured_from_the_user_facing_spelling() -> None:
+    """``bins.sph_render(...)`` is how the constructor's options are reached."""
+    bins = make_bins(make_sim(1000))
+
+    default = bins.sph_render
+    configured = bins.sph_render(smooth_floor=1.0)
+
+    assert isinstance(configured, SphRender)
+    assert configured is not default
+    assert not np.allclose(np.asarray(default["count"]), np.asarray(configured["count"]))
+    # a configured view is cached like the default one, so its renders are too
+    assert configured is bins.sph_render(smooth_floor=1.0)
+    assert configured["count"] is bins.sph_render(smooth_floor=1.0)["count"]
+    assert default is bins.sph_render
 
 
 def render_with(sim: pynbody.SimSnap, props: tuple[str, ...], **settings: Any) -> np.ndarray:

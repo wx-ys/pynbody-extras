@@ -117,8 +117,10 @@ densities (`mass.sum.density`) and properties declared `allow_sph=True`
 (`gas_fraction`, `number_density`) are answered the same way, by re-running their
 own definition against the smoothed queries. Every particle needs a smoothing
 length; a snapshot whose families do not all carry one — gas plus collisionless
-stars, say — renders with `SphRender(bins, smooth="kdtree")`, which derives them
-the way pynbody's own `rho` does.
+stars, say — renders as `bins.sph_render(smooth="kdtree")`, which derives them the
+way pynbody's own `rho` does. The view is callable for that: pass any of
+`kernel`, `smooth_floor`, `wrap`, `smooth` to get a configured view, and the
+result caches it like the default one.
 
 ### Image post-processing and visualization
 

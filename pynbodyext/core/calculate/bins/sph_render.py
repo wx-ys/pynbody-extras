@@ -129,9 +129,9 @@ Requirements
   read as ``sim["smooth"]``, which pynbody fills in from the particle distribution
   when a *single family* has none on disk — so ``bins.gas.sph_render[...]`` works
   on any snapshot — but a *mixed* set must carry one for every family it contains
-  and says so when it cannot.  Pass ``smooth="kdtree"`` to derive one for the
-  whole set instead, which is the only way to render a mixed set.  Zeros or
-  non-finite values are rejected rather than rendered.
+  and says so when it cannot.  ``bins.sph_render(smooth="kdtree")`` derives one
+  for the whole set instead, which is the only way to render a mixed set.  Zeros
+  or non-finite values are rejected rather than rendered.
 
 ``pynbody.sph`` is imported on first use, so importing the bins package stays
 light.
@@ -194,6 +194,9 @@ _ENTRY_WARNING = 50_000_000
 #: Where a render gets its smoothing lengths: the snapshot's own array, or a
 #: derivation over the whole particle set.  See :meth:`SphRender._smooth_array`.
 _SMOOTH_SOURCES = ("snapshot", "kdtree")
+
+#: Sentinel for :meth:`SphRender.__call__`, meaning "keep this view's setting".
+_INHERIT = object()
 
 #: Buckets (cells x value bins) the quantile reduction may allocate at once.  The
 #: bin count follows from the slab; it affects only speed, never the answer.
@@ -266,6 +269,41 @@ class SphRender:
 
     def __repr__(self) -> str:
         return f"<SphRender {self._kernel_spec!r} of {self._result!r}>"
+
+    def __call__(
+        self, *, kernel: Any = _INHERIT, smooth_floor: Any = _INHERIT, wrap: Any = _INHERIT, smooth: Any = _INHERIT
+    ) -> SphRender:
+        """This view with some settings changed: ``bins.sph_render(smooth="kdtree")``.
+
+        The view is what a result hands out, so this is how the constructor's
+        options are reached from the query spelling.  Anything left out keeps this
+        view's value, and the result caches the answer — so
+        ``bins.sph_render(smooth="kdtree")`` is one object, whose renders are cached
+        with it, however many times it is asked for.
+
+        Parameters
+        ----------
+        kernel, smooth_floor, wrap, smooth : optional
+            As in :class:`SphRender`.  ``smooth="kdtree"`` is the one that changes
+            what a render can be answered at all: it derives a smoothing length for
+            every particle, which a *mixed* particle set needs.
+
+        Returns
+        -------
+        SphRender
+            A view over the same result, configured as asked.
+
+        Examples
+        --------
+        >>> bins.sph_render(smooth="kdtree")["gas_fraction"]  # doctest: +SKIP
+        >>> bins.sph_render(smooth_floor=1.0, kernel="WendlandC2")["count"]  # doctest: +SKIP
+        """
+        return self._result._sph_render_view(
+            kernel=self._kernel_spec if kernel is _INHERIT else kernel,
+            smooth_floor=self._smooth_floor if smooth_floor is _INHERIT else smooth_floor,
+            wrap=self._wrap if wrap is _INHERIT else wrap,
+            smooth=self._smooth_source if smooth is _INHERIT else smooth,
+        )
 
     # ------------------------------------------------------------------ query
     def __getitem__(self, key: str) -> BinsArray:
@@ -415,8 +453,8 @@ class SphRender:
                 "sph_render needs a smoothing length for every particle, and this particle set does not "
                 "provide one: pynbody derives 'smooth' on demand for a single family, but a mixed set must "
                 "carry one for each of them (usually only the gas does).  Render a family or sub-result "
-                "that has it — bins.gas.sph_render[...] — give 'smooth' to every family first, or pass "
-                "smooth='kdtree' to derive one for the whole set.  "
+                "that has it — bins.gas.sph_render[...] — give 'smooth' to every family first, or call "
+                'bins.sph_render(smooth="kdtree") to derive one for the whole set.  '
                 f"(reading sim['smooth'] raised {type(exc).__name__}.)"
             ) from exc
 
@@ -810,7 +848,9 @@ class BinSphRenderMixin:
             A view; index it with a query such as ``"mass.sum"``, ``"count"`` or
             ``"vz.median"``, ``"vz.mean@mass"``, or a derived key such as
             ``"mass.sum.density"``.  See :class:`SphRender` for what each part
-            means and which results can be rendered.
+            means and which results can be rendered.  The view is callable to
+            change its settings — ``bins.sph_render(smooth="kdtree")`` — which is
+            how a *mixed* particle set gets rendered.
 
         Raises
         ------
@@ -824,12 +864,35 @@ class BinSphRenderMixin:
         >>> bins.sph_render["count"]  # doctest: +SKIP
         >>> bins.sph_render["vz.median"]  # doctest: +SKIP
         >>> bins.sph_render["mass.sum.density"]  # doctest: +SKIP
+        >>> bins.sph_render(smooth="kdtree")["gas_fraction"]  # doctest: +SKIP
         >>> bins.s.sph_render["vz.mean"]  # doctest: +SKIP
         """
-        render = self.__dict__.get("_sph_render")
+        return self._sph_render_view()
+
+    def _sph_render_view(
+        self,
+        *,
+        kernel: str | KernelBase | None = None,
+        smooth_floor: float = 0.0,
+        wrap: bool = True,
+        smooth: str = "snapshot",
+    ) -> SphRender:
+        """A :class:`SphRender` over this result, cached by its settings.
+
+        The default view lives in the same cache as the configured ones, so
+        ``bins.sph_render is bins.sph_render`` and
+        ``bins.sph_render(smooth="kdtree") is bins.sph_render(smooth="kdtree")`` —
+        which matters because a render keeps the plan it built, and deriving
+        smoothing lengths is not free.
+        """
+        views = self.__dict__.setdefault("_sph_render_views", {})
+        key = (kernel, smooth_floor, wrap, smooth)
+        render = views.get(key)
         if render is None:
-            render = SphRender(cast("BinNDResult", self))
-            self._sph_render = render
+            render = SphRender(
+                cast("BinNDResult", self), kernel=kernel, smooth_floor=smooth_floor, wrap=wrap, smooth=smooth
+            )
+            views[key] = render
         return render
 
 

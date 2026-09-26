@@ -154,8 +154,11 @@ rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
   own callback against the smoothed queries.  Geometry is shared with the strict
   result, and a derived property that has not opted in is refused by name.
   Smoothing lengths come from `sim['smooth']` by default, or from pynbody's own
-  k-d tree derivation with `smooth="kdtree"` — the only way to render a snapshot
-  whose families do not all carry the block, and the run pynbody's `rho` uses
+  k-d tree derivation with `bins.sph_render(smooth="kdtree")` — the only way to
+  render a snapshot whose families do not all carry the block, and the run
+  pynbody's `rho` uses.  The view is **callable** to change its settings
+  (`kernel`, `smooth_floor`, `wrap`, `smooth`), so the query spelling reaches the
+  constructor's options, and the result caches each configured view
   ([ADR-0016](docs/adr/0016-where-sph-render-gets-its-smoothing-lengths.md)).
 
 ## Image layer (`pynbodyext/plot/image/`)
