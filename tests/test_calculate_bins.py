@@ -91,6 +91,33 @@ def test_subresult_cache_and_particle_stats_are_local() -> None:
     assert first["mass.sum"] is not bins["mass.sum"]
 
 
+def test_a_filter_selects_a_subresult_rather_than_being_applied_per_bin() -> None:
+    """Our filters are calculators too, but ``bins[filter]`` means "this subset"."""
+    from pynbody.array import SimArray
+
+    from pynbodyext.filters import FamilyFilter, Sphere
+
+    sim = pynbody.new(dm=6)
+    radii = np.arange(6.0)
+    sim["pos"] = SimArray(np.c_[radii, np.zeros(6), np.zeros(6)], "kpc")
+    sim["x"] = SimArray(radii, "kpc")
+    sim["mass"] = SimArray(np.ones(6), "Msol")
+    bins = Bin1D("x", vmin=0, vmax=6, nbins=3, mode="equaln")(sim)
+
+    sub = bins[Sphere("2.5 kpc")]
+
+    assert isinstance(sub, SubBinNDResult)
+    # the parent's bins, restricted to the subset — the edges are not recomputed
+    np.testing.assert_allclose(sub.edges, bins.edges)
+    assert sub["count"].sum() == 3.0  # the particles at r = 0, 1, 2 kpc
+    assert bins["count"].sum() == 6.0
+
+    # a composed filter selects the same way, and is cached like any other key
+    star = bins[Sphere("2.5 kpc") & FamilyFilter("dm")]
+    assert isinstance(star, SubBinNDResult)
+    assert star is bins[Sphere("2.5 kpc") & FamilyFilter("dm")]
+
+
 def test_run_active_query_populates_result_cache() -> None:
     sim = make_sim()
     calculator = Bin1D("x", vmin=0, vmax=6, nbins=3).with_active(["mass.sum"])

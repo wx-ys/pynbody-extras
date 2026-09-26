@@ -14,7 +14,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, overload
 
 import numpy as np
-from pynbody.family import get_family
+from pynbody.family import Family, get_family
+from pynbody.filt import Filter
 from pynbody.snapshot import SimSnap
 
 from pynbodyext.core.calculate.nodes.base import CalculatorBase
@@ -35,9 +36,6 @@ from .subresults import BinSubresultStore
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from pynbody.family import Family
-    from pynbody.filt import Filter
 
     from .arrays import BinsArray
     from .axes import BinAxis
@@ -428,10 +426,14 @@ class BinNDResult(BinPlotMixin, BinSphRenderMixin):
         """Resolve a per-bin query or a sub-result selector.
 
         String keys compute per-bin quantities (pipeline statistics, derived
-        properties, geometry, or density).  Non-string keys that are a bool mask,
-        pynbody :class:`Filter`, or :class:`Family` return a
-        :class:`SubBinNDResult`.  Callables/calculators are evaluated per-bin via
-        :meth:`apply`.
+        properties, geometry, or density).  A bool mask, a
+        :class:`~pynbodyext.core.calculate.nodes.filters.FilterBase` such as
+        ``Sphere("30 kpc") & FamilyFilter("star")``, a pynbody :class:`Filter`, or
+        a :class:`Family` returns a :class:`SubBinNDResult` over that subset — on
+        *the same bins*, which is what ``bins[filter]`` means and why it is not
+        the same as re-binning the filtered snapshot: ``mode="equaln"`` would
+        recompute the edges from the subset.  Any other callable, and calculators,
+        are evaluated per-bin via :meth:`apply`.
 
         Examples
         --------
@@ -440,12 +442,18 @@ class BinNDResult(BinPlotMixin, BinSphRenderMixin):
         >>> bins["density"]  # per-bin mass density -> BinsArray
         >>> mask = sim["r"] > 3.0
         >>> sub = bins[mask]  # SubBinNDResult over a particle subset
+        >>> sub = bins[Sphere("30 kpc") & FamilyFilter("star")]  # the same bins
         >>> bins["vr.mean@mass"]  # mass-weighted per-bin mean of vr
         """
         if isinstance(key, str):
             # Axis properties like "r.center" must be accessed via bins.axes["r"].center
             # String queries only handle: geometry/derived properties and pipeline stat queries
             return self._resolve_query(key)
+        if isinstance(key, (FilterBase, Filter, Family)):
+            # Selectors first: our filters are calculators, and pynbody's filters
+            # are callable, so the calculator branch below would *apply* one per
+            # bin instead of selecting a sub-result from it.
+            return self._subresults.from_key(key)
         if (isinstance(key, CalculatorBase) and not isinstance(key, FilterBase)) or (
             callable(key) and not isinstance(key, (str, bytes))
         ):

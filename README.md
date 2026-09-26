@@ -63,7 +63,7 @@ ParamContain(0.5, "r", "mass")<prop>
    └─ FamilyFilter("star")<filt>
 ```
 
-One calculator can be reused inside another: `0.5 * re` above is a
+One calculator can be reused inside another: `re**2` above is a
 calculator-valued input, resolved automatically at runtime, so you never order the
 computation by hand.
 
@@ -89,7 +89,11 @@ profile["vz.abs.mean@mass"]   # transform |vz|, then the mass-weighted mean
 profile["mass.sum"].plot()
 
 profile.star                  # the same bins, star particles only
-r(sim[Sphere("30 kpc") & FamilyFilter("star")])   # re-bin a filtered snapshot
+profile[Sphere("30 kpc") & FamilyFilter("star")]  # the same bins, one subset
+
+# two axes make a map: the same queries, one answer per cell
+bins2d = (Bin1D("x", vmin="-30 kpc", vmax="30 kpc", nbins=128, alias="x")
+          @ Bin1D("y", vmin="-30 kpc", vmax="30 kpc", nbins=128, alias="y"))(sim)
 ```
 
 The statistics are `sum`, `mean`, `median`, `rms`, `disp` and percentiles
@@ -100,12 +104,12 @@ Smoothing the particles with their SPH kernel instead of counting them in a cell
 is the same queries again, for a map that stays smooth where the bins are sparse:
 
 ```python
-bins.sph_render["mass.sum"]         # per-cell mass, kernel-smoothed, same units
-bins.s.sph_render["count"]          # stars only; fractional — it is a kernel count
-bins.sph_render["vz.abs.mean@mass"] # transform |vz|, then the mass-weighted mean
-bins.sph_render["vz.median"]        # a quantile: every particle the kernel reaches
-bins.sph_render["mass.sum.density"] # derived densities too, smoothed before the ratio
-bins.gas.sph_render["gas_fraction"] # any property registered with allow_sph=True
+bins2d.sph_render["mass.sum"]         # per-cell mass, kernel-smoothed, same units
+bins2d.s.sph_render["count"]          # stars only; fractional — it is a kernel count
+bins2d.sph_render["vz.abs.mean@mass"] # transform |vz|, then the mass-weighted mean
+bins2d.sph_render["vz.median"]        # a quantile: every particle the kernel reaches
+bins2d.sph_render["mass.sum.density"] # a derived density, smoothed before the ratio
+bins2d.sph_render["gas_fraction"]     # a derived property declared allow_sph=True
 ```
 
 It needs two or three spatial axes with evenly spaced bins (`x`/`y`, plus `z`).
@@ -117,8 +121,8 @@ densities (`mass.sum.density`) and properties declared `allow_sph=True`
 (`gas_fraction`, `number_density`) are answered the same way, by re-running their
 own definition against the smoothed queries. Every particle needs a smoothing
 length; a snapshot whose families do not all carry one — gas plus collisionless
-stars, say — renders as `bins.sph_render(smooth="kdtree")`, which derives them the
-way pynbody's own `rho` does. The view is callable for that: pass any of
+stars, say — renders as `bins2d.sph_render(smooth="kdtree")`, which derives them
+the way pynbody's own `rho` does. The view is callable for that: pass any of
 `kernel`, `smooth_floor`, `wrap`, `smooth` to get a configured view, and the
 result caches it like the default one.
 
@@ -129,11 +133,7 @@ the values plus their bin edges, units and labels. `image.display.*` shows it,
 `image.process.*` works on it.
 
 ```python
-from pynbodyext.core.calculate import Bin1D
 from pynbodyext.plot import image
-
-bins2d = (Bin1D("x", vmin="-50 kpc", vmax="50 kpc", nbins=128, alias="x")
-          @ Bin1D("y", vmin="-50 kpc", vmax="50 kpc", nbins=128, alias="y"))(sim)
 
 bins2d.imshow("mass.sum", log=True, colorbar=True)           # the one-liner: binned array -> drawn map
 

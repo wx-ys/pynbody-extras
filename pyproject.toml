@@ -30,8 +30,8 @@ file = "README.md"
 content-type = "text/markdown"
 
 [project.urls]
-Repository = "https://github.com/GalaxySimAnalytics/pynbody-extras"
-Github = "https://github.com/GalaxySimAnalytics/pynbody-extras"
+Repository = "https://github.com/wx-ys/pynbody-extras"
+Github = "https://github.com/wx-ys/pynbody-extras"
 
 
 # ======================================================================================
