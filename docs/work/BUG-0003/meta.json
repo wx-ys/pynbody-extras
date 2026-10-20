@@ -12,7 +12,10 @@
   "resolution": "fixed",
   "pr": 25,
   "related": [
-    "BUG-0002"
+    "BUG-0002",
+    "BUG-0004",
+    "BUG-0005",
+    "TASK-0001"
   ],
   "locales": ["en", "zh-CN"]
 }

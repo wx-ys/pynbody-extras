@@ -133,8 +133,10 @@ monkeypatch 它。
   `.venv/bin/python setup.py build_ext --inplace` 查看编译器报错来确认。若确认，
   为 macOS 构建另开一个条目（例如只在 OpenMP 可用时加 `-fopenmp`，或在文档中
   说明 `brew install libomp`）。
+  - 已开为 BUG-0004。
 - PR #25 上有一条合并时未处理的审查评论，涉及原生扩展*加载*失败。
   `GRAVITY_NATIVE_AVAILABLE` 用的是 `find_spec`：只要存在 `_native*.so` 就为
   `True`，即使它加载不了（例如缺少 OpenMP 运行库），这时
   `import pynbodyext.gravity` 会失败。可考虑改为真正导入
   `pynbodyext._native` 来判断是否可用，另开条目处理。
+  - 已开为 BUG-0005。已有的 mypy 错误见 TASK-0001。

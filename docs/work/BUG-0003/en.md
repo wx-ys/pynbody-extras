@@ -142,9 +142,11 @@ Fixed in upstream PR #25 (`83e57c5`), merged by the maintainer.
   compiler error. If confirmed, open a separate item for the macOS build
   (for example, add `-fopenmp` only when OpenMP is available, or document
   `brew install libomp`).
+  - Opened as BUG-0004.
 - A review comment on PR #25 (left open at merge) concerns native *load*
   failures. `GRAVITY_NATIVE_AVAILABLE` uses `find_spec`, which is `True` when a
   `_native*.so` exists even if it cannot be loaded (for example a missing
   OpenMP runtime), and then `import pynbodyext.gravity` fails. Consider
   deciding availability by actually importing `pynbodyext._native`, in a
   separate item.
+  - Opened as BUG-0005. The pre-existing mypy errors are TASK-0001.

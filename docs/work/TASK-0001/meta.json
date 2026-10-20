@@ -1,0 +1,19 @@
+{
+  "id": "TASK-0001",
+  "type": "task",
+  "status": "draft",
+  "title_en": "Fix the existing mypy errors so the pre-commit hook passes",
+  "title_zh": "修掉已有的 mypy 错误，让 pre-commit 钩子能通过",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-10-20",
+  "updated": "2026-10-20",
+  "completed": null,
+  "resolution": null,
+  "pr": null,
+  "related": [
+    "BUG-0001",
+    "BUG-0003"
+  ],
+  "locales": ["en", "zh-CN"]
+}
