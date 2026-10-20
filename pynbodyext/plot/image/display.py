@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import weakref
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 
@@ -204,7 +204,11 @@ def add_colorbar(
 
     horizontal = loc in ("top", "bottom")
     cax = _divider_for(axes).append_axes(loc, size=size, pad=pad)
-    colorbar = axes.figure.colorbar(artist, cax=cax, orientation="horizontal" if horizontal else "vertical", **kwargs)
+    # Every artist that reaches here is a ScalarMappable (a Colorbar is never one).
+    mappable_artist = cast("ScalarMappable", artist)
+    colorbar = axes.figure.colorbar(
+        mappable_artist, cax=cax, orientation="horizontal" if horizontal else "vertical", **kwargs
+    )
     axis = cax.xaxis if horizontal else cax.yaxis
     axis.set_ticks_position(loc)
     axis.set_label_position(loc)
@@ -234,12 +238,10 @@ def _divider_for(axes: Axes) -> AxesDivider:
 
 def _as_mappable(mappable: Artist | ImageData | AdaptiveMap | None) -> tuple[Artist | None, ImageData | None]:
     """Split a colour-bar argument into a drawn artist and the image behind it."""
-    from typing import cast
-
     from matplotlib.cm import ScalarMappable
 
     if mappable is None or isinstance(mappable, ScalarMappable) or hasattr(mappable, "get_array"):
-        return mappable, None
+        return cast("Artist | None", mappable), None
     # An AdaptiveMap carries its ImageData; an ImageData is one already (duck-typed,
     # because importing ImageData here at runtime would close an import cycle).
     image = cast("ImageData", getattr(mappable, "image", mappable))
@@ -269,7 +271,7 @@ def _finish(
     """Shared tail of the drawing methods: labels, aspect and colour bar."""
     _apply_axis_labels(ax, image)
     if aspect is not None:
-        ax.set_aspect(aspect)
+        ax.set_aspect(cast("Literal['auto', 'equal'] | float", aspect))
     annotation = _annotation(image.label, image.units)
     if annotation is not None:
         _ARTIST_LABELS[artist] = annotation  # so a bar added later can name it too
@@ -453,7 +455,8 @@ def draw_pcolormesh(
         kwargs.setdefault("norm", resolved)
     x_edges = image.x_edges if image.x_edges is not None else np.arange(image.shape[1] + 1, dtype=float)
     y_edges = image.y_edges if image.y_edges is not None else np.arange(image.shape[0] + 1, dtype=float)
-    artist = ax.pcolormesh(x_edges, y_edges, image.data, shading=shading, **kwargs)
+    shading_mode = cast("Literal['flat', 'nearest', 'gouraud', 'auto'] | None", shading)
+    artist = ax.pcolormesh(x_edges, y_edges, image.data, shading=shading_mode, **kwargs)
     _finish(ax, image, artist, colorbar, aspect, colorbar_kwargs)
     return artist
 
@@ -523,7 +526,7 @@ def draw_contour(
         _, ax = plt.subplots(figsize=figsize)
     resolved, log_limits = resolve_norm(image.data, norm=norm, log=log, vmin=vmin, vmax=vmax)
     if log_limits is not None and isinstance(levels, (int, np.integer)):
-        levels = np.geomspace(log_limits[0], log_limits[1], int(levels) + 1)
+        levels = np.geomspace(log_limits[0], log_limits[1], int(levels) + 1).tolist()
     if resolved is not None:
         kwargs.setdefault("norm", resolved)
     method = ax.contourf if filled else ax.contour
@@ -1041,7 +1044,7 @@ class DisplayOps(ImageOps):
         reject_log_and_symmetric(symmetric, log, norm)
         if symmetric and "levels" not in kwargs:
             limit = float(np.nanmax(np.abs(self.data)))
-            levels = np.linspace(-limit, limit, 2 * count + 1)
+            levels = np.linspace(-limit, limit, 2 * count + 1).tolist()
         return draw_contour(
             self.image,
             ax=ax,

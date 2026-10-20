@@ -209,8 +209,8 @@ class WrapTransformation(transformation.Transformation):
 
         lower = -0.5 * L if self.convention == "center" else 0.0
         offsets = self._promote_and_cast_k(*(np.floor((v - lower) / L) for v in axes))
-        for axis, offset in zip(axes, offsets, strict=True):
-            np.subtract(axis, offset * L, out=axis)  # in place, without rebinding the name
+        for coords, offset in zip(axes, offsets, strict=True):
+            np.subtract(coords, offset * L, out=coords)  # in place, without rebinding the name
         return offsets
 
     # ── pynbody hooks ────────────────────────────────────────────────────────

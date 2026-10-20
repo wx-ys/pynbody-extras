@@ -90,6 +90,7 @@ def add_noise(
     if (sigma is None) == (snr is None):
         raise ValueError("Pass exactly one of 'sigma' or 'snr'.")
     if sigma is None:
+        assert snr is not None  # exactly one of sigma / snr, checked above
         noise_sigma = np.abs(array) / _broadcast(snr, array.shape, name="snr")
     else:
         noise_sigma = _broadcast(sigma, array.shape, name="sigma")

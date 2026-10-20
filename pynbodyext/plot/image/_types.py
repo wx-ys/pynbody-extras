@@ -26,6 +26,7 @@ from pynbody.units import UnitBase
 from pynbodyext.util._type import UnitLike, annotation_names
 
 if TYPE_CHECKING:
+    from matplotlib.cm import ScalarMappable
     from matplotlib.collections import PathCollection, QuadMesh
     from matplotlib.colorbar import Colorbar
     from matplotlib.contour import ContourSet
@@ -47,8 +48,9 @@ MaskLike: TypeAlias = Union[ArrayLike, "ImageData", None]
 KernelWidth: TypeAlias = float | UnitBase | tuple[float, float]
 
 #: Anything the drawing methods return, and so anything a colour bar can describe:
-#: an image, a mesh, a contour set, a scatter collection or a bar.
-Artist: TypeAlias = Union["AxesImage", "QuadMesh", "ContourSet", "PathCollection", "Colorbar"]
+#: an image, a mesh, a contour set, a scatter collection or a bar — or a bare
+#: ``ScalarMappable`` (a colour scale with nothing drawn, as ``compose`` uses).
+Artist: TypeAlias = Union["AxesImage", "QuadMesh", "ContourSet", "PathCollection", "Colorbar", "ScalarMappable"]
 
 
 def annotation_namespace() -> dict[str, object]:
@@ -70,6 +72,7 @@ def annotation_namespace() -> dict[str, object]:
     from collections.abc import Callable, Sequence
 
     from matplotlib.axes import Axes
+    from matplotlib.cm import ScalarMappable
     from matplotlib.collections import PathCollection, QuadMesh
     from matplotlib.colorbar import Colorbar
     from matplotlib.colors import Colormap, Normalize
@@ -118,6 +121,7 @@ def annotation_namespace() -> dict[str, object]:
         "ProcessOps": ProcessOps,
         "PsfOps": PsfOps,
         "QuadMesh": QuadMesh,
+        "ScalarMappable": ScalarMappable,
         "Sequence": Sequence,
         "SmoothOps": SmoothOps,
         "UnitLike": UnitLike,

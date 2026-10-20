@@ -350,7 +350,10 @@ class BinNDResult(BinPlotMixin, BinSphRenderMixin):
     @property
     def valid_mask(self) -> np.ndarray:
         """Boolean mask marking particles that were successfully assigned to a bin."""
-        return self._valid_mask
+        mask = self._valid_mask
+        if mask is None:  # pragma: no cover - both construction paths set it
+            raise RuntimeError("this binned result has no particle assignment")
+        return mask
 
     def _resolve_axis_measure(self, axis: BinAxis) -> np.ndarray:
         """Return the effective per-bin measure for *axis*.

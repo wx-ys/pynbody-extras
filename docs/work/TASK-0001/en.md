@@ -70,9 +70,11 @@ hook without `--no-verify`.
 
 - [x] The full `make typecheck` output is recorded in this item
       (see Full output).
-- [ ] `make typecheck` passes on the locked environment (`uv.lock`).
-- [ ] No new `# type: ignore` without an error code and a reason.
-- [ ] `make check` passes; no runtime behaviour changes.
+- [x] `make typecheck` passes on the locked environment (`uv.lock`).
+- [x] No new `# type: ignore` without an error code and a reason. (None added.)
+- [x] `make check` passes; no runtime behaviour changes. (lint and typecheck
+      pass; `make test`: 814 passed, 3 failed — the three BUG-0002 SPH tests,
+      unchanged by this item.)
 
 ## Design notes
 
@@ -98,6 +100,30 @@ agrees with `make typecheck` (`.venv/bin/python -m mypy`).
 Suggested order (smallest blast radius first, one commit per area):
 `gravity` + `store` + `bins` + `transforms` (8 errors, the ones that block
 core commits), then `plot/image` (14).
+
+## Changes
+
+One type-level fix per error; runtime behaviour unchanged except where noted.
+
+| Error | Fix |
+|---|---|
+| `gravity/base.py:193` (2) | `isinstance(softening, (int, float, np.integer, np.floating))` instead of `np.isscalar`; `np.full(int(n), ...)`. A 0-d array or a numeric string is no longer taken as a scalar (neither matches the `float` annotation). |
+| `store/sqlalchemy_store.py:68` | `cast("Engine", ...)` after the existing duck-typed `hasattr(..., "connect")` check. |
+| `store/sqlalchemy_store.py:107` | Check `inserted_primary_key` for `None` and raise `RuntimeError` (was a `TypeError`). |
+| `plot/image/smooth.py:173`, `:338` | `_PAD_MODES` typed with the `np.pad` mode `Literal`; `_REDUCERS` typed `dict[str, Callable[..., Any]]`. |
+| `plot/image/noise.py:93` | `assert snr is not None` after the existing exactly-one check. |
+| `plot/image/cmaps.py:323` | `cast("ColorType", bad)`. |
+| `plot/image/cmaps.py:352`, `:355` | `_segmented()` helper casts the array cdict to the stub's mapping type. |
+| `plot/image/display.py:200`, `compose.py:419` | `Artist` alias gains `ScalarMappable` (also in the `resolve_type_hints` namespace). |
+| `plot/image/display.py:207`, `:242` | `cast` to `ScalarMappable` / `Artist | None` where the code already guarantees it. |
+| `plot/image/display.py:272`, `:456` | `cast` to matplotlib's `Literal` for `aspect` / `shading` (matplotlib validates at runtime). |
+| `plot/image/display.py:526`, `:1044` | Contour levels from `np.geomspace` / `np.linspace` passed as `.tolist()`. |
+| `bins/_query_engines.py:216` | Separate `measure` / `denominator` variables. |
+| `bins/result.py:353` | `valid_mask` raises `RuntimeError` if the model has none (never on the construction paths). |
+| `transforms/wrap.py:212-213` | Loop variable renamed `axis` -> `coords` (it shadowed the `int` loop variable above). |
+
+Found on the way: `median_filter`'s pad widths are wrong for a non-square
+`size` — a real bug, opened as BUG-0006, not fixed here.
 
 ## Test plan
 

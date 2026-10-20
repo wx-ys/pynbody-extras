@@ -30,7 +30,7 @@ table is exact in the continuous definition, and matplotlib interpolates it onto
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, overload
+from typing import TYPE_CHECKING, Literal, cast, overload
 
 import matplotlib
 import matplotlib.colors as mcolors
@@ -320,7 +320,7 @@ def to_rgba(
     else:
         values = normalize(array, vmin=vmin, vmax=vmax, stretch=stretch, percentiles=percentiles)
     if bad is not None:
-        colors = colors.with_extremes(bad=bad)
+        colors = colors.with_extremes(bad=cast("ColorType", bad))
     rgba = np.asarray(colors(values), dtype=float)
     if alpha is not None:
         alpha_array = np.asarray(alpha, dtype=float)
@@ -348,11 +348,21 @@ def _sauron_cdict(reverse: bool = False) -> dict[str, np.ndarray]:
     }
 
 
+def _segmented(name: str, cdict: dict[str, np.ndarray]) -> LinearSegmentedColormap:
+    """A ``LinearSegmentedColormap`` from per-channel ``(x, y0, y1)`` arrays.
+
+    matplotlib converts the arrays itself; its stubs only ask for sequences of
+    tuples keyed by channel name, hence the cast.
+    """
+    channels = cast("dict[Literal['red', 'green', 'blue', 'alpha'], Sequence[tuple[float, ...]]]", cdict)
+    return LinearSegmentedColormap(name, channels)
+
+
 #: The SAURON colormap, registered so that ``cmap="sauron"`` works.
-sauron_cmap: LinearSegmentedColormap = LinearSegmentedColormap("sauron", _sauron_cdict())
+sauron_cmap: LinearSegmentedColormap = _segmented("sauron", _sauron_cdict())
 
 #: Reversed SAURON colormap (light grey → red → … → black), registered as ``"sauron_r"``.
-sauron_cmap_r: LinearSegmentedColormap = LinearSegmentedColormap("sauron_r", _sauron_cdict(reverse=True))
+sauron_cmap_r: LinearSegmentedColormap = _segmented("sauron_r", _sauron_cdict(reverse=True))
 
 #: Alias of :data:`sauron_cmap` under the name it usually goes by in plotting code.
 vel_cmap: LinearSegmentedColormap = sauron_cmap

@@ -19,7 +19,7 @@ record content round-trips through the same codec used everywhere else.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from .base import RecordRef, ResultRecord, ResultStore, _record_key, _sig_text
 
@@ -65,7 +65,7 @@ class SQLAlchemyResultStore(ResultStore):
         self._sa = sqlalchemy
 
         if hasattr(url_or_engine, "connect"):
-            self.engine: Engine = url_or_engine
+            self.engine: Engine = cast("Engine", url_or_engine)
         else:
             self.engine = sqlalchemy.create_engine(str(url_or_engine))
 
@@ -104,7 +104,10 @@ class SQLAlchemyResultStore(ResultStore):
                     created_at=record.created_at,
                 )
             )
-            row_id = result.inserted_primary_key[0]
+            primary_key = result.inserted_primary_key
+            if primary_key is None:  # pragma: no cover - a single-row INSERT always returns one
+                raise RuntimeError("the database did not return the inserted primary key")
+            row_id = primary_key[0]
         return RecordRef(record.sim_signature, record.calculator_signature_hash, id=row_id)
 
     def _get_by_key(self, sim_signature: tuple[Any, ...], calculator_signature_hash: str) -> ResultRecord | None:

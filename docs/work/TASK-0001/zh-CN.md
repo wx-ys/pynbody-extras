@@ -67,9 +67,10 @@ pynbodyext/transforms/wrap.py:213: error: No overload variant of "__call__" of "
 ## 验收标准
 
 - [x] 在本条目中记录完整的 `make typecheck` 输出（见“完整输出”）。
-- [ ] 在锁定的环境（`uv.lock`）下 `make typecheck` 通过。
-- [ ] 不新增没有错误代码和理由的 `# type: ignore`。
-- [ ] `make check` 通过；运行时行为不变。
+- [x] 在锁定的环境（`uv.lock`）下 `make typecheck` 通过。
+- [x] 不新增没有错误代码和理由的 `# type: ignore`。（一个也没加。）
+- [x] `make check` 通过；运行时行为不变。（lint 和 typecheck 通过；`make test`：
+      814 通过、3 失败——即 BUG-0002 的三个 SPH 测试，与本条目无关。）
 
 ## 设计说明
 
@@ -93,6 +94,30 @@ pre-commit 钩子用的是 `uv run mypy`；确认它与 `make typecheck`
 
 建议顺序（影响面小的先做，每个区域一个提交）：先修 `gravity` + `store` +
 `bins` + `transforms`（8 个，正是会拦住 core 提交的那些），再修 `plot/image`（14 个）。
+
+## 改动
+
+每个错误一处类型层面的修改；除特别注明外，运行时行为不变。
+
+| 错误 | 修改 |
+|---|---|
+| `gravity/base.py:193`（2 个） | 用 `isinstance(softening, (int, float, np.integer, np.floating))` 代替 `np.isscalar`；`np.full(int(n), ...)`。0 维数组或数字字符串不再被当作标量（两者都不符合 `float` 注解）。 |
+| `store/sqlalchemy_store.py:68` | 在原有的鸭子类型检查 `hasattr(..., "connect")` 之后 `cast("Engine", ...)`。 |
+| `store/sqlalchemy_store.py:107` | 检查 `inserted_primary_key` 是否为 `None`，是则抛 `RuntimeError`（原来是 `TypeError`）。 |
+| `plot/image/smooth.py:173`、`:338` | `_PAD_MODES` 标注为 `np.pad` 的 mode `Literal`；`_REDUCERS` 标注为 `dict[str, Callable[..., Any]]`。 |
+| `plot/image/noise.py:93` | 在原有“恰好给一个”检查之后加 `assert snr is not None`。 |
+| `plot/image/cmaps.py:323` | `cast("ColorType", bad)`。 |
+| `plot/image/cmaps.py:352`、`:355` | 新增 `_segmented()`，把数组形式的 cdict cast 成存根要求的类型。 |
+| `plot/image/display.py:200`、`compose.py:419` | `Artist` 别名加入 `ScalarMappable`（`resolve_type_hints` 的命名空间也加上）。 |
+| `plot/image/display.py:207`、`:242` | 在代码已保证的位置 `cast` 为 `ScalarMappable` / `Artist | None`。 |
+| `plot/image/display.py:272`、`:456` | `aspect` / `shading` cast 为 matplotlib 的 `Literal`（matplotlib 运行时会校验）。 |
+| `plot/image/display.py:526`、`:1044` | 由 `np.geomspace` / `np.linspace` 生成的等值线层级以 `.tolist()` 传入。 |
+| `bins/_query_engines.py:216` | 拆成 `measure` / `denominator` 两个变量。 |
+| `bins/result.py:353` | 模型没有 `valid_mask` 时抛 `RuntimeError`（两条构造路径都不会出现）。 |
+| `transforms/wrap.py:212-213` | 循环变量 `axis` 改名为 `coords`（它与上面 `int` 类型的循环变量同名）。 |
+
+顺带发现：`median_filter` 在非正方形 `size` 下补边宽度错误——这是真正的 bug，
+已开为 BUG-0006，这里不修。
 
 ## 测试计划
 

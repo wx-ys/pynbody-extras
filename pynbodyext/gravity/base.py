@@ -189,8 +189,8 @@ class Gravity:
         soft_arr: NDArray[np.float64] | None
         if softening is None:
             soft_arr = None
-        elif np.isscalar(softening):
-            soft_arr = np.full((pos.shape[0],), float(softening), dtype=np.float64)
+        elif isinstance(softening, (int, float, np.integer, np.floating)):
+            soft_arr = np.full(int(pos.shape[0]), float(softening), dtype=np.float64)
         else:
             soft_arr = np.asarray(softening, dtype=np.float64)
             if soft_arr.shape != (pos.shape[0],):

@@ -211,9 +211,9 @@ class DensityResolver:
         else:
             numerator = self._resolve_query(f"{base_field}.sum")
 
-        denominator = self._resolve_query("measure")
-        if isinstance(getattr(denominator, "units", None), NoUnit):
-            denominator = np.asarray(denominator)
+        measure = self._resolve_query("measure")
+        # A unitless measure divides as a plain array, so the result has no NoUnit.
+        denominator = np.asarray(measure) if isinstance(getattr(measure, "units", None), NoUnit) else measure
 
         with np.errstate(divide="ignore", invalid="ignore"):
             result_arr = numerator / denominator

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from scipy import ndimage
@@ -131,7 +131,12 @@ def box_smooth(
     return masked_filter(array, valid, lambda values: ndimage.uniform_filter(values, size=kernel, mode=mode))
 
 
-_PAD_MODES = {"nearest": "edge", "reflect": "reflect", "mirror": "symmetric", "constant": "constant"}
+_PAD_MODES: dict[str, Literal["edge", "reflect", "symmetric", "constant"]] = {
+    "nearest": "edge",
+    "reflect": "reflect",
+    "mirror": "symmetric",
+    "constant": "constant",
+}
 
 
 def median_filter(
@@ -298,7 +303,12 @@ def normalize(
     return np.where(finite, _apply_stretch(unit, stretch, asinh_a), np.nan)
 
 
-_REDUCERS = {"mean": np.nanmean, "sum": np.nansum, "median": np.nanmedian, "max": np.nanmax}
+_REDUCERS: dict[str, Callable[..., Any]] = {
+    "mean": np.nanmean,
+    "sum": np.nansum,
+    "median": np.nanmedian,
+    "max": np.nanmax,
+}
 
 
 def downsample(data: ArrayLike, factor: int | tuple[int, int] = 2, *, func: str = "mean") -> np.ndarray:
