@@ -44,3 +44,21 @@
 - Files: `pynbodyext/core/calculate/bins/result.py`,
   `tests/test_bins_vcirc.py`, `docs/work/BUG-0003/*`, `docs/work/INDEX.md`.
 - Env: Linux VM on the user's Mac, Python 3.10.12, no pynbody.
+
+## 2026-10-20 — Claude @ cloud session
+
+- State: done
+- Done: upstream PR #25 (`83e57c5`) merged. Set `done`, `pr: 25`, filled
+  `Outcome`, ticked the test-coverage criterion.
+- Next: run `.venv/bin/python -m pytest tests/test_bins_vcirc.py -rs` and
+  `make check` on the Mac, record the output in `Outcome`, and tick the two
+  remaining criteria. Open separate items for (a) the macOS native build,
+  (b) availability via a real import of `pynbodyext._native` (open review
+  comment on PR #25), (c) the pre-existing mypy errors. Archive after the
+  retention window.
+- Commands: `.venv/bin/python -m pytest tests/test_bins_vcirc.py -rs`;
+  `make check`.
+- Failing test: none known; the green run is not recorded yet.
+- Blockers: none.
+- Files: `docs/work/BUG-0003/*`, `docs/work/INDEX.md`.
+- Env: Linux VM on the user's Mac; no pynbody.

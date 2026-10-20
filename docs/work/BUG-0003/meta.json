@@ -1,16 +1,16 @@
 {
   "id": "BUG-0003",
   "type": "bug",
-  "status": "review",
+  "status": "done",
   "title_en": "vcirc is offered without the native gravity extension and fails with ImportError",
   "title_zh": "未编译原生 gravity 扩展时仍提供 vcirc，调用即 ImportError",
   "owner": "Claude",
   "issue": 0,
   "created": "2026-10-20",
   "updated": "2026-10-20",
-  "completed": null,
-  "resolution": null,
-  "pr": null,
+  "completed": "2026-10-20",
+  "resolution": "fixed",
+  "pr": 25,
   "related": [
     "BUG-0002"
   ],

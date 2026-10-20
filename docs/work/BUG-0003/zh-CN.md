@@ -73,8 +73,9 @@ bins["vcirc"]                            # ImportError: KernelKind
       `en.md` / `zh-CN.md` 中记录选择）。已选：给出清楚的错误（见“决定”）。
 - [ ] 缺少 `pynbodyext._native` 时，`tests/test_bins_vcirc.py` 中依赖 gravity
       的测试跳过；有扩展时照常运行。
-- [ ] 有一个测试覆盖“缺少扩展”的路径（例如 monkeypatch
+- [x] 有一个测试覆盖“缺少扩展”的路径（例如 monkeypatch
       `GRAVITY_NATIVE_AVAILABLE`），在任何机器上都会运行。
+      （`test_vcirc_without_native_extension_names_it`）
 - [ ] 有扩展和没有扩展时 `make check` 都通过。
 
 ## 设计说明
@@ -111,6 +112,19 @@ monkeypatch 它。
 
 ## 结果
 
+已在上游 PR #25（`83e57c5`）中修复，由维护者合并。
+
+- 缺少扩展时，`_vcirc` 抛出 `ImportError(name="pynbodyext._native")` 并给出
+  重新编译的提示；`vcirc` 仍然列出（见“决定”）。
+- 红：没有扩展时，`tests/test_bins_vcirc.py` 的三个测试因
+  `ImportError: cannot import name 'KernelKind'` 失败。
+- 绿：尚未记录。PR 在贴上 `pytest tests/test_bins_vcirc.py -rs` 和
+  `make check` 的输出之前就已合并（没有扩展时预期 3 skipped、1 passed）。上面
+  两条未勾选的验收标准等这次运行后再勾。
+- 提交用了 `--no-verify`：ruff 通过；mypy 钩子报出 5 个 `main` 上已有的错误
+  （`gravity/base.py:193`、`store/sqlalchemy_store.py:68,107`、
+  `bins/result.py:353`）。
+
 ## 待决问题
 
 - macOS 上为什么没有扩展？`setup.py` 用 `-fopenmp` 和 `optional=True` 编译
@@ -119,3 +133,8 @@ monkeypatch 它。
   `.venv/bin/python setup.py build_ext --inplace` 查看编译器报错来确认。若确认，
   为 macOS 构建另开一个条目（例如只在 OpenMP 可用时加 `-fopenmp`，或在文档中
   说明 `brew install libomp`）。
+- PR #25 上有一条合并时未处理的审查评论，涉及原生扩展*加载*失败。
+  `GRAVITY_NATIVE_AVAILABLE` 用的是 `find_spec`：只要存在 `_native*.so` 就为
+  `True`，即使它加载不了（例如缺少 OpenMP 运行库），这时
+  `import pynbodyext.gravity` 会失败。可考虑改为真正导入
+  `pynbodyext._native` 来判断是否可用，另开条目处理。

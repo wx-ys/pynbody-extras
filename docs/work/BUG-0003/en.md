@@ -76,8 +76,9 @@ bins["vcirc"]                            # ImportError: KernelKind
       Chosen: the clear error (see Decision).
 - [ ] `tests/test_bins_vcirc.py` skips its gravity-dependent tests when
       `pynbodyext._native` is missing, and still runs them when it is present.
-- [ ] A test covers the "extension missing" path, e.g. by monkeypatching
+- [x] A test covers the "extension missing" path, e.g. by monkeypatching
       `GRAVITY_NATIVE_AVAILABLE`, so it runs on every machine.
+      (`test_vcirc_without_native_extension_names_it`)
 - [ ] `make check` passes with and without the extension.
 
 ## Design notes
@@ -118,6 +119,20 @@ so a test can monkeypatch it.
 
 ## Outcome
 
+Fixed in upstream PR #25 (`83e57c5`), merged by the maintainer.
+
+- `_vcirc` raises `ImportError(name="pynbodyext._native")` with a rebuild hint
+  when the extension is missing; `vcirc` stays listed (see Decision).
+- Red: without the extension, the three tests in `tests/test_bins_vcirc.py`
+  failed with `ImportError: cannot import name 'KernelKind'`.
+- Green: not yet recorded. The PR was merged before the
+  `pytest tests/test_bins_vcirc.py -rs` and `make check` output was pasted
+  (expected without the extension: 3 skipped, 1 passed). The two unticked
+  criteria above wait for that run.
+- The commit used `--no-verify`: ruff passed; the mypy hook failed on 5 errors
+  already on `main` (`gravity/base.py:193`, `store/sqlalchemy_store.py:68,107`,
+  `bins/result.py:353`).
+
 ## Open questions
 
 - Why is the extension missing on macOS? `setup.py` builds
@@ -127,3 +142,9 @@ so a test can monkeypatch it.
   compiler error. If confirmed, open a separate item for the macOS build
   (for example, add `-fopenmp` only when OpenMP is available, or document
   `brew install libomp`).
+- A review comment on PR #25 (left open at merge) concerns native *load*
+  failures. `GRAVITY_NATIVE_AVAILABLE` uses `find_spec`, which is `True` when a
+  `_native*.so` exists even if it cannot be loaded (for example a missing
+  OpenMP runtime), and then `import pynbodyext.gravity` fails. Consider
+  deciding availability by actually importing `pynbodyext._native`, in a
+  separate item.
