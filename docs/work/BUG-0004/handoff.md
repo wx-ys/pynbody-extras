@@ -98,3 +98,17 @@
   pytest 9.0.2. `make cpp-test` shows 5 pre-existing
   `-Winstantiation-after-specialization` warnings in
   `cpp/gravity/multipole/eval.cpp:588-592` (not touched by this item).
+
+## 2026-10-20 — Claude @ cloud session
+
+- State: done
+- Done: upstream PR #29 (`4e4480a`) merged. Set `done`, `pr: 29`, filled
+  `Outcome`, answered the first Open question.
+- Next: archive after the retention window. Still open: whether a failed
+  optional build should warn at import time (second Open question; related
+  to BUG-0005).
+- Commands: none.
+- Failing test: none.
+- Blockers: none.
+- Files: `docs/work/BUG-0004/*`.
+- Env: n/a.

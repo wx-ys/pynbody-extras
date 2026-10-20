@@ -123,10 +123,26 @@ single-threaded with a visible warning (answers the first Open question).
 
 ## Outcome
 
+Fixed in upstream PR #29 (`4e4480a`), merged by the maintainer.
+
+- Red: on macOS, `setup.py build_ext` failed with
+  `clang++: error: unsupported option '-fopenmp'`; `optional=True` turned it
+  into a warning, so no `pynbodyext._native` was installed and the gravity
+  and `vcirc` tests skipped or failed.
+- Green (macOS, Apple clang, Homebrew libomp 23.1.2, Python 3.11.7): the
+  build prints `building with OpenMP (libomp at /opt/homebrew/opt/libomp)`;
+  `otool -L` shows `libomp.dylib`; `make cpp-test` -> ALL PASS;
+  `pytest tests/test_gravity.py tests/test_bins_vcirc.py -rs` -> 11 passed.
+- Green (Linux, GCC 11): `-fopenmp` build, `PYNBODYEXT_OPENMP=0` build and a
+  compiler that rejects `-fopenmp` all build; direct accelerations identical
+  across them; `make cpp-test` passes with and without OpenMP.
+
 ## Open questions
 
 - Should OpenMP be required on macOS (document `brew install libomp`), or is
   a serial fallback acceptable?
+  - Answer: neither alone; OpenMP when libomp is found, otherwise a
+    single-threaded build with a warning (see Decision).
   - Data point: the user's Mac already has Homebrew `libomp` 23.1.2
     (`/opt/homebrew/Cellar/libomp/23.1.2`, `lib/libomp.dylib`), so an
     "OpenMP when libomp is found, serial otherwise" build can be verified

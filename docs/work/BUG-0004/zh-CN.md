@@ -117,10 +117,25 @@ brew list libomp 2>/dev/null && echo "libomp present"
 
 ## 结果
 
+已在上游 PR #29（`4e4480a`）中修复，由维护者合并。
+
+- 红：在 macOS 上，`setup.py build_ext` 报
+  `clang++: error: unsupported option '-fopenmp'`；`optional=True` 把它变成
+  一条警告，结果没有安装 `pynbodyext._native`，gravity 和 `vcirc` 的测试被跳过
+  或失败。
+- 绿（macOS，Apple clang，Homebrew libomp 23.1.2，Python 3.11.7）：构建打印
+  `building with OpenMP (libomp at /opt/homebrew/opt/libomp)`；`otool -L`
+  显示 `libomp.dylib`；`make cpp-test` -> ALL PASS；
+  `pytest tests/test_gravity.py tests/test_bins_vcirc.py -rs` -> 11 passed。
+- 绿（Linux，GCC 11）：`-fopenmp` 构建、`PYNBODYEXT_OPENMP=0` 构建，以及
+  拒绝 `-fopenmp` 的编译器都能构建；三者的直接求和加速度完全一致；
+  `make cpp-test` 在开和不开 OpenMP 时都通过。
+
 ## 待决问题
 
 - macOS 上是否要求必须有 OpenMP（在文档中写 `brew install libomp`），还是可以
   接受串行回退？
+  - 答：两者结合：找到 libomp 就用 OpenMP，否则单线程构建并给出警告（见“决定”）。
   - 参考：用户的 Mac 上已经装了 Homebrew `libomp` 23.1.2
     （`/opt/homebrew/Cellar/libomp/23.1.2`，含 `lib/libomp.dylib`），所以
     “找到 libomp 就用 OpenMP，否则串行”的构建可以在这台机器上验证。Homebrew
