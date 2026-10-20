@@ -899,14 +899,6 @@ def _count(bins: BinNDResult) -> np.ndarray:
     return np.bincount(bins.particle_bin[valid_mask], minlength=bins.nbins).astype(int)
 
 
-_VCIRC_NATIVE_MISSING_MSG = (
-    "bins['vcirc'] needs the compiled pynbodyext._native extension (the gravity "
-    "backend), which is not available in this environment. Rebuild it with "
-    "`python setup.py build_ext --inplace` and check the compiler output; on macOS "
-    "the OpenMP runtime (`brew install libomp`) may be required."
-)
-
-
 @BinNDResult.derived(
     "vcirc", condition=lambda bins: bins.ndim == 1 and any(axis_matches(axis, {"r", "rxy"}) for axis in bins.axes)
 )
@@ -940,7 +932,11 @@ def _vcirc(bins: BinNDResult) -> np.ndarray:
 
     # Read the flag at call time (not import time) so tests can monkeypatch it.
     if not deps.GRAVITY_NATIVE_AVAILABLE:
-        raise ImportError(_VCIRC_NATIVE_MISSING_MSG, name="pynbodyext._native")
+        raise ImportError(
+            "bins['vcirc'] needs the compiled pynbodyext._native extension (the gravity backend). "
+            + deps.native_unavailable_reason(),
+            name=deps.NATIVE_MODULE,
+        ) from deps.native_import_error()
 
     from pynbodyext.gravity import KernelKind, calculate_acceleration
 

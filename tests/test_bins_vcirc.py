@@ -94,3 +94,5 @@ def test_vcirc_without_native_extension_names_it(monkeypatch):
     with pytest.raises(ImportError, match=r"pynbodyext\._native") as excinfo:
         bins["vcirc"]
     assert excinfo.value.name == "pynbodyext._native"
+    # BUG-0005: the message carries the reason from util.deps.
+    assert deps.native_unavailable_reason() in str(excinfo.value)

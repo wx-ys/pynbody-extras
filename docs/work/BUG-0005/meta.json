@@ -1,10 +1,10 @@
 {
   "id": "BUG-0005",
   "type": "bug",
-  "status": "ready",
+  "status": "review",
   "title_en": "Native availability is decided by find_spec, not by loading pynbodyext._native",
   "title_zh": "原生扩展是否可用由 find_spec 判断，而不是实际加载 pynbodyext._native",
-  "owner": "",
+  "owner": "Claude",
   "issue": 0,
   "created": "2026-10-20",
   "updated": "2026-10-20",

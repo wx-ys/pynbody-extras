@@ -24,7 +24,9 @@ import and falls back on `ImportError`.
 ## Goal
 
 "Available" means "imports successfully". A broken extension behaves like a
-missing one, and the reason is kept for error messages.
+missing one, and the reason is kept for error messages. When the extension is
+unusable, importing `pynbodyext.gravity` emits a warning that is visible by
+default (also answers BUG-0004's second open question).
 
 ## Actual behavior
 
@@ -55,10 +57,11 @@ import sys, importlib.util, types
 
 ## Acceptance criteria
 
-- [ ] `deps` decides native availability by attempting
+- [x] `deps` decides native availability by attempting
       `import pynbodyext._native` (once, cached), not by `find_spec`.
-- [ ] The import error is kept (e.g. `deps.GRAVITY_NATIVE_ERROR`) and
+- [x] The import error is kept (e.g. `deps.GRAVITY_NATIVE_ERROR`) and
       appended to the `vcirc` and `pynbodyext.gravity` messages.
+      (`deps.native_import_error()`, `deps.native_unavailable_reason()`.)
 - [ ] A test simulates a present-but-unloadable extension and checks that
       `import pynbodyext.gravity` succeeds and `bins["vcirc"]` raises the
       clear `ImportError`; it runs on every machine.
@@ -76,6 +79,27 @@ import sys, importlib.util, types
   working or update the test together with the requirement.
 - `_native` also hosts the SPH scatter engine; consider one shared helper so
   gravity and scatter agree on availability.
+
+## Decision
+
+- `util/deps.py`: `native_import_error()` imports `pynbodyext._native` once
+  (cached) and returns the `ImportError` or `None`;
+  `GRAVITY_NATIVE_AVAILABLE = native_import_error() is None` (still a module
+  attribute, so BUG-0003's monkeypatch keeps working). Eager, at `deps`
+  import: `deps` is only imported by `gravity`, `plot.image.adaptive` and
+  inside `_vcirc`, and loading the extension is cheap.
+  `native_unavailable_reason()` says "not built" (`ModuleNotFoundError` for
+  `pynbodyext._native`) or "present but failed to load (<error>)", plus how
+  to rebuild.
+- New `deps.NativeExtensionWarning(UserWarning)`, shown by default.
+  `pynbodyext.gravity` emits it at import when the extension is unusable,
+  replacing the hidden `ImportWarning`. Filter with
+  `warnings.filterwarnings("ignore", category=NativeExtensionWarning)`.
+- `bins["vcirc"]`: the `ImportError` message now ends with the reason and is
+  chained (`from`) to the original import error.
+- `import pynbodyext` itself does not warn: users who never touch gravity or
+  `vcirc` should not see it. `_sph_scatter.native_pair_builder()` keeps its own
+  silent fallback.
 
 ## Test plan
 

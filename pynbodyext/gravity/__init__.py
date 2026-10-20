@@ -7,6 +7,10 @@ and two high-level convenience functions that operate on pynbody Snapshots.
 It also supports optional gravitational softening (scalar or per-particle)
 with selectable softening kernels via ``KernelKind``.
 
+Without a working ``pynbodyext._native`` extension, only
+``GRAVITY_NATIVE_AVAILABLE`` is exported and importing this package emits a
+:class:`~pynbodyext.util.deps.NativeExtensionWarning` that says why.
+
 Example
 -------
 >>> from pynbodyext.gravity import calculate_acceleration, KernelKind
@@ -23,7 +27,10 @@ if GRAVITY_NATIVE_AVAILABLE:
 
     __all__ += ["Gravity", "KernelKind", "calculate_potential", "calculate_acceleration"]
 else:
-    warning_msg = "pynbodyext.gravity: C++ extension not available; gravity calculations will be unavailable."
     import warnings
 
-    warnings.warn(warning_msg, ImportWarning, stacklevel=2)
+    from pynbodyext.util.deps import NativeExtensionWarning, native_unavailable_reason
+
+    warnings.warn(
+        f"pynbodyext.gravity is unavailable: {native_unavailable_reason()}", NativeExtensionWarning, stacklevel=2
+    )

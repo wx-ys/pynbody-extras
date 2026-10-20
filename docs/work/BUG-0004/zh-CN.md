@@ -143,3 +143,4 @@ brew list libomp 2>/dev/null && echo "libomp present"
     （`brew --prefix libomp`），链接时用 `-lomp` 而不是 `-fopenmp`。
 - `optional=True` 的静默失败是否应在导入时变成可见的警告？（`pynbodyext.gravity`
   已经会发出 `ImportWarning`，但它默认不显示。）
+  - 答：是；已在 BUG-0005 中实现（`NativeExtensionWarning`，属于 `UserWarning`）。

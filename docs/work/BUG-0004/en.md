@@ -152,3 +152,4 @@ Fixed in upstream PR #29 (`4e4480a`), merged by the maintainer.
 - Should a silent `optional=True` failure become a visible warning at import
   time (`pynbodyext.gravity` already emits an `ImportWarning`, which is hidden
   by default)?
+  - Answer: yes; done in BUG-0005 (`NativeExtensionWarning`, a `UserWarning`).
