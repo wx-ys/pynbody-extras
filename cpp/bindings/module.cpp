@@ -2,7 +2,9 @@
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 
 #include <cstddef>
 #include <cstdint>
@@ -17,6 +19,20 @@
 #include "gravity/kernel.hpp"
 #include "gravity/vec3.hpp"
 #include "image/scatter.hpp"
+
+namespace {
+
+// Set the OpenMP thread count for the next parallel region; a no-op in a
+// single-threaded build (no OpenMP), where `threads` is ignored.
+inline void set_omp_threads(std::size_t threads) {
+#ifdef _OPENMP
+    if (threads > 0) omp_set_num_threads(static_cast<int>(threads));
+#else
+    (void)threads;
+#endif
+}
+
+}  // namespace
 
 namespace py = pybind11;
 using namespace gravity;
@@ -113,7 +129,7 @@ struct PyOctree {
         std::vector<Vec3> out(n);
         {
             py::gil_scoped_release release;
-            if (threads > 0) omp_set_num_threads((int)threads);
+            set_omp_threads(threads);
             gravity::compute_accelerations(inner, theta, out);
         }
         return make_n3(out);
@@ -125,7 +141,7 @@ struct PyOctree {
         std::vector<double> out(n);
         {
             py::gil_scoped_release release;
-            if (threads > 0) omp_set_num_threads((int)threads);
+            set_omp_threads(threads);
             gravity::compute_potentials(inner, theta, out);
         }
         return py::array_t<double>({(py::ssize_t)n}, out.data());
@@ -137,7 +153,7 @@ struct PyOctree {
         std::vector<Vec3> out(pts.size());
         {
             py::gil_scoped_release release;
-            if (threads > 0) omp_set_num_threads((int)threads);
+            set_omp_threads(threads);
             gravity::accelerations_at_points(inner, pts, theta, out);
         }
         return make_n3(out);
@@ -149,7 +165,7 @@ struct PyOctree {
         std::vector<double> out(pts.size());
         {
             py::gil_scoped_release release;
-            if (threads > 0) omp_set_num_threads((int)threads);
+            set_omp_threads(threads);
             gravity::potentials_at_points(inner, pts, theta, out);
         }
         return py::array_t<double>({(py::ssize_t)pts.size()}, out.data());
@@ -172,7 +188,7 @@ py::array_t<double> direct_accelerations_py(PyArr positions, std::optional<PyArr
     std::vector<Vec3> acc;
     {
         py::gil_scoped_release release;
-        if (threads > 0) omp_set_num_threads((int)threads);
+        set_omp_threads(threads);
         acc = kk.has_value()
                   ? direct_accelerations_kernel(pos, mv ? mv->data() : nullptr,
                                                 sv ? sv->data() : nullptr, *kk)
@@ -195,7 +211,7 @@ py::array_t<double> direct_potentials_py(PyArr positions, std::optional<PyArr> m
     std::vector<double> pot;
     {
         py::gil_scoped_release release;
-        if (threads > 0) omp_set_num_threads((int)threads);
+        set_omp_threads(threads);
         pot = kk.has_value()
                   ? direct_potentials_kernel(pos, mv ? mv->data() : nullptr,
                                              sv ? sv->data() : nullptr, *kk)
@@ -220,7 +236,7 @@ py::array_t<double> direct_accelerations_at_points_py(PyArr positions, PyArr tar
     std::vector<Vec3> acc;
     {
         py::gil_scoped_release release;
-        if (threads > 0) omp_set_num_threads((int)threads);
+        set_omp_threads(threads);
         acc = kk.has_value()
                   ? direct_accelerations_kernel_at_points(pos, mv ? mv->data() : nullptr,
                                                           sv ? sv->data() : nullptr, tgt, *kk)
@@ -245,7 +261,7 @@ py::array_t<double> direct_potentials_at_points_py(PyArr positions, PyArr target
     std::vector<double> pot;
     {
         py::gil_scoped_release release;
-        if (threads > 0) omp_set_num_threads((int)threads);
+        set_omp_threads(threads);
         pot = kk.has_value()
                   ? direct_potentials_kernel_at_points(pos, mv ? mv->data() : nullptr,
                                                        sv ? sv->data() : nullptr, tgt, *kk)

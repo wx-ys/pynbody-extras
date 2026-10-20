@@ -97,9 +97,19 @@ archive-item:
 
 check: lint typecheck test docs-check
 
+# OpenMP flags for cpp-test. Apple clang rejects a bare -fopenmp, so on macOS
+# use Homebrew's keg-only libomp when it is installed (single-threaded
+# otherwise); elsewhere use -fopenmp. Override with `make cpp-test OMP_FLAGS=`.
+ifeq ($(shell uname -s),Darwin)
+LIBOMP_PREFIX ?= $(shell brew --prefix libomp 2>/dev/null)
+OMP_FLAGS ?= $(if $(wildcard $(LIBOMP_PREFIX)/include/omp.h),-Xpreprocessor -fopenmp -I$(LIBOMP_PREFIX)/include -L$(LIBOMP_PREFIX)/lib -lomp)
+else
+OMP_FLAGS ?= -fopenmp
+endif
+
 .PHONY: cpp-test
 cpp-test:
-	g++ -std=c++17 -O2 -fopenmp -Icpp -o /tmp/pynbodyext_cpp_test \
+	g++ -std=c++17 -O2 $(OMP_FLAGS) -Icpp -o /tmp/pynbodyext_cpp_test \
 		cpp/gravity/tests/test_core.cpp \
 		$(wildcard cpp/gravity/*.cpp cpp/gravity/multipole/*.cpp) \
 		-lm && /tmp/pynbodyext_cpp_test

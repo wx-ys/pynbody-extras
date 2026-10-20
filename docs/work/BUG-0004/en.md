@@ -70,11 +70,13 @@ brew list libomp 2>/dev/null && echo "libomp present"
 
 - [x] The compiler error on macOS is captured in this item and the cause is
       confirmed or replaced. (Confirmed: `unsupported option '-fopenmp'`.)
-- [ ] On macOS, `make setup` produces an importable `pynbodyext._native`
+- [x] On macOS, `make setup` produces an importable `pynbodyext._native`
       (with or without OpenMP), or prints an explicit, actionable error.
-- [ ] Linux builds keep `-fopenmp` and their current performance.
-- [ ] `make cpp-test` and `tests/test_gravity.py` pass on macOS after the fix.
-- [ ] README / README.zh-CN describe the macOS build requirements.
+      (Verified with `setup.py build_ext --inplace`: OpenMP via libomp.)
+- [x] Linux builds keep `-fopenmp` and their current performance.
+      (Linux/GCC 11: probe picks `-fopenmp`, `libgomp` is linked.)
+- [x] `make cpp-test` and `tests/test_gravity.py` pass on macOS after the fix.
+- [x] README / README.zh-CN describe the macOS build requirements.
 
 ## Design notes
 
@@ -90,6 +92,27 @@ brew list libomp 2>/dev/null && echo "libomp present"
   `gravity/traversal.cpp` (4) and `image/scatter.cpp` (1) is ignored without
   OpenMP and needs no change.
 - `setup.py` and `cpp/` changes need human review (`AGENTS.md`).
+
+## Decision
+
+Use OpenMP when the build's compiler can compile and link it, otherwise build
+single-threaded with a visible warning (answers the first Open question).
+
+- `setup.py`: a `BuildExt` subclass probes the compiler with a small OpenMP
+  program before building. On macOS it tries Homebrew libomp first
+  (`LIBOMP_PREFIX`, `brew --prefix libomp`, `/opt/homebrew/opt/libomp`,
+  `/usr/local/opt/libomp`) with `-Xpreprocessor -fopenmp -I<prefix>/include`
+  and `-L<prefix>/lib -lomp -Wl,-rpath,<prefix>/lib`; then plain `-fopenmp`.
+  If nothing works it prints a warning (with `brew install libomp` on macOS)
+  and builds without OpenMP. `PYNBODYEXT_OPENMP=0` forces a single-threaded
+  build. The build always prints which setup it used.
+- `cpp/bindings/module.cpp`, `cpp/image/scatter.cpp`: `#include <omp.h>` is
+  guarded by `#ifdef _OPENMP`; the 8 `omp_set_num_threads` calls go through
+  `set_omp_threads()`, a no-op without OpenMP. `threads` is then ignored.
+- `Makefile` `cpp-test`: `OMP_FLAGS` uses Homebrew libomp on macOS and
+  `-fopenmp` elsewhere; `make cpp-test OMP_FLAGS=` builds serially.
+- README / README.zh-CN: build requirements, `brew install libomp`,
+  `PYNBODYEXT_OPENMP`, `LIBOMP_PREFIX`.
 
 ## Test plan
 

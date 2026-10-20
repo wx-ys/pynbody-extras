@@ -20,8 +20,16 @@ python -m pip install -e ".[image,store]"
 ```
 
 `image` extra 增加 adaptive binning（`powerbin`），`store` 增加 SQLAlchemy
-结果存储。C++17 编译器和 OpenMP 用于构建可选的 native 扩展；没有编译器时会
-回退到纯 Python 实现。
+结果存储。C++17 编译器用于构建可选的 native 扩展（`pynbodyext._native`），
+gravity 求解器和 `bins["vcirc"]` 需要它；没有编译器时会跳过这个扩展，这些功能
+不可用。编译器支持 OpenMP 时构建会启用多线程，否则为单线程。在 macOS 上，
+Apple clang 需要 Homebrew 的 OpenMP 运行库才能多线程构建：
+
+```bash
+brew install libomp   # 会被自动找到；也可以设置 LIBOMP_PREFIX=/path/to/libomp
+```
+
+设置 `PYNBODYEXT_OPENMP=0` 可强制单线程构建。构建时会打印实际使用的 OpenMP 配置。
 
 开发包：
 

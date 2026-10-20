@@ -66,11 +66,13 @@ brew list libomp 2>/dev/null && echo "libomp present"
 
 - [x] 在本条目中记录 macOS 上的编译报错，并确认（或更正）原因。（已确认：
       `unsupported option '-fopenmp'`。）
-- [ ] 在 macOS 上，`make setup` 能产出可导入的 `pynbodyext._native`（启用或
+- [x] 在 macOS 上，`make setup` 能产出可导入的 `pynbodyext._native`（启用或
       不启用 OpenMP 均可），或打印明确、可操作的错误。
-- [ ] Linux 构建保留 `-fopenmp`，性能不变。
-- [ ] 修复后在 macOS 上 `make cpp-test` 和 `tests/test_gravity.py` 通过。
-- [ ] README / README.zh-CN 写明 macOS 的构建要求。
+      （已用 `setup.py build_ext --inplace` 验证：通过 libomp 启用 OpenMP。）
+- [x] Linux 构建保留 `-fopenmp`，性能不变。
+      （Linux/GCC 11：探测选中 `-fopenmp`，链接了 `libgomp`。）
+- [x] 修复后在 macOS 上 `make cpp-test` 和 `tests/test_gravity.py` 通过。
+- [x] README / README.zh-CN 写明 macOS 的构建要求。
 
 ## 设计说明
 
@@ -85,6 +87,26 @@ brew list libomp 2>/dev/null && echo "libomp present"
   `image/scatter.cpp`（1 处）中的 `#pragma omp` 在没有 OpenMP 时会被忽略，
   无需改动。
 - `setup.py` 和 `cpp/` 的改动需要人工审核（见 `AGENTS.md`）。
+
+## 决定
+
+构建所用的编译器能编译并链接 OpenMP 时就用 OpenMP，否则单线程构建，并给出
+明显的警告（回答了第一个待决问题）。
+
+- `setup.py`：新增 `BuildExt` 子类，构建前用一个很小的 OpenMP 程序探测编译器。
+  macOS 上先试 Homebrew libomp（依次为 `LIBOMP_PREFIX`、`brew --prefix libomp`、
+  `/opt/homebrew/opt/libomp`、`/usr/local/opt/libomp`），编译参数
+  `-Xpreprocessor -fopenmp -I<prefix>/include`，链接参数
+  `-L<prefix>/lib -lomp -Wl,-rpath,<prefix>/lib`；然后试普通的 `-fopenmp`。
+  都不行就打印警告（macOS 上提示 `brew install libomp`），不带 OpenMP 构建。
+  `PYNBODYEXT_OPENMP=0` 强制单线程构建。构建时总会打印实际使用的配置。
+- `cpp/bindings/module.cpp`、`cpp/image/scatter.cpp`：`#include <omp.h>` 用
+  `#ifdef _OPENMP` 保护；8 处 `omp_set_num_threads` 改为调用
+  `set_omp_threads()`，没有 OpenMP 时什么也不做，`threads` 参数被忽略。
+- `Makefile` 的 `cpp-test`：`OMP_FLAGS` 在 macOS 上用 Homebrew libomp，其他
+  平台用 `-fopenmp`；`make cpp-test OMP_FLAGS=` 为单线程构建。
+- README / README.zh-CN：写明构建要求、`brew install libomp`、
+  `PYNBODYEXT_OPENMP`、`LIBOMP_PREFIX`。
 
 ## 测试计划
 

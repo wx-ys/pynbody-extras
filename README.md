@@ -21,9 +21,19 @@ python -m pip install -e ".[image,store]"
 ```
 
 The `image` extra adds adaptive binning (`powerbin`), and `store` adds the
-SQLAlchemy result store. A C++17 compiler with OpenMP builds the optional
-native extension; without one, installation falls back to the pure-Python
-implementation.
+SQLAlchemy result store. A C++17 compiler builds the optional native
+extension (`pynbodyext._native`), which the gravity solver and `bins["vcirc"]`
+need; without a compiler the extension is skipped and those features are
+unavailable. The build uses OpenMP when the compiler supports it and is
+single-threaded otherwise. On macOS, Apple clang needs Homebrew's OpenMP
+runtime for a multi-threaded build:
+
+```bash
+brew install libomp   # found automatically; or set LIBOMP_PREFIX=/path/to/libomp
+```
+
+Set `PYNBODYEXT_OPENMP=0` to force a single-threaded build. The build prints
+which OpenMP setup it used.
 
 To develop the package:
 

@@ -11,7 +11,9 @@
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 
 #include <algorithm>
 #include <cmath>
