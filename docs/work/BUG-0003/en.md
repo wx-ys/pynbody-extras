@@ -70,9 +70,10 @@ bins["vcirc"]                            # ImportError: KernelKind
 
 ## Acceptance criteria
 
-- [ ] Without the extension, `vcirc` is not in `bins.queries.names()`, or
+- [x] Without the extension, `vcirc` is not in `bins.queries.names()`, or
       `bins["vcirc"]` raises an error whose message names
       `pynbodyext._native` (pick one and document it in `en.md` / `zh-CN.md`).
+      Chosen: the clear error (see Decision).
 - [ ] `tests/test_bins_vcirc.py` skips its gravity-dependent tests when
       `pynbodyext._native` is missing, and still runs them when it is present.
 - [ ] A test covers the "extension missing" path, e.g. by monkeypatching
@@ -90,6 +91,20 @@ bins["vcirc"]                            # ImportError: KernelKind
   pynbodyext._native extension".
 - `pynbodyext/core/` changes need human review (`AGENTS.md`); this one should
   be small.
+
+## Decision
+
+`vcirc` stays listed on 1-D `r` / `rxy` profiles; without the extension,
+`bins["vcirc"]` raises `ImportError(name="pynbodyext._native")` whose message
+names the extension and how to rebuild it. Reasons:
+
+- If the `condition` hid it, `bins["vcirc"]` would fall through to the
+  particle-array path and fail with an unrelated message, so the user would
+  still not learn that the extension is missing.
+- The query stays discoverable; `names()` does not depend on the build.
+
+The check reads `pynbodyext.util.deps.GRAVITY_NATIVE_AVAILABLE` at call time,
+so a test can monkeypatch it.
 
 ## Test plan
 

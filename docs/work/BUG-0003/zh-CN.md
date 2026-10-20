@@ -68,9 +68,9 @@ bins["vcirc"]                            # ImportError: KernelKind
 
 ## 验收标准
 
-- [ ] 没有扩展时，`vcirc` 不出现在 `bins.queries.names()` 中，或
+- [x] 没有扩展时，`vcirc` 不出现在 `bins.queries.names()` 中，或
       `bins["vcirc"]` 抛出的错误信息写明 `pynbodyext._native`（二选一，并在
-      `en.md` / `zh-CN.md` 中记录选择）。
+      `en.md` / `zh-CN.md` 中记录选择）。已选：给出清楚的错误（见“决定”）。
 - [ ] 缺少 `pynbodyext._native` 时，`tests/test_bins_vcirc.py` 中依赖 gravity
       的测试跳过；有扩展时照常运行。
 - [ ] 有一个测试覆盖“缺少扩展”的路径（例如 monkeypatch
@@ -86,6 +86,19 @@ bins["vcirc"]                            # ImportError: KernelKind
 - 如果查询仍然列出，就把 import 包起来，抛出 `ImportError`（或项目自己的错误
   类型），信息类似 “vcirc needs the compiled pynbodyext._native extension”。
 - `pynbodyext/core/` 下的改动需要人工审核（见 `AGENTS.md`）；这次改动应很小。
+
+## 决定
+
+一维 `r` / `rxy` profile 上继续列出 `vcirc`；没有扩展时，`bins["vcirc"]` 抛出
+`ImportError(name="pynbodyext._native")`，信息写明缺少的扩展以及如何重新编译。
+理由：
+
+- 如果用 `condition` 把它隐藏，`bins["vcirc"]` 会落到粒子数组的查找路径，报一个
+  不相关的错误，用户仍然不知道是缺少扩展。
+- 查询仍可被发现；`names()` 不随编译结果变化。
+
+检查在调用时读取 `pynbodyext.util.deps.GRAVITY_NATIVE_AVAILABLE`，测试可以
+monkeypatch 它。
 
 ## 测试计划
 

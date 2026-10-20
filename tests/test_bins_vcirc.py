@@ -3,16 +3,26 @@
 ``vcirc`` is a radial-only derived property: available on 1-D bins whose axis is
 ``r`` or ``rxy``.  It evaluates the gravitational acceleration at points on the
 mid-plane circle of each bin radius and returns ``sqrt(|a| * R)`` in ``km s**-1``.
+
+The acceleration comes from the compiled ``pynbodyext._native`` extension.  The
+tests that compute ``vcirc`` skip when it is missing (as ``tests/test_gravity.py``
+does); ``test_vcirc_without_native_extension_names_it`` runs everywhere.
 """
 
 from __future__ import annotations
 
 import numpy as np
 import pynbody
+import pytest
 from pynbody import units
 from pynbody.array import SimArray
 
 from pynbodyext.core.calculate import Bin1D, BinsArray
+
+
+def require_native() -> None:
+    """Skip the calling test when the native gravity extension is not built."""
+    pytest.importorskip("pynbodyext._native", reason="vcirc needs the compiled pynbodyext._native extension")
 
 
 def point_mass_sim() -> pynbody.SimSnap:
@@ -26,6 +36,7 @@ def point_mass_sim() -> pynbody.SimSnap:
 
 def test_vcirc_available_for_radial_axes_only():
     """``vcirc`` appears only on 1-D r/rxy profiles, not other axes."""
+    require_native()
     sim = point_mass_sim()
     bins = Bin1D("rxy", vmin="1 kpc", vmax="3 kpc", nbins=2)(sim)
 
@@ -43,6 +54,7 @@ def test_vcirc_available_for_radial_axes_only():
 
 def test_vcirc_matches_analytic_point_mass():
     """For a central point mass, vcirc(R) = sqrt(G M / R) (km s**-1)."""
+    require_native()
     sim = point_mass_sim()
     bins = Bin1D("rxy", vmin="1 kpc", vmax="3 kpc", nbins=2)(sim)
     vcirc = bins["vcirc"]
@@ -58,8 +70,27 @@ def test_vcirc_matches_analytic_point_mass():
 
 
 def test_vcirc_is_finite_and_nonnegative():
+    require_native()
     sim = point_mass_sim()
     bins = Bin1D("rxy", vmin="1 kpc", vmax="3 kpc", nbins=4)(sim)
     vcirc = np.asarray(bins["vcirc"])
     assert np.all(np.isfinite(vcirc))
     assert np.all(vcirc >= 0.0)
+
+
+def test_vcirc_without_native_extension_names_it(monkeypatch):
+    """Without the extension, ``vcirc`` stays listed but raises a clear ImportError.
+
+    BUG-0003: the call used to fail with ``cannot import name 'KernelKind'``.
+    The flag is patched so this path is tested on every machine.
+    """
+    from pynbodyext.util import deps
+
+    monkeypatch.setattr(deps, "GRAVITY_NATIVE_AVAILABLE", False)
+    sim = point_mass_sim()
+    bins = Bin1D("rxy", vmin="1 kpc", vmax="3 kpc", nbins=2)(sim)
+
+    assert "vcirc" in bins.queries.names()
+    with pytest.raises(ImportError, match=r"pynbodyext\._native") as excinfo:
+        bins["vcirc"]
+    assert excinfo.value.name == "pynbodyext._native"
