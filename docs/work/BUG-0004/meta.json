@@ -1,7 +1,7 @@
 {
   "id": "BUG-0004",
   "type": "bug",
-  "status": "draft",
+  "status": "ready",
   "title_en": "pynbodyext._native is not built on macOS; the optional build fails silently",
   "title_zh": "macOS 上没有编译出 pynbodyext._native；可选构建悄悄失败",
   "owner": "",

@@ -25,7 +25,19 @@ $ .venv/bin/python -c "from pynbodyext.util.deps import GRAVITY_NATIVE_AVAILABLE
 False
 ```
 
-编译器的具体报错还没有记录（见复现方式）。
+编译器输出（2026-10-20，Apple clang，Python 3.11 来自 `/opt/anaconda3`）：
+
+```text
+$ uv run --with setuptools --with pybind11 python setup.py build_ext --inplace 2>&1 | tail -60
+running build_ext
+building 'pynbodyext._native' extension
+clang++ ... -c cpp/bindings/module.cpp -o build/temp.macosx-11.1-arm64-cpython-311/cpp/bindings/module.o -fvisibility=hidden -g0 -std=c++17 -mmacosx-version-min=10.14 -O2 -fopenmp
+clang++: error: unsupported option '-fopenmp'
+warning: build_ext: building extension "pynbodyext._native" failed: Command '['clang++', ..., '-fopenmp']' returned non-zero exit status 1.
+```
+
+已确认：Apple clang 不接受 `-fopenmp`；由于扩展声明了 `optional=True`，
+setuptools 把失败变成一条警告，安装出来的包里没有 `_native`。
 
 ## 期望行为
 
@@ -35,8 +47,12 @@ False
 
 ## 复现方式
 
+项目的 `.venv`（由 uv 创建）里没有 `setuptools`，直接调用 `setup.py` 会报
+`ModuleNotFoundError: No module named 'setuptools'`（2026-10-20 观察到）。用
+`pyproject.toml` 中的构建依赖临时补上，不改动 `.venv`：
+
 ```bash
-.venv/bin/python setup.py build_ext --inplace 2>&1 | tail -40
+uv run --with setuptools --with pybind11 python setup.py build_ext --inplace 2>&1 | tail -60
 clang++ --version
 brew list libomp 2>/dev/null && echo "libomp present"
 ```
@@ -48,7 +64,8 @@ brew list libomp 2>/dev/null && echo "libomp present"
 
 ## 验收标准
 
-- [ ] 在本条目中记录 macOS 上的编译报错，并确认（或更正）原因。
+- [x] 在本条目中记录 macOS 上的编译报错，并确认（或更正）原因。（已确认：
+      `unsupported option '-fopenmp'`。）
 - [ ] 在 macOS 上，`make setup` 能产出可导入的 `pynbodyext._native`（启用或
       不启用 OpenMP 均可），或打印明确、可操作的错误。
 - [ ] Linux 构建保留 `-fopenmp`，性能不变。
@@ -60,8 +77,13 @@ brew list libomp 2>/dev/null && echo "libomp present"
 - 可选方案：在 `setup.py` 中检测 OpenMP 支持（试编译一个很小的 OpenMP 程序），
   只在可用时加上相关参数；macOS 上使用 `-Xpreprocessor -fopenmp -lomp`，并
   加上 Homebrew `libomp` 的 include/lib 路径；否则串行编译。
-- 检查 C++ 代码在没有 OpenMP 时能否编译（`#pragma omp` 会被忽略，但
-  `#include <omp.h>` 或 `omp_*` 调用需要用 `_OPENMP` 之类的宏保护）。
+- 目前 C++ 代码在没有 OpenMP 时无法编译：`cpp/bindings/module.cpp` 和
+  `cpp/image/scatter.cpp` 里的 `#include <omp.h>` 没有保护；`module.cpp` 调用了
+  8 次 `omp_set_num_threads`，`scatter.cpp` 调用了 `omp_get_max_threads`。
+  串行回退需要 `#ifdef _OPENMP` 保护（或在 `cpp/` 加一个小的兼容头文件）。
+  `gravity/direct.cpp`（2 处）、`gravity/traversal.cpp`（4 处）和
+  `image/scatter.cpp`（1 处）中的 `#pragma omp` 在没有 OpenMP 时会被忽略，
+  无需改动。
 - `setup.py` 和 `cpp/` 的改动需要人工审核（见 `AGENTS.md`）。
 
 ## 测试计划
@@ -77,5 +99,10 @@ brew list libomp 2>/dev/null && echo "libomp present"
 
 - macOS 上是否要求必须有 OpenMP（在文档中写 `brew install libomp`），还是可以
   接受串行回退？
+  - 参考：用户的 Mac 上已经装了 Homebrew `libomp` 23.1.2
+    （`/opt/homebrew/Cellar/libomp/23.1.2`，含 `lib/libomp.dylib`），所以
+    “找到 libomp 就用 OpenMP，否则串行”的构建可以在这台机器上验证。Homebrew
+    的 libomp 是 keg-only：需要显式传入它的 `include/` 和 `lib/` 路径
+    （`brew --prefix libomp`），链接时用 `-lomp` 而不是 `-fopenmp`。
 - `optional=True` 的静默失败是否应在导入时变成可见的警告？（`pynbodyext.gravity`
   已经会发出 `ImportWarning`，但它默认不显示。）

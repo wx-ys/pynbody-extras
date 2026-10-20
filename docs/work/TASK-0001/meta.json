@@ -1,7 +1,7 @@
 {
   "id": "TASK-0001",
   "type": "task",
-  "status": "draft",
+  "status": "ready",
   "title_en": "Fix the existing mypy errors so the pre-commit hook passes",
   "title_zh": "修掉已有的 mypy 错误，让 pre-commit 钩子能通过",
   "owner": "",

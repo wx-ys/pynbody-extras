@@ -26,7 +26,20 @@ $ .venv/bin/python -c "from pynbodyext.util.deps import GRAVITY_NATIVE_AVAILABLE
 False
 ```
 
-The compiler error itself has not been captured yet (see Reproduction).
+Compiler output (2026-10-20, Apple clang, Python 3.11 from `/opt/anaconda3`):
+
+```text
+$ uv run --with setuptools --with pybind11 python setup.py build_ext --inplace 2>&1 | tail -60
+running build_ext
+building 'pynbodyext._native' extension
+clang++ ... -c cpp/bindings/module.cpp -o build/temp.macosx-11.1-arm64-cpython-311/cpp/bindings/module.o -fvisibility=hidden -g0 -std=c++17 -mmacosx-version-min=10.14 -O2 -fopenmp
+clang++: error: unsupported option '-fopenmp'
+warning: build_ext: building extension "pynbodyext._native" failed: Command '['clang++', ..., '-fopenmp']' returned non-zero exit status 1.
+```
+
+Confirmed: Apple clang rejects `-fopenmp`; because the extension is
+`optional=True`, setuptools turns the failure into a warning and installs the
+package without `_native`.
 
 ## Expected behavior
 
@@ -37,8 +50,13 @@ The compiler error itself has not been captured yet (see Reproduction).
 
 ## Reproduction
 
+The project `.venv` (made by uv) has no `setuptools`, so calling `setup.py`
+directly fails with `ModuleNotFoundError: No module named 'setuptools'`
+(observed 2026-10-20). Supply the build requirements from `pyproject.toml`
+without changing `.venv`:
+
 ```bash
-.venv/bin/python setup.py build_ext --inplace 2>&1 | tail -40
+uv run --with setuptools --with pybind11 python setup.py build_ext --inplace 2>&1 | tail -60
 clang++ --version
 brew list libomp 2>/dev/null && echo "libomp present"
 ```
@@ -50,8 +68,8 @@ brew list libomp 2>/dev/null && echo "libomp present"
 
 ## Acceptance criteria
 
-- [ ] The compiler error on macOS is captured in this item and the cause is
-      confirmed or replaced.
+- [x] The compiler error on macOS is captured in this item and the cause is
+      confirmed or replaced. (Confirmed: `unsupported option '-fopenmp'`.)
 - [ ] On macOS, `make setup` produces an importable `pynbodyext._native`
       (with or without OpenMP), or prints an explicit, actionable error.
 - [ ] Linux builds keep `-fopenmp` and their current performance.
@@ -64,8 +82,13 @@ brew list libomp 2>/dev/null && echo "libomp present"
   program) and add the flags only when it works; on macOS use
   `-Xpreprocessor -fopenmp -lomp` with the Homebrew `libomp` include/lib
   paths; otherwise build serially.
-- Check that the C++ code compiles without OpenMP (`#pragma omp` is ignored,
-  but `#include <omp.h>` or `omp_*` calls need a guard such as `_OPENMP`).
+- The C++ code does not compile without OpenMP today: `#include <omp.h>` is
+  unguarded in `cpp/bindings/module.cpp` and `cpp/image/scatter.cpp`;
+  `module.cpp` calls `omp_set_num_threads` 8 times and `scatter.cpp` calls
+  `omp_get_max_threads`. A serial fallback needs `#ifdef _OPENMP` guards (or
+  a small `cpp/` shim header). `#pragma omp` in `gravity/direct.cpp` (2),
+  `gravity/traversal.cpp` (4) and `image/scatter.cpp` (1) is ignored without
+  OpenMP and needs no change.
 - `setup.py` and `cpp/` changes need human review (`AGENTS.md`).
 
 ## Test plan
@@ -81,6 +104,12 @@ brew list libomp 2>/dev/null && echo "libomp present"
 
 - Should OpenMP be required on macOS (document `brew install libomp`), or is
   a serial fallback acceptable?
+  - Data point: the user's Mac already has Homebrew `libomp` 23.1.2
+    (`/opt/homebrew/Cellar/libomp/23.1.2`, `lib/libomp.dylib`), so an
+    "OpenMP when libomp is found, serial otherwise" build can be verified
+    there. Homebrew's libomp is keg-only: pass its `include/` and `lib/`
+    paths explicitly (`brew --prefix libomp`), and link with `-lomp` instead
+    of `-fopenmp`.
 - Should a silent `optional=True` failure become a visible warning at import
   time (`pynbodyext.gravity` already emits an `ImportWarning`, which is hidden
   by default)?
