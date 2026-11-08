@@ -20,6 +20,7 @@ concepts.
 
 from __future__ import annotations
 
+import ast
 import base64
 import hashlib
 import json
@@ -79,6 +80,12 @@ class ValueCodec:
     Round-tripping through the codec is stable: ``decode(encode(x))`` returns a
     value equal to ``x`` for supported types (numpy arrays compare element-wise
     via ``==``; units are preserved for :class:`SimArray`).
+
+    NumPy scalars retain their dtype. Dictionary keys support Python strings,
+    integers, floats, booleans, None and tuples of Python literals. The existing
+    tuple-key format stores their literal text; nonliteral representations
+    (such as ``(nan,)`` or a custom object's repr) raise :class:`ValueError`
+    during decoding rather than silently changing the key's identity.
     """
 
     def __init__(self, *, raise_on_opaque: bool = True) -> None:
@@ -185,7 +192,7 @@ class ValueCodec:
         return {"__kind": "opaque", "type": f"{cls.__module__}.{cls.__qualname__}", "pickle_b64": _b64(payload)}
 
     def _encode_dict(self, value: dict[Any, Any]) -> list[tuple[dict[str, Any], dict[str, Any]]]:
-        """Encode a dict preserving arbitrary (hashable) keys via typed tags.
+        """Encode a dict with typed tags for scalar and literal tuple keys.
 
         JSON object keys are always strings, so to round-trip an ``int``,
         ``float``, ``bool``, ``tuple``, or ``None`` key we tag each key with its
@@ -212,11 +219,17 @@ class ValueCodec:
             return float(text)
         if kind == "bool":
             return text.lower() == "true"
-        if kind == "none":
+        if kind in ("none", "NoneType"):
             return None
         if kind == "tuple":
-            inner = text.strip("()").strip()
-            return tuple(part.strip() for part in inner.split(",")) if inner else ()
+            try:
+                key = ast.literal_eval(text)
+                if not isinstance(key, tuple):
+                    raise ValueError("expected a tuple")
+                hash(key)
+            except (SyntaxError, ValueError, TypeError) as exc:
+                raise ValueError("cannot decode tuple key: expected a hashable Python literal tuple") from exc
+            return key
         # unknown key type: fall back to the string form (keeps data lossless-ish)
         return text
 
@@ -246,7 +259,15 @@ class ValueCodec:
                 return float("-inf")
             return float(data["value"])
         if kind == "np_scalar":
-            return np.asarray(data["value"], dtype=data["dtype"]).item()
+            value = self._decode(data["value"])
+            dtype = np.dtype(data["dtype"])
+            # Array scalar extraction strips trailing NULs and narrows string
+            # dtypes. The stored width restores padding lost by encode's item().
+            if dtype.kind == "U":
+                return np.str_(value.ljust(dtype.itemsize // np.dtype("U1").itemsize, "\0"))
+            if dtype.kind == "S":
+                return np.bytes_(value.ljust(dtype.itemsize, b"\0"))
+            return np.asarray(value, dtype=dtype)[()]
         if kind in ("seq",):
             items = [self._decode(v) for v in data["items"]]
             return tuple(items) if data.get("seq_kind") == "tuple" else items

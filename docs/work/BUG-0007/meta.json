@@ -1,0 +1,19 @@
+{
+  "id": "BUG-0007",
+  "type": "bug",
+  "status": "review",
+  "title_en": "Preserve NumPy scalars and dictionary keys in ValueCodec",
+  "title_zh": "ValueCodec 保留 NumPy 标量与字典键的类型和值",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-08",
+  "updated": "2026-11-08",
+  "completed": null,
+  "resolution": null,
+  "pr": 33,
+  "related": [],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}
