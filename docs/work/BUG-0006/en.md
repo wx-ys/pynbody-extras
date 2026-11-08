@@ -103,3 +103,9 @@ The earlier failing counts above record the median-only checkpoint; its remainin
 acceptance criterion is now satisfied. See [combined PR body](../BUG-0002/pr-body.md).
 
 ## Open questions
+
+Known follow-up from PR #34 review: constant padding in the masked/nonfinite
+median path currently adds zeros despite the documented NaN padding. The all-valid
+fast path also needs its boundary semantics checked. This behavior predates the
+per-axis correction and is outside this PR's explicit boundary-mode scope; handle
+it with dedicated boundary tests instead of changing it incidentally here.

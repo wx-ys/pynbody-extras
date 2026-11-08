@@ -27,6 +27,11 @@ def test_pynbody_floor_excludes_the_broken_3d_grid_renderer() -> None:
 
     project = tomllib.loads((pathlib.Path(__file__).parents[1] / "pyproject.toml").read_text())["project"]
     requirement = next(Requirement(dep) for dep in project["dependencies"] if Requirement(dep).name == "pynbody")
+    # Pin an explicit lower bound: excluding only 2.3.3 would still allow 2.4-2.7.
+    assert any(
+        bound.operator == ">=" and Version(bound.version) >= Version("2.8.0")
+        for bound in requirement.specifier
+    )
     assert requirement.specifier.contains("2.8.0")
     assert not requirement.specifier.contains("2.3.3")
     assert Version(importlib.metadata.version("pynbody")) >= Version("2.8.0")
