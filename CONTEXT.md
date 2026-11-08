@@ -55,7 +55,9 @@ Use these terms exactly. Don't drift to synonyms.
   calculator. `calc.run(sim, store=<persistent store>)` uses it by default.
 - **Read-through store** — `calc.run(sim, store=store)` returns the stored
   result when the key is present (`result.from_store`), and computes and stores
-  it otherwise; `reuse=False` recomputes and replaces. A persistent store is
+  it otherwise; `reuse=False` recomputes, saves a new version and updates the
+  current cache. `result.store_ref` identifies the saved/reused version, or is None
+  when persistence did not occur. A persistent store is
   neither read nor written when either half of the key is session-only.
   In-place array edits are not part of the key.
 - **Content-addressed key** — the composite store identity:
@@ -66,8 +68,19 @@ Use these terms exactly. Don't drift to synonyms.
   (`SignatureMismatchError`), and a persistent store refuses an unstable
   signature (`UnstableSignatureError`). `short_hash()` is for display only.
 - **`ResultStore`** (`store/base.py`) — the persistence seam. `store`/`fetch`/
-  `get`/`has`/`delete`/`list_refs` over four abstract primitives
-  (`_put`, `_get_by_key`, `_delete`, `_list`).
+  `get`/`has`/`delete`/`list_refs`/`list_versions` over six abstract primitives
+  (`_put`, `_get_by_key`, `_delete`, `_list`, `_get_version`, `_list_versions`).
+  Every save atomically appends a version and updates the current cache.
+- **`RecordRef`** — a typed simulation + full calculator hash address, optionally
+  pinned by `version_id`. `cache_key` identifies the computation; `key` also
+  includes its version when pinned. `store()` and `Result.store_ref` return pinned
+  references, whose `fetch` remains unchanged by refresh or cache invalidation.
+  `get`/`has`/`load` and unpinned refs use the current cache; `list_refs()` lists
+  current unpinned addresses; `list_versions(ref)` lists saved versions in insertion
+  order. `delete` only invalidates current cache (a pinned ref must still be current),
+  retaining all historical versions without promoting an older one. Reference JSON
+  preserves identity types and version, and must be paired with its owning backend.
+  No automatic historical GC or legacy migration; see ADR-007.
 - **`SignatureCatalog`** (`store/catalog.py`) — keys (full signature hashes)
   mapped to their signatures and optional labels: turns a key back into the
   calculator (`catalog.calculator(key)`) and its expression. Looked up by full
@@ -83,8 +96,8 @@ Use these terms exactly. Don't drift to synonyms.
   dependencies are not shared between columns.
 - **Record** (`store/base.py::ResultRecord`) — one self-describing, codec-encoded
   row (value + named + provenance), serializable via `to_json`/`from_json`.
-  The current schema is `pynbodyext.result.store/v3`; JSON loading refuses missing
-  or unsupported schema versions.
+  The current schema is `pynbodyext.result.store/v4`; JSON loading refuses missing
+  or unsupported schema versions and missing/empty `version_id`.
 - **`ValueCodec`** (`store/codec.py`) — portable value serialization (numpy,
   pynbody `SimArray` with units, scalars, nested structures, pickle fallback).
 - **tangos** — the Python package this store is modeled on; a relational DB that
@@ -152,6 +165,20 @@ result = store.load(
 )
 if result is not None:
     rerun = result.calculator.run(sim)   # the recipe is rebuilt from the text
+```
+
+A saved reference can be serialized and fetched after recomputation or reopening
+its database. Keep the backend location alongside it:
+
+```python
+from pynbodyext.core.calculate.store import RecordRef
+
+first = calc.run(sim, store=store, sim_identity=path_identity)
+saved_reference = first.store_ref.to_json()
+refreshed = calc.run(sim, store=store, sim_identity=path_identity, reuse=False)
+original = store.fetch(RecordRef.from_json(saved_reference))  # first saved result
+assert original.store_ref == first.store_ref
+assert refreshed.store_ref != first.store_ref
 ```
 
 ## Architecture invariants (each one is a test)

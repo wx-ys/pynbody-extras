@@ -238,7 +238,9 @@ class EvalEngine:
 
         if store is not None and not result.errors:
             if store_refusal is None:
-                store.store(result, sim_signature=ctx.sim_signature, calculator_signature=node.to_signature())
+                result.store_ref = store.store(
+                    result, sim_signature=ctx.sim_signature, calculator_signature=node.to_signature()
+                )
             else:
                 # The run itself succeeded; only its key would be meaningless in a
                 # later session, so the result is returned but not persisted.

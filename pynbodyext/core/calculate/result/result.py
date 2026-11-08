@@ -98,6 +98,7 @@ from .views import (
 
 if TYPE_CHECKING:
     from pynbodyext.core.calculate.nodes.base import CalculatorBase
+    from pynbodyext.core.calculate.store.base import RecordRef
 
 T = TypeVar("T")
 
@@ -294,6 +295,8 @@ class Result(Generic[T]):
     diagnostics: DiagnosticsView = field(default_factory=DiagnosticsView)
     #: True when the result was read from a result store instead of computed.
     from_store: bool = field(default=False, compare=False)
+    #: Exact saved/reused version, scoped to the run's store; None without persistence.
+    store_ref: RecordRef | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.named, NamedView):

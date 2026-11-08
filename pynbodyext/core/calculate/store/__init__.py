@@ -7,7 +7,10 @@ implements.  The public surface is small:
 - :class:`~pynbodyext.core.calculate.store.codec.ValueCodec` — portable value
   serialization (numpy, pynbody arrays, scalars, nested structures).
 - :class:`~pynbodyext.core.calculate.store.base.ResultStore` — the abstract
-  persistence interface keyed on simulation + calculator identity.
+  persistence interface keyed on simulation + calculator identity. Saves append
+  immutable versions; current-cache lookup selects the latest saved version.
+- :class:`~pynbodyext.core.calculate.store.base.RecordRef` — a current-cache
+  address or a pinned version returned by ``store()`` / ``Result.store_ref``.
 - :class:`~pynbodyext.core.calculate.store.base.InMemoryResultStore` — the
   reference in-memory adapter.
 - :class:`~pynbodyext.core.calculate.store.sqlalchemy_store.SQLAlchemyResultStore`
