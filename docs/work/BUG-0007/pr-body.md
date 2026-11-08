@@ -15,16 +15,15 @@ Work item: [BUG-0007](docs/work/BUG-0007/en.md), first P0 checkpoint of the V1 p
   Failures included casting an encoded dictionary to a NumPy scalar, lost key
   identities and missing rejection of nonliteral tuple text.
 - [x] Focused codec/store/reuse/sample suite: **95 passed, 1 skipped**.
-- [ ] `make check` passes locally: ruff and mypy passed; pytest reported
-  **850 passed, 3 failed, 1 skipped, 3 deselected**.
-- [ ] `make test-all` passes: **853 passed, 3 failed, 1 skipped**.
-- [x] Separate `make docs-check` passed (8 work items); `git diff --check` passed.
+- [x] `make check`: ruff, mypy and docs pass; **866 passed, 1 skipped, 3 deselected**.
+- [x] `make test-all`: **869 passed, 1 skipped**.
+- [x] `make docs-check` passes (8 work items); `git diff --check` passes.
 
-The three full-suite failures are pre-existing [BUG-0002](docs/work/BUG-0002/en.md)
-SPH compatibility failures with pynbody 2.3.3 (two missing `Kernel.value` calls and
-one unequal-z grid placement). Before this patch, the fast suite reported
-814 passed / the same 3 failed / 1 skipped. These failures remain visible;
-this PR does not claim a green full suite or resolve BUG-0002.
+Validated together with the image/SPH baseline in PR #34, on Linux / Python
+3.11.9 / pynbody 2.8.0. The previous three SPH failures are resolved by that
+baseline. Only the generated work-item index conflicted during integration;
+regeneration preserved all items. Merge #34 first; this PR then adds only the
+codec correction and its tests/documentation.
 
 ## Architecture
 

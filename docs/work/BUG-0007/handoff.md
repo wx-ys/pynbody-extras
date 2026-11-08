@@ -36,3 +36,14 @@
 - Independent review: caught U/S scalar trailing-NUL width loss; four new tests
   failed before the follow-up fix. Decoder restores padding from stored dtype.
   Reviewer reran 35 codec tests and eight string probes, with no remaining findings.
+
+## 2026-11-08 — Combined validation before merging #33
+
+- State: review; PR #33. User explicitly authorized push, PR management and merge.
+- Integrated PR #34's baseline plus d34680b floor-contract follow-up. Regenerated
+  the only conflict, docs/work/INDEX.md, preserving all eight work items.
+- No codec implementation or existing assertion changed during integration.
+- Final make check: 866 passed / 1 skipped / 3 deselected; lint, mypy and docs pass.
+- Final make test-all: 869 passed / 1 skipped on Linux / Python 3.11.9 / pynbody 2.8.0.
+- Next: merge #34 first, then mark #33 ready and merge after GitHub checks pass.
+- Pre-existing untracked directories remain untouched.

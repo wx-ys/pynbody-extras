@@ -85,6 +85,17 @@ None 键同时接受 NoneType 和 none 标签。tuple 文本使用 ast.literal_e
 814 passed、3 failed、1 skipped。没有移除或跳过失败测试。
 make check 在 pytest 失败处停止，因此另外执行文档检查。
 
+### 组合基线验证 — 2026-11-08
+
+将 PR #34 的图像/SPH 基线及版本契约补强合入本分支后进行组合验证。
+只有自动生成的工作项索引发生冲突，重新生成后完整保留八个工作项。
+集成过程没有修改 codec 实现或已有数值断言。
+
+`make check` 现已通过：**866 passed、1 skipped、3 deselected**，lint、mypy
+及文档校验均通过。`make test-all`：**869 passed、1 skipped**。
+环境为 Linux / Python 3.11.9 / pynbody 2.8.0。上方失败计数保留为旧依赖基线
+下的历史证据。维护者现已明确授权执行 push、更新 PR 和合并。
+
 ## 待决问题
 
 本项修复无待决问题；带类型的键格式演进另行规划。

@@ -100,6 +100,19 @@ also reproduced before this patch (814 passed, 3 failed, 1 skipped in the fast
 suite). No failing tests were removed or skipped. The docs check is run
 separately because make check stops at the failing pytest target.
 
+### Combined baseline verification — 2026-11-08
+
+PR #34's image/SPH baseline and its floor-contract follow-up were merged into
+this branch for integration validation. Only the generated work-item index
+conflicted; regenerating it retained all eight items. No codec implementation or
+existing numerical assertion changed during integration.
+
+`make check` now passes: **866 passed, 1 skipped, 3 deselected**, with lint,
+mypy and docs validation passing. `make test-all`: **869 passed, 1 skipped**.
+Environment: Linux / Python 3.11.9 / pynbody 2.8.0. The earlier failing counts
+above are historical evidence from the old dependency baseline.
+The maintainer now explicitly authorizes push, PR updates and merge.
+
 ## Open questions
 
 None for this bounded repair. Typed-key format evolution is deferred.
