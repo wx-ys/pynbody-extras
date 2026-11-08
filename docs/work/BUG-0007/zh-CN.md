@@ -96,6 +96,14 @@ make check 在 pytest 失败处停止，因此另外执行文档检查。
 环境为 Linux / Python 3.11.9 / pynbody 2.8.0。上方失败计数保留为旧依赖基线
 下的历史证据。维护者现已明确授权执行 push、更新 PR 和合并。
 
+### 合并验证 — 2026-11-08
+
+已通过 [PR #33](https://github.com/wx-ys/pynbody-extras/pull/33) 合并
+（提交 `88ae3b4`）。两批改动的组合验证通过：make check 为
+866 passed / 1 skipped / 3 deselected；make test-all 为 869 passed / 1 skipped。
+本地 main 已同步至 88ae3b4，与验证过的集成版本内容一致。
+工作项保留至下次发布或 30 天后再归档。
+
 ## 待决问题
 
 本项修复无待决问题；带类型的键格式演进另行规划。

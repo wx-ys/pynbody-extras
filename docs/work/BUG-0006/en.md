@@ -102,9 +102,17 @@ approved BUG-0002's dependency upgrade, `make check` passes (830 passed,
 The earlier failing counts above record the median-only checkpoint; its remaining
 acceptance criterion is now satisfied. See [combined PR body](../BUG-0002/pr-body.md).
 
+### Merge verification — 2026-11-08
+
+Merged in [PR #34](https://github.com/wx-ys/pynbody-extras/pull/34)
+(commit `d1be459`). Both checkpoints were validated together: make check passed
+with 866 passed / 1 skipped / 3 deselected; make test-all passed with
+869 passed / 1 skipped. Local main was synchronized to 88ae3b4 and matched the
+validated integration tree. Retain the work item until the next release or 30 days.
+
 ## Open questions
 
-Known follow-up from PR #34 review: constant padding in the masked/nonfinite
+Follow-up tracked in [BUG-0008](../BUG-0008/en.md) from PR #34 review: constant padding in the masked/nonfinite
 median path currently adds zeros despite the documented NaN padding. The all-valid
 fast path also needs its boundary semantics checked. This behavior predates the
 per-axis correction and is outside this PR's explicit boundary-mode scope; handle

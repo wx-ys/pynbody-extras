@@ -129,6 +129,14 @@ floor contract, so excluding only 2.3.3 cannot accidentally admit 2.4-2.7. Mutat
 check: temporarily declaring >=2.4.0 fails the contract on installed 2.8.0;
 restoring the approved declaration passes.
 
+### Merge verification — 2026-11-08
+
+Merged in [PR #34](https://github.com/wx-ys/pynbody-extras/pull/34)
+(commit `d1be459`). Both checkpoints were validated together: make check passed
+with 866 passed / 1 skipped / 3 deselected; make test-all passed with
+869 passed / 1 skipped. Local main was synchronized to 88ae3b4 and matched the
+validated integration tree. Retain the work item until the next release or 30 days.
+
 ## Open questions
 
 None for this fix; the maintainer approved the support-floor change above.

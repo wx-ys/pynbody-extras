@@ -1,16 +1,16 @@
 {
   "id": "BUG-0006",
   "type": "bug",
-  "status": "review",
+  "status": "done",
   "title_en": "median_filter pads the wrong amount for a non-square size and fails on masked images",
   "title_zh": "median_filter 在非正方形 size 下补边错误，有遮罩时直接报错",
   "owner": "",
   "issue": 0,
   "created": "2026-10-20",
   "updated": "2026-11-08",
-  "completed": null,
-  "resolution": null,
-  "pr": null,
+  "completed": "2026-11-08",
+  "resolution": "fixed",
+  "pr": 34,
   "related": [
     "TASK-0001"
   ],

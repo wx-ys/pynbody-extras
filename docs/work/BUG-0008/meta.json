@@ -1,0 +1,21 @@
+{
+  "id": "BUG-0008",
+  "type": "bug",
+  "status": "review",
+  "title_en": "Constant median boundaries include artificial zeros",
+  "title_zh": "中值滤波 constant 边界错误地引入零值",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-08",
+  "updated": "2026-11-08",
+  "completed": null,
+  "resolution": null,
+  "pr": 35,
+  "related": [
+    "BUG-0006"
+  ],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

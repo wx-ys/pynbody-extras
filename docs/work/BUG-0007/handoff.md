@@ -47,3 +47,11 @@
 - Final make test-all: 869 passed / 1 skipped on Linux / Python 3.11.9 / pynbody 2.8.0.
 - Next: merge #34 first, then mark #33 ready and merge after GitHub checks pass.
 - Pre-existing untracked directories remain untouched.
+
+## 2026-11-08 — Merge completion
+
+- State: done; PR #33, merge commit 88ae3b4; user authorized push/PR/merge.
+- Verified combined make check (866 passed / 1 skipped / 3 deselected) and
+  make test-all (869 passed / 1 skipped), GitHub checks passed.
+- Local main 88ae3b4 matched the validated tree. Retain until next release or
+  30 days before archiving. No untracked local files included.
