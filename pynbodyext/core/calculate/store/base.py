@@ -43,6 +43,7 @@ from pynbodyext.core.calculate.interfaces import is_stable_sim_identity
 from pynbodyext.core.calculate.result.signature import CalculatorSignature, calculator_from_signature
 
 from .codec import ValueCodec
+from .identity import sim_identity_key
 
 if TYPE_CHECKING:
     from pynbodyext.core.calculate.result.result import Result, ValueSummary
@@ -61,9 +62,8 @@ __all__ = [
     "compute_calculator_key",
 ]
 
-#: Discriminator for records produced by this store version.  v2 keys records on
-#: the full sha256 signature hash (v1 used its first 12 characters).
-RESULT_STORE_SCHEMA = "pynbodyext.result.store/v2"
+#: v3 preserves simulation identity types; calculator keys remain full sha256.
+RESULT_STORE_SCHEMA = "pynbodyext.result.store/v3"
 
 
 class UnstableSignatureError(ValueError):
@@ -79,8 +79,8 @@ class SignatureMismatchError(RuntimeError):
 
 
 def _sig_text(sig: tuple[Any, ...]) -> str:
-    """Serialize a signature tuple to a stable string (for composite keys)."""
-    return json.dumps([str(s) for s in sig], sort_keys=True, separators=(",", ":"))
+    """Serialize a simulation identity using the shared typed-key contract."""
+    return sim_identity_key(sig)
 
 
 def _record_key(sim_signature: tuple[Any, ...], calculator_signature_hash: str) -> str:
@@ -327,8 +327,10 @@ class ResultRecord:
     def from_json(cls, text: str) -> ResultRecord:
         """Reconstruct a record from the output of :meth:`to_json`."""
         data = json.loads(text, object_hook=_json_object_hook)
+        if not isinstance(data, dict) or data.get("schema") != RESULT_STORE_SCHEMA:
+            raise ValueError("unsupported result-store schema; expected " + RESULT_STORE_SCHEMA)
         return cls(
-            schema=data.get("schema", RESULT_STORE_SCHEMA),
+            schema=data["schema"],
             sim_signature=tuple(data.get("sim_signature", ())),
             calculator_signature_hash=data.get("calculator_signature_hash", ""),
             calculator_signature_text=data.get("calculator_signature_text", ""),
@@ -470,10 +472,10 @@ class ResultStore(ABC):
 
     def sim_signatures(self) -> list[tuple[Any, ...]]:
         """Every simulation identity the store holds a result for, in first-stored order."""
-        out: dict[tuple[Any, ...], None] = {}
+        out: dict[str, tuple[Any, ...]] = {}
         for ref in self.list_refs():
-            out.setdefault(tuple(ref.sim_signature), None)
-        return list(out)
+            out.setdefault(_sig_text(ref.sim_signature), ref.sim_signature)
+        return list(out.values())
 
     def __contains__(self, ref: RecordRef) -> bool:
         return self._get_by_key(ref.sim_signature, ref.calculator_signature_hash) is not None
@@ -545,8 +547,9 @@ class InMemoryResultStore(ResultStore):
 
     def _list(self, sim_signature: tuple[Any, ...] | None) -> list[RecordRef]:
         refs: list[RecordRef] = []
+        requested = None if sim_signature is None else _sig_text(tuple(sim_signature))
         for record in self._records.values():
-            if sim_signature is not None and record.sim_signature != tuple(sim_signature):
+            if requested is not None and _sig_text(record.sim_signature) != requested:
                 continue
             refs.append(RecordRef(record.sim_signature, record.calculator_signature_hash))
         return refs

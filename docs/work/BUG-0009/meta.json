@@ -1,0 +1,21 @@
+{
+  "id": "BUG-0009",
+  "type": "bug",
+  "status": "done",
+  "title_en": "Prevent typed simulation identities from sharing result-store keys",
+  "title_zh": "防止不同类型的模拟身份共用结果存储键",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-08",
+  "updated": "2026-11-08",
+  "completed": "2026-11-08",
+  "resolution": "fixed",
+  "pr": 36,
+  "related": [
+    "BUG-0007"
+  ],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

@@ -37,6 +37,15 @@ Use these terms exactly. Don't drift to synonyms.
   ...)` is stable across sessions, `("session", id(obj))` is valid in this
   process only (`interfaces.is_stable_sim_identity`). Produced by
   `EvalEngine.make_sim_signature(sim)`.
+- **Typed simulation key** (`store/identity.py::sim_identity_key`) — versioned
+  canonical JSON used by `RecordRef`, result-store lookup/listing and
+  `SampleTable` row indexing. Built-in strings, booleans, integers, finite floats,
+  None and recursive tuples are supported. Types distinguish identities:
+  `1`, `"1"`, `True` and `1.0` are different; floating `-0.0` and `0.0` agree.
+  Providers convert NumPy scalar IDs to built-ins explicitly; mutable values,
+  arbitrary objects and non-finite floats are rejected. This is independent of
+  calculator-parameter numerical equivalence. See ADR-006: there are no existing
+  databases or caches to migrate; no legacy compatibility is required.
 - **`engine.make_sim_signature`** — the stable-identity seam. Default is
   id-based (`("session", id(sim))`). `snapshot_identity` is the stable provider
   for pynbody snapshots: `("sim", <abs path>)`, plus `("halo", <number>,
@@ -74,6 +83,8 @@ Use these terms exactly. Don't drift to synonyms.
   dependencies are not shared between columns.
 - **Record** (`store/base.py::ResultRecord`) — one self-describing, codec-encoded
   row (value + named + provenance), serializable via `to_json`/`from_json`.
+  The current schema is `pynbodyext.result.store/v3`; JSON loading refuses missing
+  or unsupported schema versions.
 - **`ValueCodec`** (`store/codec.py`) — portable value serialization (numpy,
   pynbody `SimArray` with units, scalars, nested structures, pickle fallback).
 - **tangos** — the Python package this store is modeled on; a relational DB that
@@ -126,19 +137,21 @@ calc(sim, store=store, sim_identity=path_identity)    # __call__ alias
 ```
 
 The result is persisted automatically on a clean run keyed by
-`(sim_identity(sim), root CalculatorSignature.short_hash())`. `store` and
+`(sim_identity(sim), root CalculatorSignature.hash)`. `store` and
 `sim_identity` are both optional, so existing callers are unaffected.
 
 Loading back is the mirror image — `store.load(sim_signature=...,
 calculator_signature_text=...)` deserializes the stored signature text into a
-runnable calculator and returns `(calculator, result)` (or `None` on a miss):
+runnable calculator and returns a `Result` with `.calculator` attached (or
+`None` on a miss):
 
 ```python
-calculator, result = store.load(
+result = store.load(
     sim_signature=("sim", "snapshot_103", "halo_0"),
     calculator_signature_text=record.calculator_signature_text,
 )
-rerun = calculator.run(sim)   # the recipe is fully rebuilt from the text
+if result is not None:
+    rerun = result.calculator.run(sim)   # the recipe is rebuilt from the text
 ```
 
 ## Architecture invariants (each one is a test)
