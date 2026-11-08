@@ -66,8 +66,8 @@ includes the finished work-item layout. No production baseline failure remained.
 
 Self-review covered type-tag separation, nested identities, signed zero,
 unsupported IDs, SQLite reopen, filtering/deletion, SampleTable round trips,
-record-schema rejection and import layering. Human architecture/code review is
-pending in the draft PR. Historical result versioning remains the next milestone.
+record-schema rejection and import layering. The maintainer explicitly authorized publication and merge in this chat.
+PR #36 contains the completed repair; merge is subject to remote checks. Historical result versioning remains the next milestone.
 
 ## Open questions
 

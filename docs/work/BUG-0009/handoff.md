@@ -25,3 +25,13 @@
   only the new decision file is included, no unrelated local architecture notes.
 - Next: review this PR, then immutable result references and data registry.
 - No changes to pre-existing untracked directories; no dependency changes.
+
+## 2026-11-08 — Publication and maintainer authorization
+
+- State: done (implementation and local validation); PR #36 created.
+- User explicitly authorized pushing to wx-ys/pynbody-extras, PR creation and merge.
+- Implementation commit: 55b12db. Final tests: make check 936 passed /
+  1 skipped / 3 deselected; make test-all 939 passed / 1 skipped.
+- This follow-up changes only completion metadata/docs; no production/test edits.
+- Merge after remote checks permit it; do not bypass branch protection.
+- Retain work item until the next release or 30 days before archival.

@@ -1,7 +1,7 @@
 # ADR-006: Typed simulation identities in result storage
 
 Date: 2026-11-08
-Status: accepted for implementation; code review pending
+Status: accepted; maintainer authorized publication and merge on 2026-11-08
 Work item: BUG-0009
 
 ## Context and decision
@@ -33,7 +33,7 @@ Identities 1, "1", True and 1.0 coexist without overwriting, fetching or deletin
 one another. Identical typed identities still reuse results. SampleTable must not
 collapse rows through Python equality. Exercise SQLite reopen, filtered lists,
 deletion, read-through, table save/load, invalid identities and deterministic keys.
-Run make check and make test-all; retain human review of the implementation.
+Run make check and make test-all. The maintainer authorized merge after these checks.
 
 ## 中文决策摘要
 
@@ -45,4 +45,4 @@ Run make check and make test-all; retain human review of the implementation.
 浮点正负零归一。拒绝可变容器、任意对象、NumPy 标量及非有限浮点；provider 应显式
 转换 NumPy ID。统一 RecordRef、两个 store、模拟列表和 SampleTable 行索引规则。
 保留原始 tuple 元数据，不改变 CalculatorSignature 数值等价、运行内缓存、snapshot
-身份来源、覆盖策略或依赖。实施获准，代码仍待人类审查。
+身份来源、覆盖策略或依赖。维护者已明确授权发布及合并。

@@ -10,7 +10,7 @@ The maintainer confirmed there are no existing databases/caches: no legacy
 compatibility or migration is included. Identity providers use built-in scalar
 values and recursive tuples; unsupported/non-finite values are rejected.
 
-Work item: [BUG-0009](https://github.com/wx-ys/pynbody-extras/blob/codex/p0-sim-identity-contract/docs/work/BUG-0009/en.md).
+Work item: [BUG-0009](https://github.com/wx-ys/pynbody-extras/blob/55b12db/docs/work/BUG-0009/en.md).
 
 ## Evidence
 
@@ -22,7 +22,7 @@ Work item: [BUG-0009](https://github.com/wx-ys/pynbody-extras/blob/codex/p0-sim-
 
 ## Architecture
 
-- [x] ADR-006 added under `docs/adr/`; human review requested.
+- [x] ADR-006 added under `docs/adr/`; maintainer authorized publication and merge.
 - New encoding is a leaf inside the existing store layer; import contracts pass.
 - Historical result versions, ORM and logical snapshot identity remain separate work.
 
