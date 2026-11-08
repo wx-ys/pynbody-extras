@@ -128,6 +128,76 @@ def test_median_filter_removes_hot_pixel() -> None:
     np.testing.assert_allclose(filtered, 0.0)
 
 
+def _nearest_valid_median(data, size, mask):
+    """Small reference: enumerate neighbours and clamp their coordinates."""
+    ky, kx = (size, size) if isinstance(size, int) else size
+    valid = np.isfinite(data) & mask
+    expected = np.full(data.shape, np.nan)
+    for y, x in np.ndindex(data.shape):
+        if not valid[y, x]:
+            continue
+        neighbours = []
+        for dy in range(-(ky // 2), ky // 2 + 1):
+            for dx in range(-(kx // 2), kx // 2 + 1):
+                yy = min(max(y + dy, 0), data.shape[0] - 1)
+                xx = min(max(x + dx, 0), data.shape[1] - 1)
+                if valid[yy, xx]:
+                    neighbours.append(data[yy, xx])
+        expected[y, x] = np.median(neighbours)
+    return expected
+
+
+@pytest.mark.parametrize("size", [(3, 5), (5, 3), 3])
+@pytest.mark.parametrize("invalid", ["mask", "nonfinite"])
+def test_median_filter_matches_neighbours_for_each_axis(size, invalid):
+    data = np.random.default_rng(7).normal(size=(6, 7))
+    mask = np.ones(data.shape, dtype=bool)
+    if invalid == "mask":
+        mask[0, 0] = mask[2, 3] = mask[-1, -1] = False
+    else:
+        data[0, 0] = data[2, 3] = np.nan
+        data[-1, -1] = np.inf
+    original = data.copy()
+    expected = _nearest_valid_median(data, size, mask)
+
+    actual = median_filter(data, size=size, mask=mask if invalid == "mask" else None)
+
+    assert actual.shape == data.shape
+    np.testing.assert_allclose(actual, expected, equal_nan=True)
+    np.testing.assert_array_equal(data, original)
+
+
+@pytest.mark.parametrize("size", [(3, 5), (5, 3)])
+def test_median_filter_all_masked_keeps_rectangular_image_shape(size):
+    data = np.ones((6, 7))
+    actual = median_filter(data, size=size, mask=np.zeros(data.shape, dtype=bool))
+    assert actual.shape == data.shape
+    assert np.isnan(actual).all()
+
+
+@pytest.mark.parametrize("size", [(3, 5), (5, 3)])
+def test_image_median_keeps_geometry_and_records_rectangular_window(size):
+    from pynbodyext.plot.image import ImageData
+
+    data = np.random.default_rng(9).normal(size=(6, 7))
+    mask = np.ones(data.shape, dtype=bool)
+    mask[1, 2] = False
+    source = ImageData(data, extent=(0, 14, 0, 6), units="Msol", x_units="kpc", y_units="kpc")
+
+    filtered = source.process.smooth.median(size=size, mask=mask)
+
+    np.testing.assert_allclose(filtered.data, _nearest_valid_median(data, size, mask), equal_nan=True)
+    assert filtered.shape == source.shape
+    assert filtered.extent == source.extent
+    np.testing.assert_array_equal(filtered.x_edges, source.x_edges)
+    np.testing.assert_array_equal(filtered.y_edges, source.y_edges)
+    assert filtered.units == source.units
+    assert filtered.x_units == filtered.y_units == "kpc"
+    assert filtered.ops[-1].name == "median_filter"
+    assert filtered.ops[-1].params["size"] == size
+    assert source.ops == ()
+
+
 # ---------------------------------------------------------------------------
 # normalize
 # ---------------------------------------------------------------------------
