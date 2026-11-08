@@ -1,0 +1,21 @@
+{
+  "id": "FEAT-0001",
+  "type": "feature",
+  "status": "done",
+  "title_en": "Pin stored result references to immutable versions",
+  "title_zh": "将结果存储引用固定到不可变版本",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-08",
+  "updated": "2026-11-08",
+  "completed": "2026-11-08",
+  "resolution": "implemented",
+  "pr": null,
+  "related": [
+    "BUG-0009"
+  ],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

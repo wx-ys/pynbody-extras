@@ -25,8 +25,8 @@ and a session-only simulation identity (see
 :class:`ResultStore` is deliberately an abstract template: it implements the
 high-level :meth:`ResultStore.store`, :meth:`ResultStore.fetch`,
 :meth:`ResultStore.get`, :meth:`ResultStore.has`, and :meth:`ResultStore.delete`
-in terms of four small abstract primitives (``_put``, ``_get_by_key``,
-``_delete``, ``_list``).  :class:`InMemoryResultStore` is the reference adapter;
+in terms of six small abstract primitives (``_put``, ``_get_by_key``,
+``_delete``, ``_list``, ``_get_version``, ``_list_versions``).  :class:`InMemoryResultStore` is the reference adapter;
 a SQLAlchemy adapter in the same package implements the same primitives for a
 relational database.
 """
@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -62,8 +63,8 @@ __all__ = [
     "compute_calculator_key",
 ]
 
-#: v3 preserves simulation identity types; calculator keys remain full sha256.
-RESULT_STORE_SCHEMA = "pynbodyext.result.store/v3"
+#: v4 adds immutable save versions; calculator keys remain full sha256.
+RESULT_STORE_SCHEMA = "pynbodyext.result.store/v4"
 
 
 class UnstableSignatureError(ValueError):
@@ -75,7 +76,7 @@ class UnstableSimIdentityError(ValueError):
 
 
 class SignatureMismatchError(RuntimeError):
-    """The record stored under a hash describes a different calculator than requested."""
+    """Stored identity, calculator signature or version differs from the request."""
 
 
 def _sig_text(sig: tuple[Any, ...]) -> str:
@@ -143,20 +144,61 @@ def _check_record(record: ResultRecord | None, signature: CalculatorSignature) -
 
 @dataclass(frozen=True, slots=True)
 class RecordRef:
-    """Opaque handle to a stored result, returned by :meth:`ResultStore.store`.
+    """A cache address, or an immutable saved version when version_id is set.
 
-    Carries the composite identity so an adapter can resolve it; a
-    database-backed adapter may additionally hold a primary key in
-    :attr:`id`.
+    ``store()`` returns pinned versions; ``list_refs()`` returns current cache
+    addresses. Pair either reference with its owning backend. ``id`` is optional
+    backend-local metadata and is excluded from identity and JSON serialization.
     """
 
     sim_signature: tuple[Any, ...]
     calculator_signature_hash: str
     id: Any = None
+    version_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.version_id is not None and (not isinstance(self.version_id, str) or not self.version_id):
+            raise ValueError("version_id must be a non-empty string or None")
+
+    @property
+    def cache_key(self) -> str:
+        """The computation address, independent of any saved version."""
+        return _record_key(self.sim_signature, self.calculator_signature_hash)
 
     @property
     def key(self) -> str:
-        return _record_key(self.sim_signature, self.calculator_signature_hash)
+        """The address including the saved version, when pinned."""
+        if self.version_id is None:
+            return self.cache_key
+        return f"{self.cache_key}::version:{json.dumps(self.version_id)}"
+
+    def to_json(self) -> str:
+        """Serialize a reference for later use with the same backend."""
+        _sig_text(self.sim_signature)  # validate types before serializing
+        return json.dumps(
+            _tag_tuples(
+                {
+                    "schema": "pynbodyext.result.ref/v1",
+                    "sim_signature": self.sim_signature,
+                    "calculator_signature_hash": self.calculator_signature_hash,
+                    "version_id": self.version_id,
+                }
+            ),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    @classmethod
+    def from_json(cls, text: str) -> RecordRef:
+        """Restore a typed cache or version address; unknown schemas are rejected."""
+        data = json.loads(text, object_hook=_json_object_hook)
+        if not isinstance(data, dict) or data.get("schema") != "pynbodyext.result.ref/v1":
+            raise ValueError("unsupported result-reference schema")
+        ref = cls(data["sim_signature"], data["calculator_signature_hash"], version_id=data["version_id"])
+        _sig_text(ref.sim_signature)
+        if not isinstance(ref.calculator_signature_hash, str) or not ref.calculator_signature_hash:
+            raise ValueError("calculator_signature_hash must be a non-empty string")
+        return ref
 
     def __hash__(self) -> int:
         return hash(self.key)
@@ -178,6 +220,12 @@ class ResultRecord:
     named: dict[str, dict[str, Any]] | None = None
     provenance: dict[str, Any] | None = None
     created_at: float = 0.0
+    version_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+
+    @property
+    def ref(self) -> RecordRef:
+        """The immutable reference to this saved record."""
+        return RecordRef(self.sim_signature, self.calculator_signature_hash, version_id=self.version_id)
 
     @classmethod
     def from_result(
@@ -229,13 +277,7 @@ class ResultRecord:
         from the stored signature text when possible.
         """
         from pynbodyext.core.calculate.result.enums import BuiltinKinds, NodeStatus
-        from pynbodyext.core.calculate.result.result import (
-            NodeRecord,
-            PerfSummary,
-            ProvenanceInfo,
-            Result,
-            ResultNode,
-        )
+        from pynbodyext.core.calculate.result.result import NodeRecord, PerfSummary, ProvenanceInfo, Result, ResultNode
 
         value = codec.decode(self.value)
 
@@ -295,6 +337,7 @@ class ResultRecord:
             provenance=provenance,
             perf_summary=PerfSummary(),
             from_store=True,
+            store_ref=self.ref,
         )
 
     def to_json(self) -> str:
@@ -316,6 +359,7 @@ class ResultRecord:
                     "named": self.named,
                     "provenance": self.provenance,
                     "created_at": self.created_at,
+                    "version_id": self.version_id,
                 }
             ),
             sort_keys=True,
@@ -329,6 +373,8 @@ class ResultRecord:
         data = json.loads(text, object_hook=_json_object_hook)
         if not isinstance(data, dict) or data.get("schema") != RESULT_STORE_SCHEMA:
             raise ValueError("unsupported result-store schema; expected " + RESULT_STORE_SCHEMA)
+        if not isinstance(data.get("version_id"), str) or not data["version_id"]:
+            raise ValueError("result-store record requires a non-empty version_id")
         return cls(
             schema=data["schema"],
             sim_signature=tuple(data.get("sim_signature", ())),
@@ -339,6 +385,7 @@ class ResultRecord:
             named=data.get("named"),
             provenance=data.get("provenance"),
             created_at=float(data.get("created_at", 0.0)),
+            version_id=data["version_id"],
         )
 
 
@@ -363,8 +410,8 @@ def _value_summary(value: Any) -> ValueSummary:
 class ResultStore(ABC):
     """Abstract persistence seam keyed on simulation + calculator identity.
 
-    Concrete adapters only implement ``_put``, ``_get_by_key``, ``_delete``, and
-    ``_list``; everything else (encoding a :class:`Result`, decoding it back,
+    Concrete adapters implement ``_put``, ``_get_by_key``, ``_delete``,
+    ``_list``, ``_get_version`` and ``_list_versions``; everything else (encoding a :class:`Result`, decoding it back,
     deriving the content-addressed key, checking a hit) is shared here.
     """
 
@@ -387,7 +434,10 @@ class ResultStore(ABC):
         calculator_signature: CalculatorSignature,
         pretty_key: str | None = None,
     ) -> RecordRef:
-        """Persist a result under the given simulation + calculator identity.
+        """Append an immutable version and update the current cache atomically.
+
+        Returns a pinned reference. Each save creates a new version, even when
+        values are identical. Historical versions are retained after deletion.
 
         Raises
         ------
@@ -418,11 +468,29 @@ class ResultStore(ABC):
         return self._put(record)
 
     def fetch(self, ref: RecordRef) -> Result:
-        """Load a result previously stored under a :class:`RecordRef`."""
-        record = self._get_by_key(ref.sim_signature, ref.calculator_signature_hash)
+        """Read an exact saved version, or the current result for an unpinned ref."""
+        record = self._read_ref(ref)
         if record is None:
             raise KeyError(f"no stored result for {ref.key!r}")
         return record.to_result(self.codec)
+
+    def _read_ref(self, ref: RecordRef) -> ResultRecord | None:
+        record = (
+            self._get_by_key(ref.sim_signature, ref.calculator_signature_hash)
+            if ref.version_id is None
+            else self._get_version(ref.version_id)
+        )
+        if record is None:
+            return None
+        if record.ref.cache_key != ref.cache_key or (
+            ref.version_id is not None and record.version_id != ref.version_id
+        ):
+            raise SignatureMismatchError("stored record does not match the requested identity/version")
+        if record.calculator_signature_text:
+            signature = CalculatorSignature.from_json(record.calculator_signature_text)
+            if signature.hash != ref.calculator_signature_hash:
+                raise SignatureMismatchError("stored signature text does not match the requested hash")
+        return record
 
     def get(
         self, *, sim_signature: tuple[Any, ...], calculator_signature: CalculatorSignature, calculator: Any = None
@@ -432,24 +500,30 @@ class ResultStore(ABC):
         *calculator*, when given, becomes ``result.calculator`` instead of a node
         rebuilt from the stored signature.
         """
-        record = _check_record(self._get_by_key(tuple(sim_signature), calculator_signature.hash), calculator_signature)
+        record = _check_record(
+            self._read_ref(RecordRef(tuple(sim_signature), calculator_signature.hash)), calculator_signature
+        )
         return None if record is None else record.to_result(self.codec, calculator=calculator)
 
     def has(self, *, sim_signature: tuple[Any, ...], calculator_signature: CalculatorSignature) -> bool:
         """Whether a result already exists for an identity."""
-        record = self._get_by_key(tuple(sim_signature), calculator_signature.hash)
+        record = self._read_ref(RecordRef(tuple(sim_signature), calculator_signature.hash))
         return _check_record(record, calculator_signature) is not None
 
     def delete(self, ref: RecordRef) -> bool:
-        """Delete a stored result; return whether it existed."""
+        """Invalidate current cache, retaining history; pinned refs must be current."""
         return self._delete(ref)
 
     def list_refs(self, *, sim_signature: tuple[Any, ...] | None = None) -> list[RecordRef]:
-        """List stored records, optionally filtered by simulation identity."""
+        """List current cache addresses, optionally filtered by simulation identity."""
         return self._list(sim_signature)
 
+    def list_versions(self, ref: RecordRef) -> list[RecordRef]:
+        """List pinned historical versions of an address in insertion order."""
+        return self._list_versions(ref)
+
     def catalog(self) -> SignatureCatalog:
-        """A :class:`~pynbodyext.core.calculate.store.catalog.SignatureCatalog` of every stored calculator.
+        """A :class:`~pynbodyext.core.calculate.store.catalog.SignatureCatalog` of current cached calculators.
 
         Each record carries the signature it was stored under, so the store can
         say which calculators it holds results for, rebuild them, and describe a
@@ -464,21 +538,21 @@ class ResultStore(ABC):
             if ref.calculator_signature_hash in seen:
                 continue
             seen.add(ref.calculator_signature_hash)
-            record = self._get_by_key(ref.sim_signature, ref.calculator_signature_hash)
+            record = self._read_ref(ref)
             if record is None or not record.calculator_signature_text:
                 continue
             catalog.add(CalculatorSignature.from_json(record.calculator_signature_text))
         return catalog
 
     def sim_signatures(self) -> list[tuple[Any, ...]]:
-        """Every simulation identity the store holds a result for, in first-stored order."""
+        """Simulation identities in the current cache, in backend listing order."""
         out: dict[str, tuple[Any, ...]] = {}
         for ref in self.list_refs():
             out.setdefault(_sig_text(ref.sim_signature), ref.sim_signature)
         return list(out.values())
 
     def __contains__(self, ref: RecordRef) -> bool:
-        return self._get_by_key(ref.sim_signature, ref.calculator_signature_hash) is not None
+        return self._read_ref(ref) is not None
 
     def load(self, *, sim_signature: tuple[Any, ...], calculator_signature_text: str) -> Result | None:
         """Load a stored result by simulation identity + calculator signature text.
@@ -502,7 +576,7 @@ class ResultStore(ABC):
             no record exists for the identity.
         """
         signature = CalculatorSignature.from_json(calculator_signature_text)
-        record = _check_record(self._get_by_key(tuple(sim_signature), signature.hash), signature)
+        record = _check_record(self._read_ref(RecordRef(tuple(sim_signature), signature.hash)), signature)
         return None if record is None else record.to_result(self.codec)
 
     # ------------------------------------------------------------------
@@ -521,6 +595,12 @@ class ResultStore(ABC):
     @abstractmethod
     def _list(self, sim_signature: tuple[Any, ...] | None) -> list[RecordRef]: ...
 
+    @abstractmethod
+    def _get_version(self, version_id: str) -> ResultRecord | None: ...
+
+    @abstractmethod
+    def _list_versions(self, ref: RecordRef) -> list[RecordRef]: ...
+
 
 class InMemoryResultStore(ResultStore):
     """Reference :class:`ResultStore` adapter backed by ``dict``.
@@ -533,17 +613,39 @@ class InMemoryResultStore(ResultStore):
     def __init__(self, codec: ValueCodec | None = None) -> None:
         super().__init__(codec)
         self._records: dict[str, ResultRecord] = {}
+        self._versions: dict[str, str] = {}
+        self._history: dict[str, list[RecordRef]] = {}
 
     def _put(self, record: ResultRecord) -> RecordRef:
         key = _record_key(record.sim_signature, record.calculator_signature_hash)
-        self._records[key] = record
-        return RecordRef(record.sim_signature, record.calculator_signature_hash)
+        encoded = record.to_json()
+        current = ResultRecord.from_json(encoded)
+        if record.version_id in self._versions:
+            raise ValueError("a saved result version cannot be overwritten")
+        self._versions[record.version_id] = encoded
+        self._history.setdefault(key, []).append(record.ref)
+        self._records[key] = current
+        return record.ref
 
     def _get_by_key(self, sim_signature: tuple[Any, ...], calculator_signature_hash: str) -> ResultRecord | None:
-        return self._records.get(_record_key(tuple(sim_signature), calculator_signature_hash))
+        current = self._records.get(_record_key(tuple(sim_signature), calculator_signature_hash))
+        # The cache selects a version; its metadata is not the saved payload.
+        # Resolve through history just as the SQL adapter joins its version table.
+        return None if current is None else self._get_version(current.version_id)
 
     def _delete(self, ref: RecordRef) -> bool:
-        return self._records.pop(ref.key, None) is not None
+        current = self._records.get(ref.cache_key)
+        if current is None or (ref.version_id is not None and current.version_id != ref.version_id):
+            return False
+        del self._records[ref.cache_key]
+        return True
+
+    def _get_version(self, version_id: str) -> ResultRecord | None:
+        encoded = self._versions.get(version_id)
+        return None if encoded is None else ResultRecord.from_json(encoded)
+
+    def _list_versions(self, ref: RecordRef) -> list[RecordRef]:
+        return list(self._history.get(ref.cache_key, ()))
 
     def _list(self, sim_signature: tuple[Any, ...] | None) -> list[RecordRef]:
         refs: list[RecordRef] = []
