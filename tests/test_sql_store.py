@@ -165,3 +165,42 @@ def test_sql_store_lists_by_sim():
 
     all_refs = store.list_refs()
     assert len(all_refs) == 2
+
+
+@PropertyBase.dataclass
+class TypedPayload(PropertyBase[dict]):
+    def calculate(self, sim, params=None):
+        return {
+            None: np.int64(3),
+            "None": np.float32(1.5),
+            (1, "star", (False, None)): np.uint64(2**64 - 1),
+            ("1", "star", (False, None)): np.bool_(False),
+        }
+
+
+def test_sql_store_reopen_preserves_scalar_dtypes_and_dictionary_keys(tmp_path):
+    from pynbodyext.core.calculate.store import SQLAlchemyResultStore
+
+    url = f"sqlite:///{tmp_path / 'typed.sqlite'}"
+    calc = TypedPayload()
+    sim = make_sim()
+    expected = calc.run(sim).value
+    store = SQLAlchemyResultStore(url)
+    try:
+        ref = store.store(
+            calc.run(sim), sim_signature=("sim", "typed-snapshot"),
+            calculator_signature=calc.to_signature(),
+        )
+    finally:
+        store.engine.dispose()
+
+    reopened = SQLAlchemyResultStore(url)
+    try:
+        actual = reopened.fetch(ref).value
+        assert actual.keys() == expected.keys()
+        for key, value in expected.items():
+            assert type(actual[key]) is type(value)
+            assert actual[key].dtype == value.dtype
+            np.testing.assert_equal(actual[key], value)
+    finally:
+        reopened.engine.dispose()
