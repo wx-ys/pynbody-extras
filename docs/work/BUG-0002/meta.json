@@ -1,18 +1,21 @@
 {
   "id": "BUG-0002",
   "type": "bug",
-  "status": "draft",
+  "status": "review",
   "title_en": "SPH 3-D render tests fail against the locked pynbody 2.3.3",
   "title_zh": "SPH 三维渲染测试在锁定的 pynbody 2.3.3 下失败",
   "owner": "",
   "issue": 0,
   "created": "2026-10-20",
-  "updated": "2026-10-20",
+  "updated": "2026-11-08",
   "completed": null,
   "resolution": null,
   "pr": null,
   "related": [
     "BUG-0003"
   ],
-  "locales": ["en", "zh-CN"]
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
 }

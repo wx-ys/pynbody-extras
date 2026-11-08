@@ -58,46 +58,65 @@ make setup
 
 ## 验收标准
 
-- [ ] `pyproject.toml` 和 `uv.lock` 在一个测试确实能通过的 pynbody 下限上
+- [x] `pyproject.toml` 和 `uv.lock` 在一个测试确实能通过的 pynbody 下限上
       保持一致；或者测试在下限允许的所有版本上都能通过。
-- [ ] 上述三个测试在 `make setup` 创建的环境中通过。
-- [ ] `tests/test_bins_sph_render.py` 使用同一个 kernel 求值辅助函数，不再
+- [x] 上述三个测试在 `make setup` 创建的环境中通过。
+- [x] `tests/test_bins_sph_render.py` 使用同一个 kernel 求值辅助函数，不再
       混用 `get_value` 和 `value`。
-- [ ] 对 `to_3d_grid` 存在 z 尺寸 bug 的 pynbody，`nz != ny` 的三维渲染会
+- [x] 对 `to_3d_grid` 存在 z 尺寸 bug 的 pynbody，`nz != ny` 的三维渲染会
       警告或报错，并有测试覆盖（或者下限排除这些版本，并有契约测试固定）。
-- [ ] `make check` 和 `make test-all` 通过。
+- [x] `make check` 和 `make test-all` 通过。
 
 ## 设计说明
 
-有两种修法，需要维护者选择：
+### 维护者决策 — 2026-11-08
 
-- **A. 提高下限。** 设 `pynbody>=X`，X 为第一个同时具备
-  `Kernel.value(distance, h)` 和修复后 `to_3d_grid` 的版本，然后重新 lock。
-  后果：如果 X 没有 3.10 的 wheel，Python 3.10 可能失去 pynbody 支持。
-  lock 文件用的是清华镜像地址，重新 lock 需要能访问该镜像，或在保留镜像的前提下
-  指定 `--index-url`。
-- **B. 保持下限。** 增加一个测试辅助函数，两种 API 都能求值（有 `value(r, h)`
-  就用它，否则向量化调用 `get_value(r / h, h)`）；并在三维渲染路径中，对存在
-  z bug 的 pynbody 版本恢复按版本判断的警告（或绕过方案）。
-  `pynbodyext/util/deps.py` 中已经有 `PYNBODY_VERSION`。
+已批准方案 A：要求 **Python >=3.11、pynbody >=2.8.0**，锁定并测试
+pynbody 2.8.0，明确取消 Python 3.10 支持。
+2.8.0 是选定的已知可用基线，不表示它是最早修复版本。
+上游 [040ade1](https://github.com/pynbody/pynbody/commit/040ade1eaf58a5fa9ac22194d7b4be8b26c536aa)
+修复了 z 像素尺寸（`ny` -> `nz`），该提交已包含在
+[v2.8.0](https://github.com/pynbody/pynbody/releases/tag/v2.8.0) 中；该版本的
+包元数据要求 Python >=3.11。保留适配层签名及数值容差。
 
-如果可以接受提高下限，A 的改动更小。无论哪种，在不受支持的 pynbody 上明确失败的
-契约测试，都比给出错误数字要好。
+检查安装后的 2.8.0 源码发现，`Kernel2D.value` 仍会抛出 `NotImplementedError`。
+因此数值参考统一通过一个辅助函数，在单位 h 下调用 `get_value(r / h)`，再除以
+`h**kernel.h_power`，保持二维投影和三维核的归一化。生产代码不增加兼容分支。
+投影测试除原有 h=1 外，还覆盖 h=0.7 和 h=1.4。
+
+未采用的方案是保留旧下限，并增加依赖版本的警告或绕过逻辑。
+已批准的版本下限避免了额外的生产行为分支。
 
 ## 测试计划
 
-- 在锁定的 2.3.3 环境中复现（红）。
-- 选 A：重新 lock，跑 `make test`（绿），并增加断言
-  `pynbody.__version__ >= X` 的契约测试。
-- 选 B：在 2.3.3 和新版 pynbody 上分别跑这三个测试；增加测试验证受影响版本下
-  `nz != ny` 渲染会警告（若无法安装真实旧版本，用 `monkeypatch` 修改
-  `PYNBODY_VERSION` 或适配层）。
-- `make check`、`make test-all`。
+- 在 2.3.3 下复现三个 SPH 失败及新增的版本下限契约失败。
+- 重新锁定并同步全部 extras，在最低支持版本 2.8.0 下测试渲染器签名、数值参考和
+  非立方网格的粒子位置。
+- 运行 `make check`、`make test-all`，验证锁文件一致性。
 
 ## 结果
 
+在 `codex/p0-image-sph-baseline` 分支实现，接在 BUG-0006 中值滤波修复之后。
+分支从 main 创建，不包含 codec PR #33。
+
+- 更新 Python/依赖元数据、Ruff/mypy 目标、锁文件及双语 README。
+  删除过时的 Python 3.10 typing 兼容分支及其直接依赖。
+- 保留清华镜像，锁定 pynbody 2.8.0。其余保留包的版本不变；锁文件移除
+  Python 3.10 专用解析结果，并加入 pynbody 所需的 `osfclient`/HTTP 依赖。
+- 红灯：2.3.3 下 renderer contract + SPH 专项 **4 failed、42 passed**，
+  即新增的版本下限契约及原有三个失败。
+- 绿灯：同一专项加两个新的投影尺度用例，**48 passed**。
+- `make check`：lint、mypy 通过；**830 passed、1 skipped、3 deselected**；
+  文档校验通过。
+- `make test-all`：**833 passed、1 skipped**。保留原有断言及数值容差，
+  没有跳过或删除失败测试。
+- 在 Linux / Python 3.11.9 / pynbody 2.8.0 下，`uv sync --locked --all-extras`
+  及离线锁文件校验通过。尚未运行其他 Python/平台组合。
+- 本地 `.github/` 文件原本未被 Git 跟踪，不包含在此次提交中；其中草稿 CI 矩阵
+  仍有 Python 3.10，单独发布该工作流前需移除这一项。
+
+由维护者继续审查、push、创建 PR 和合并。见 [PR 正文](pr-body.md)。
+
 ## 待决问题
 
-- 哪个 pynbody 版本最先同时具备 `Kernel.value(distance, h)` 和修复后的
-  `to_3d_grid` z 尺寸？（通过测试的环境是 2.8.0；确切的最早版本尚未核实。）
-- 选 A 还是 B？如果 A 需要放弃 Python 3.10，是否可以接受？
+本次修复无待决问题；维护者已批准上述版本下限变更。

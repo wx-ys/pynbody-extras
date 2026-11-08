@@ -9,7 +9,8 @@
 
 ## 安装
 
-需要 Python 3.10–3.12。
+需要 Python >=3.11、pynbody >=2.8.0。不再支持 Python 3.10；
+pynbody 版本下限包含非立方 SPH 网格的修复（BUG-0002）。
 
 使用包：
 

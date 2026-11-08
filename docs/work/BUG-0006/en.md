@@ -61,7 +61,7 @@ median_filter(data, size=(3, 5), mask=mask)  # ValueError
 - [x] The pad widths are `((pad_y, pad_y), (pad_x, pad_x))`.
 - [x] The result matches a brute-force `nanmedian` reference on a small image
       for `size=(3, 5)` and `(5, 3)`, and still matches for `size=3`.
-- [ ] `make check` passes.
+- [x] `make check` passes.
 
 ## Design notes
 
@@ -93,5 +93,13 @@ Image geometry, units, operation history and input immutability are checked.
 - Docs validation runs separately because make check stops at pytest.
 - No dependency, architecture, edge-mode, or even-window contract was changed.
 
+
+### Final baseline verification — 2026-11-08
+
+The branch was renamed to `codex/p0-image-sph-baseline`. After the maintainer
+approved BUG-0002's dependency upgrade, `make check` passes (830 passed,
+1 skipped, 3 deselected) and `make test-all` passes (833 passed, 1 skipped).
+The earlier failing counts above record the median-only checkpoint; its remaining
+acceptance criterion is now satisfied. See [combined PR body](../BUG-0002/pr-body.md).
 
 ## Open questions

@@ -38,3 +38,14 @@
 - Env: Linux, Python 3.11.9, pynbody 2.3.3, repository .venv.
 - Independent review: no actionable findings; reviewer separately ran the smooth
   suite (40 passed). No existing tests were changed, weakened or skipped.
+
+## 2026-11-08 — Codex / final baseline verification
+
+- State: review. Renamed branch to codex/p0-image-sph-baseline.
+- Maintainer approved BUG-0002's Python >=3.11 / pynbody >=2.8.0 floor.
+- After that upgrade, make check passes (830 passed / 1 skipped / 3 deselected,
+  lint, mypy, docs) and make test-all passes (833 passed / 1 skipped).
+- Earlier failing counts remain historical median-only evidence. All BUG-0006
+  acceptance criteria are now satisfied. The median implementation is unchanged.
+- Next: user publishes and reviews the combined BUG-0006 + BUG-0002 branch;
+  use docs/work/BUG-0002/pr-body.md. No push, PR creation or merge performed here.

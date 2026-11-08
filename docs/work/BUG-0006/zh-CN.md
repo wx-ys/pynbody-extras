@@ -59,7 +59,7 @@ median_filter(data, size=(3, 5), mask=mask)  # ValueError
 - [x] 补边宽度为 `((pad_y, pad_y), (pad_x, pad_x))`。
 - [x] 在小图像上，`size=(3, 5)` 和 `(5, 3)` 的结果与暴力 `nanmedian` 参考值
       一致，`size=3` 仍然一致。
-- [ ] `make check` 通过。
+- [x] `make check` 通过。
 
 ## 设计说明
 
@@ -90,5 +90,12 @@ mask/NaN 路径按每个轴自己的半径对称补边。新增十个回归用�
 - make check 在 pytest 失败处停止，因此另外执行文档检查。
 - 未改变依赖、架构、边界模式或偶数窗口契约。
 
+
+### 最终基线验证 — 2026-11-08
+
+分支已更名为 `codex/p0-image-sph-baseline`。维护者批准 BUG-0002 的依赖升级后，
+`make check` 通过（830 passed、1 skipped、3 deselected），`make test-all` 通过
+（833 passed、1 skipped）。上面的失败计数保留为仅完成中值滤波修复时的历史检查点；
+剩余验收项现已满足。见[合并后的 PR 正文](../BUG-0002/pr-body.md)。
 
 ## 待决问题
