@@ -27,6 +27,17 @@ NBINS = 20
 EDGE = SPAN / NBINS
 
 
+def kernel_value(kernel, distance, h):
+    """Evaluate W(r, h); Kernel2D still lacks ``value`` in pynbody 2.8.0.
+
+    Sample the unit-h kernel at r/h, then apply its dimensional scaling.
+    Calling Kernel2D.get_value with a non-unit h does not do this scaling.
+    """
+    distance = np.asarray(distance)
+    samples = [kernel.get_value(float(r) / h) for r in distance.flat]
+    return np.asarray(samples).reshape(distance.shape) / h**kernel.h_power
+
+
 def make_sim(n: int = 4000, *, h: float = 0.5, spread: float = 3.5, stars: int = 0) -> pynbody.SimSnap:
     """A small snapshot with hand-set smoothing lengths (no kdtree needed)."""
     rng = np.random.default_rng(7)
@@ -246,9 +257,10 @@ def test_mass_sum_keeps_the_units_and_the_total_of_the_strict_query() -> None:
     assert smoothed.shape_bins == strict.shape_bins
 
 
-def test_the_projection_matches_pynbody_kernel_sampling_exactly() -> None:
+@pytest.mark.parametrize("h", [0.7, 1.0, 1.4])
+def test_the_projection_matches_pynbody_kernel_sampling_exactly(h: float) -> None:
     """Our render is pynbody's: sample the projected kernel at each cell centre."""
-    h, nbins, span = 1.0, 21, 10.5
+    nbins, span = 21, 10.5
     bins = one_particle(h, nbins=nbins, span=span)
     kernel = kernels.Kernel2D(kernels.CubicSplineKernel())
 
@@ -257,7 +269,7 @@ def test_the_projection_matches_pynbody_kernel_sampling_exactly() -> None:
     distance = np.hypot(*grids)
     reference = np.zeros_like(distance)
     inside = distance < 2 * h
-    reference[inside] = [kernel.get_value(r / h) / h**2 for r in distance[inside]]
+    reference[inside] = kernel_value(kernel, distance[inside], h)
     reference *= (span / nbins) ** 2
 
     # pynbody samples its kernel from a 0.02-step table, so agreement is to the
@@ -338,7 +350,7 @@ def test_a_volume_render_places_the_kernel_on_the_cell_grid() -> None:
     middle = nbins // 2
 
     assert count.shape == (nbins, nbins, nbins)
-    assert count[middle, middle, middle] == pytest.approx(kernels.CubicSplineKernel().value(0.0, h) * edge**3, rel=1e-6)
+    assert count[middle, middle, middle] == pytest.approx(kernel_value(kernels.CubicSplineKernel(), 0.0, h) * edge**3, rel=1e-6)
     assert count.sum() == pytest.approx(1.0, rel=0.05)
 
 
@@ -366,7 +378,7 @@ def test_a_volume_render_matches_a_direct_kernel_sum() -> None:
         distance = np.sqrt(
             (grid[0] - atom[0]) ** 2 + (grid[1] - atom[1]) ** 2 + (grid[2] - atom[2]) ** 2
         )
-        reference += weight * edge**3 * kernel.value(distance, h)
+        reference += weight * edge**3 * kernel_value(kernel, distance, h)
 
     # pynbody samples its kernel from a 0.02-step lookup table, so the agreement
     # is to the table's resolution rather than to machine precision: about a
@@ -400,7 +412,7 @@ def test_an_unequal_z_resolution_renders_the_grid_it_was_asked_for() -> None:
         [-span / 2 + (index + 0.5) * (span / counts[prop]) for prop, index in zip(("x", "y", "z"), (2, 3, 2))]
     )
     volume = (span / counts["x"]) * (span / counts["y"]) * (span / counts["z"])
-    expected = kernels.CubicSplineKernel().value(float(np.linalg.norm(centre - atom)), h) * volume
+    expected = kernel_value(kernels.CubicSplineKernel(), float(np.linalg.norm(centre - atom)), h) * volume
     # the renderer reads its kernel from a 0.02-step table, as the sibling tests note
     assert count[2, 3, 2] == pytest.approx(expected, rel=0.03)
 

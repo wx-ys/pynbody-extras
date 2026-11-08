@@ -10,7 +10,8 @@ calculators, binned profiles and ready-to-publish 2-D maps.
 
 ## Installation
 
-Requires Python 3.10–3.12.
+Requires Python >=3.11 and pynbody >=2.8.0. Python 3.10 is no longer supported;
+the pynbody floor includes the fix for non-cubic SPH grids (BUG-0002).
 
 To use the package:
 

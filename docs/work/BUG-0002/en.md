@@ -61,49 +61,74 @@ make setup
 
 ## Acceptance criteria
 
-- [ ] `pyproject.toml` and `uv.lock` agree on a pynbody floor that the suite
+- [x] `pyproject.toml` and `uv.lock` agree on a pynbody floor that the suite
       actually passes on, or the suite passes on every pynbody the floor admits.
-- [ ] The three tests above pass in the environment `make setup` creates.
-- [ ] `tests/test_bins_sph_render.py` uses one kernel-evaluation helper, not a
+- [x] The three tests above pass in the environment `make setup` creates.
+- [x] `tests/test_bins_sph_render.py` uses one kernel-evaluation helper, not a
       mix of `get_value` and `value`.
-- [ ] With a pynbody whose `to_3d_grid` has the z-sizing bug, a 3-D render
+- [x] With a pynbody whose `to_3d_grid` has the z-sizing bug, a 3-D render
       with `nz != ny` warns or raises; a test covers this (or the floor
       excludes such versions and a contract test pins it).
-- [ ] `make check` and `make test-all` pass.
+- [x] `make check` and `make test-all` pass.
 
 ## Design notes
 
-Two ways to fix it, and the choice needs a maintainer:
+### Maintainer decision — 2026-11-08
 
-- **A. Raise the floor.** Set `pynbody>=X` where X is the first release with
-  both `Kernel.value(distance, h)` and the fixed `to_3d_grid`, then re-lock.
-  Consequence: Python 3.10 may lose pynbody support if X has no 3.10 wheels.
-  The lock uses the TUNA mirror URLs, so re-locking needs that mirror or
-  `--index-url` with the mirror kept.
-- **B. Keep the floor.** Add a test helper that evaluates the kernel on both
-  APIs (`value(r, h)` when present, else `get_value(r / h, h)` vectorised), and
-  bring back a version-gated warning (or a workaround) in the 3-D render path
-  for pynbody versions with the z bug. `PYNBODY_VERSION` already exists in
-  `pynbodyext/util/deps.py`.
+Option A is approved: require **Python >=3.11 and pynbody >=2.8.0**, and
+lock/test pynbody 2.8.0. Python 3.10 support is deliberately removed.
+2.8.0 is the chosen known-good baseline, not a claim about the earliest fixed release.
+Upstream [040ade1](https://github.com/pynbody/pynbody/commit/040ade1eaf58a5fa9ac22194d7b4be8b26c536aa)
+fixes z pixel sizing (`ny` -> `nz`); the commit is an ancestor of
+[v2.8.0](https://github.com/pynbody/pynbody/releases/tag/v2.8.0), whose package
+metadata requires Python >=3.11. Keep the adapter signatures and numerical tolerances.
 
-A is the smaller change if the floor is acceptable. Either way, a contract test
-that fails loudly on an unsupported pynbody is better than wrong numbers.
+Inspection of the installed 2.8.0 kernels found that `Kernel2D.value` still raises
+`NotImplementedError`. Numerical references therefore share one helper that samples
+`get_value(r / h)` at unit h and divides by `h**kernel.h_power`. This preserves
+both 2-D projection and 3-D normalization, with no compatibility branch in production.
+Projection tests also cover h=0.7 and h=1.4, besides the original h=1 case.
+
+The rejected alternative was to keep the old floor and add a version-dependent
+warning/workaround. The approved floor avoids that extra production behavior.
 
 ## Test plan
 
-- Reproduce on the locked 2.3.3 environment (red).
-- For A: re-lock, run `make test` (green), and add a contract test that
-  asserts `pynbody.__version__ >= X`.
-- For B: run the three tests on 2.3.3 and on the newer pynbody; add a test that
-  the `nz != ny` render warns on an affected version (use `monkeypatch` on
-  `PYNBODY_VERSION` or the adapter if a real old version is unavailable).
-- `make check`, `make test-all`.
+- Reproduce the three SPH failures and the new floor-contract failure on 2.3.3.
+- Re-lock and sync all extras; test the SPH renderer signatures, numerical references,
+  and non-cubic grid placement on the exact supported floor, 2.8.0.
+- Run `make check`, `make test-all`, and verify lock consistency.
 
 ## Outcome
 
+Implemented on `codex/p0-image-sph-baseline` after the BUG-0006 median fix.
+The branch starts from main and does not include codec PR #33.
+
+- Updated Python/package metadata, Ruff/mypy targets, the lock and both READMEs.
+  Removed the obsolete Python 3.10 typing fallback and its direct dependency.
+- Locked pynbody 2.8.0 using the existing TUNA index. Other retained packages keep
+  their versions; the lock removes Python 3.10-only resolutions and adds pynbody's
+  required `osfclient`/HTTP dependencies.
+- Red: renderer contract + SPH suites on 2.3.3: **4 failed, 42 passed** (the new
+  floor contract plus the three original failures).
+- Green: the same suites, including two new projection scales: **48 passed**.
+- `make check`: lint and mypy pass; **830 passed, 1 skipped, 3 deselected**;
+  documentation validation passes.
+- `make test-all`: **833 passed, 1 skipped**. Existing assertions and numerical
+  tolerances are intact; no failing tests were skipped or deleted.
+- `uv sync --locked --all-extras` and offline lock validation pass on Linux /
+  Python 3.11.9 / pynbody 2.8.0. Other Python/platform combinations were not run.
+- Local `.github/` files were already untracked and are outside this commit.
+  Their draft CI matrix still includes Python 3.10; remove that entry before
+  publishing that separate workflow.
+
+Review/push/PR/merge remain with the maintainer. See [PR body](pr-body.md).
+
+PR #34 review follow-up: require an explicit `>=2.8.0` or stronger bound in the
+floor contract, so excluding only 2.3.3 cannot accidentally admit 2.4-2.7. Mutation
+check: temporarily declaring >=2.4.0 fails the contract on installed 2.8.0;
+restoring the approved declaration passes.
+
 ## Open questions
 
-- Which pynbody release first has `Kernel.value(distance, h)` and the fixed
-  `to_3d_grid` z sizing? (The passing environment had 2.8.0; the exact first
-  version has not been checked.)
-- Option A or B? Is dropping Python 3.10 acceptable if A needs it?
+None for this fix; the maintainer approved the support-floor change above.

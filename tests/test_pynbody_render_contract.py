@@ -15,6 +15,31 @@ from __future__ import annotations
 import inspect
 
 
+def test_pynbody_floor_excludes_the_broken_3d_grid_renderer() -> None:
+    """BUG-0002: both installation metadata and the environment require the fix."""
+    import importlib.metadata
+    import pathlib
+    import tomllib
+
+    from packaging.requirements import Requirement
+    from packaging.specifiers import SpecifierSet
+    from packaging.version import Version
+
+    project = tomllib.loads((pathlib.Path(__file__).parents[1] / "pyproject.toml").read_text())["project"]
+    requirement = next(Requirement(dep) for dep in project["dependencies"] if Requirement(dep).name == "pynbody")
+    # Pin an explicit lower bound: excluding only 2.3.3 would still allow 2.4-2.7.
+    assert any(
+        bound.operator == ">=" and Version(bound.version) >= Version("2.8.0")
+        for bound in requirement.specifier
+    )
+    assert requirement.specifier.contains("2.8.0")
+    assert not requirement.specifier.contains("2.3.3")
+    assert Version(importlib.metadata.version("pynbody")) >= Version("2.8.0")
+    python_versions = SpecifierSet(project["requires-python"])
+    assert python_versions.contains("3.11")
+    assert not python_versions.contains("3.10")
+
+
 def test_render_image_signature_is_pinned() -> None:
     from pynbody.sph import _render
 

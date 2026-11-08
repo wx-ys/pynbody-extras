@@ -55,11 +55,11 @@ median_filter(data, size=(3, 5), mask=mask)  # ValueError
 
 ## 验收标准
 
-- [ ] 有一个非正方形 `size` 加遮罩的测试，在修复前失败。
-- [ ] 补边宽度为 `((pad_y, pad_y), (pad_x, pad_x))`。
-- [ ] 在小图像上，`size=(3, 5)` 和 `(5, 3)` 的结果与暴力 `nanmedian` 参考值
+- [x] 有一个非正方形 `size` 加遮罩的测试，在修复前失败。
+- [x] 补边宽度为 `((pad_y, pad_y), (pad_x, pad_x))`。
+- [x] 在小图像上，`size=(3, 5)` 和 `(5, 3)` 的结果与暴力 `nanmedian` 参考值
       一致，`size=3` 仍然一致。
-- [ ] `make check` 通过。
+- [x] `make check` 通过。
 
 ## 设计说明
 
@@ -73,4 +73,34 @@ median_filter(data, size=(3, 5), mask=mask)  # ValueError
 
 ## 结果
 
+在 `codex/p0-median-filter-padding` 分支实施，与 codec PR #33 独立。
+mask/NaN 路径按每个轴自己的半径对称补边。新增十个回归用例，覆盖
+(3, 5)、(5, 3)、正方形窗口、mask、NaN/Inf、全遮罩和 ImageData 接口。
+参考计算逐个枚举并截断邻域坐标，不使用补边或滑动窗口；同时检查图像几何、
+单位、操作记录以及输入未被修改。
+
+- 红灯：修复前 `pytest tests/test_plot_image_smooth.py -k median -q`：
+  **8 failed、4 passed、28 deselected**。
+- 绿灯：smooth/ops/methods 专项 **90 passed**。
+- `make check`：ruff 和 mypy 通过；快速测试 **824 passed、3 failed、
+  1 skipped、3 deselected**。
+- `make test-all`：**827 passed、3 failed、1 skipped**。
+- 三个失败仍为 pynbody 2.3.3 上已有 BUG-0002 的 SPH 失败，所以上方
+  make check 验收项保持未勾选。
+- make check 在 pytest 失败处停止，因此另外执行文档检查。
+- 未改变依赖、架构、边界模式或偶数窗口契约。
+
+
+### 最终基线验证 — 2026-11-08
+
+分支已更名为 `codex/p0-image-sph-baseline`。维护者批准 BUG-0002 的依赖升级后，
+`make check` 通过（830 passed、1 skipped、3 deselected），`make test-all` 通过
+（833 passed、1 skipped）。上面的失败计数保留为仅完成中值滤波修复时的历史检查点；
+剩余验收项现已满足。见[合并后的 PR 正文](../BUG-0002/pr-body.md)。
+
 ## 待决问题
+
+PR #34 审查确认的后续项：带 mask/非有限值的中值滤波路径在 constant 模式下
+补零，与文档中的 NaN 补边不一致；全有效像素的快速路径也需核对边界语义。
+该行为在本次逐轴补边修复前已存在，不属于本 PR 明确限定的边界模式范围，
+应另加专门的边界测试处理，避免在本次修复中附带改变。
