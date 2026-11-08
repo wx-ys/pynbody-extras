@@ -113,6 +113,14 @@ Environment: Linux / Python 3.11.9 / pynbody 2.8.0. The earlier failing counts
 above are historical evidence from the old dependency baseline.
 The maintainer now explicitly authorizes push, PR updates and merge.
 
+### Merge verification — 2026-11-08
+
+Merged in [PR #33](https://github.com/wx-ys/pynbody-extras/pull/33)
+(commit `88ae3b4`). Both checkpoints were validated together: make check passed
+with 866 passed / 1 skipped / 3 deselected; make test-all passed with
+869 passed / 1 skipped. Local main was synchronized to 88ae3b4 and matched the
+validated integration tree. Retain the work item until the next release or 30 days.
+
 ## Open questions
 
 None for this bounded repair. Typed-key format evolution is deferred.

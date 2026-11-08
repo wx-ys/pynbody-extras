@@ -145,8 +145,9 @@ def median_filter(
     """Median-filter a 2-D image, ignoring non-finite pixels.
 
     Useful for removing cosmic-ray-like hot pixels before smoothing.  The
-    NaN-aware path pads the image and takes a median over every sliding window;
-    that is memory-hungry for large ``size``, so keep the kernel small.
+    NaN-aware path (also used for constant mode) pads the image and takes a
+    median over every sliding window; that is memory-hungry for large ``size``,
+    so keep the kernel small.
 
     Parameters
     ----------
@@ -156,7 +157,8 @@ def median_filter(
         Window size in pixels.
     mode : str, default: "nearest"
         Edge handling: ``"nearest"``, ``"reflect"``, ``"mirror"`` or
-        ``"constant"`` (padded with ``NaN``).
+        ``"constant"`` (padded with ``NaN``, so outside pixels are excluded).
+        Constant mode averages the two middle samples when their count is even.
     mask : array_like of bool, optional
         Additional per-pixel validity mask.
 
@@ -169,13 +171,18 @@ def median_filter(
     valid = validity_mask(array, mask)
     kernel = as_pair(size, name="size")
     kernel_y, kernel_x = (kernel, kernel) if isinstance(kernel, int) else kernel
-    if valid.all():
+    if array.size == 0 or (valid.all() and mode != "constant"):
         return ndimage.median_filter(array, size=kernel, mode="nearest" if mode == "mirror" else mode)
     if mode not in _PAD_MODES:
         raise ValueError(f"mode must be one of {', '.join(sorted(_PAD_MODES))}, got {mode!r}.")
     filled = np.where(valid, array, np.nan)
     pad_y, pad_x = kernel_y // 2, kernel_x // 2
-    padded = np.pad(filled, ((pad_y, pad_y), (pad_x, pad_x)), mode=_PAD_MODES[mode])
+    if mode == "constant":
+        # Keep origin=0 alignment and the input shape for odd and even windows.
+        padding = ((pad_y, kernel_y - pad_y - 1), (pad_x, kernel_x - pad_x - 1))
+        padded = np.pad(filled, padding, mode="constant", constant_values=np.nan)
+    else:
+        padded = np.pad(filled, ((pad_y, pad_y), (pad_x, pad_x)), mode=_PAD_MODES[mode])
     windows = np.lib.stride_tricks.sliding_window_view(padded, (kernel_y, kernel_x))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN windows are expected at the edges
@@ -471,7 +478,8 @@ class SmoothOps(ImageOps):
             and takes a median over every sliding window.
         mode : str, default: "nearest"
             Edge handling: ``"nearest"``, ``"reflect"``, ``"mirror"`` or
-            ``"constant"`` (padded with ``NaN``).
+            ``"constant"`` (padded with ``NaN``, so outside pixels are excluded).
+            Constant mode averages the two middle samples when their count is even.
         mask : array_like of bool, optional
             Pixels to include, oriented for you when image-like.
 

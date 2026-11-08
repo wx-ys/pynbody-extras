@@ -49,3 +49,11 @@
   acceptance criteria are now satisfied. The median implementation is unchanged.
 - Next: user publishes and reviews the combined BUG-0006 + BUG-0002 branch;
   use docs/work/BUG-0002/pr-body.md. No push, PR creation or merge performed here.
+
+## 2026-11-08 — Merge completion
+
+- State: done; PR #34, merge commit d1be459; user authorized push/PR/merge.
+- Verified combined make check (866 passed / 1 skipped / 3 deselected) and
+  make test-all (869 passed / 1 skipped), GitHub checks passed.
+- Local main 88ae3b4 matched the validated tree. Retain until next release or
+  30 days before archiving. No untracked local files included.

@@ -47,3 +47,11 @@
 - Sourcery's constant-padding observation is pre-existing and outside the
   explicit boundary-mode scope; recorded in both BUG-0006 locales for follow-up.
 - User now explicitly authorizes push, PR creation and merge for both #34 and #33.
+
+## 2026-11-08 — Merge completion
+
+- State: done; PR #34, merge commit d1be459; user authorized push/PR/merge.
+- Verified combined make check (866 passed / 1 skipped / 3 deselected) and
+  make test-all (869 passed / 1 skipped), GitHub checks passed.
+- Local main 88ae3b4 matched the validated tree. Retain until next release or
+  30 days before archiving. No untracked local files included.
