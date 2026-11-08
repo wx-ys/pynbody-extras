@@ -53,3 +53,5 @@ make test-all：976 通过、1 跳过。原有损坏记录测试暴露了当前�
 ## 待决问题
 
 本阶段无待决问题。历史版本暂不自动清理，后续 ORM 管理 backend 和引用生命周期。
+
+PR：[#37](https://github.com/wx-ys/pynbody-extras/pull/37)。

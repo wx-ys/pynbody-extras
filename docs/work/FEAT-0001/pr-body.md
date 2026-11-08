@@ -1,6 +1,6 @@
 ## What changed
 
-Implement FEAT-0001: a reference returned by `store()` now stays pinned to the saved result. If a calculation saves 6 and later recomputes 12 under the same key, the first reference still fetches 6 while `get`/`load` and read-through return 12. `Result.store_ref` exposes the version saved or reused by a run; `list_versions` and reference JSON support historical lookup, including after reopening SQLite.
+Implement [FEAT-0001](https://github.com/wx-ys/pynbody-extras/blob/c6fa004/docs/work/FEAT-0001/en.md): a reference returned by `store()` now stays pinned to the saved result. If a calculation saves 6 and later recomputes 12 under the same key, the first reference still fetches 6 while `get`/`load` and read-through return 12. `Result.store_ref` exposes the version saved or reused by a run; `list_versions` and reference JSON support historical lookup, including after reopening SQLite.
 
 Each save appends a UUID version and updates the current cache atomically. `delete` only invalidates the current cache and never deletes history; an older pinned reference cannot invalidate a newer result. Both adapters resolve current reads through saved versions, and validate identities/signatures before value decoding. SQLite cache-update failures roll back the new version too.
 
@@ -16,7 +16,7 @@ The record format is v4. The project has no existing databases/caches and requir
 
 ## Architecture
 
-- [x] ADR added: `docs/adr/0007-immutable-result-versions.md`; the user approved continuation and publication/merge.
+- [x] ADR added: [ADR-007](https://github.com/wx-ys/pynbody-extras/blob/c6fa004/docs/adr/0007-immutable-result-versions.md); the user approved continuation and publication/merge.
 - [x] `CONTEXT.md`, both FEAT-0001 locales, metadata and handoff document the new contract.
 - [x] Backends implement two additional primitives: `_get_version` and `_list_versions`.
 

@@ -23,3 +23,11 @@
   location; SQL dialects other than SQLite are not validated in this milestone.
 - Next: publish this branch, record PR, merge without bypassing protections and
   synchronize local main. Later roadmap work: logical data identity/ORM Run links.
+
+## 2026-11-08 — Codex / published
+
+- Draft PR: https://github.com/wx-ys/pynbody-extras/pull/37
+- Validated implementation commit: c6fa004; local hooks ruff/mypy passed.
+- This follow-up only records publication metadata; tested source is unchanged.
+- Merge is already authorized; verify remote head, base and required checks,
+  mark ready, merge, then fast-forward local main. Preserve unrelated untracked files.
