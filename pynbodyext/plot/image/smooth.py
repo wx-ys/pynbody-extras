@@ -139,15 +139,38 @@ _PAD_MODES: dict[str, Literal["edge", "reflect", "symmetric", "constant"]] = {
 }
 
 
+_MEDIAN_BATCH_ELEMENTS = 1_000_000
+
+
+def _constant_window_medians(windows: np.ndarray) -> np.ndarray:
+    """Reduce windows without an image-sized stack of temporary neighbourhoods."""
+    height, width, kernel_y, kernel_x = windows.shape
+    batch_width = max(1, _MEDIAN_BATCH_ELEMENTS // (kernel_y * kernel_x))
+    result = np.empty((height, width), dtype=float)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN windows; overflow repaired below
+        for row in range(height):
+            for start in range(0, width, batch_width):
+                batch = windows[row, start : start + batch_width]
+                medians = np.nanmedian(batch, axis=(-1, -2))
+                overflow = np.isinf(medians)
+                if overflow.any():
+                    # Inputs are finite or NaN. An infinite median can only come
+                    # from overflow when averaging the two finite middle values.
+                    medians[overflow] = 2 * np.nanmedian(batch[overflow] / 2, axis=(-1, -2))
+                result[row, start : start + batch_width] = medians
+    return result
+
+
 def median_filter(
     data: ArrayLike, size: int | tuple[int, int] = 3, *, mode: str = "nearest", mask: MaskLike = None
 ) -> np.ndarray:
     """Median-filter a 2-D image, ignoring non-finite pixels.
 
     Useful for removing cosmic-ray-like hot pixels before smoothing.  The
-    NaN-aware path (also used for constant mode) pads the image and takes a
-    median over every sliding window; that is memory-hungry for large ``size``,
-    so keep the kernel small.
+    NaN-aware path pads the image and takes a median over every sliding window.
+    Constant mode processes these windows in bounded batches; other NaN-aware
+    modes can be memory-hungry. Keep kernels small to limit the work per pixel.
 
     Parameters
     ----------
@@ -159,6 +182,8 @@ def median_filter(
         Edge handling: ``"nearest"``, ``"reflect"``, ``"mirror"`` or
         ``"constant"`` (padded with ``NaN``, so outside pixels are excluded).
         Constant mode averages the two middle samples when their count is even.
+        Other modes retain SciPy's upper-middle choice for even windows on
+        all-valid images, and the arithmetic median when invalid pixels exist.
     mask : array_like of bool, optional
         Additional per-pixel validity mask.
 
@@ -184,9 +209,12 @@ def median_filter(
     else:
         padded = np.pad(filled, ((pad_y, pad_y), (pad_x, pad_x)), mode=_PAD_MODES[mode])
     windows = np.lib.stride_tricks.sliding_window_view(padded, (kernel_y, kernel_x))
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN windows are expected at the edges
-        medians = np.nanmedian(windows, axis=(-1, -2))
+    if mode == "constant":
+        medians = _constant_window_medians(windows)
+    else:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN windows are expected at the edges
+            medians = np.nanmedian(windows, axis=(-1, -2))
     return np.where(valid, medians, np.nan)
 
 
@@ -480,6 +508,8 @@ class SmoothOps(ImageOps):
             Edge handling: ``"nearest"``, ``"reflect"``, ``"mirror"`` or
             ``"constant"`` (padded with ``NaN``, so outside pixels are excluded).
             Constant mode averages the two middle samples when their count is even.
+            Other modes use SciPy's upper-middle choice for even windows on
+            all-valid images, and the arithmetic median with invalid pixels.
         mask : array_like of bool, optional
             Pixels to include, oriented for you when image-like.
 

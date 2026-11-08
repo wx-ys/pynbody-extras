@@ -276,6 +276,41 @@ def test_image_constant_median_preserves_metadata_and_records_mode():
     assert source.ops == ()
 
 
+@pytest.mark.parametrize("value", [1e308, -1e308, np.nextafter(0., 1.)])
+@pytest.mark.parametrize("masked", [False, True])
+def test_constant_median_keeps_representable_extreme_values(value, masked):
+    data = np.full((3, 3), value)
+    mask = np.ones(data.shape, dtype=bool)
+    if masked:
+        mask[-1, -1] = False
+    actual = median_filter(data, size=3, mode="constant", mask=mask)
+    np.testing.assert_array_equal(actual[mask], data[mask])
+    if masked:
+        assert np.isnan(actual[-1, -1])
+
+
+@pytest.mark.parametrize("size", [(3, 5), (7, 9)])
+def test_constant_median_bounds_temporary_window_batches(monkeypatch, size):
+    import pynbodyext.plot.image.smooth as smooth_module
+
+    budget = 32
+    monkeypatch.setattr(smooth_module, "_MEDIAN_BATCH_ELEMENTS", budget, raising=False)
+    original_median = np.nanmedian
+    calls = []
+
+    def bounded_median(values, *args, **kwargs):
+        calls.append(values.size)
+        assert values.size <= max(budget, np.prod(size))
+        return original_median(values, *args, **kwargs)
+
+    monkeypatch.setattr(np, "nanmedian", bounded_median)
+    data = 10. + np.arange(42).reshape(6, 7)
+    expected = _constant_valid_median(data, size, np.ones(data.shape, dtype=bool))
+    actual = median_filter(data, size=size, mode="constant")
+    np.testing.assert_array_equal(actual, expected)
+    assert len(calls) > 1
+
+
 # ---------------------------------------------------------------------------
 # normalize
 # ---------------------------------------------------------------------------

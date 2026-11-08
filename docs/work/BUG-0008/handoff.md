@@ -33,3 +33,18 @@
 - Review verification: 490 nonempty constant reference cases, 60 nonconstant
   baseline comparisons, and 150 empty-input/exception comparisons passed.
   Final reviewer reran 82 smooth tests, with no remaining findings.
+
+## 2026-11-08 — PR #35 memory and numerical review follow-up
+
+- Reproduced review risks: 6 failed / 2 passed for bounded median batches and
+  +/-1e308 finite neighbourhoods. Subnormal results stay on the normal path.
+- Constant-mode windows now reduce in row/column batches of at most 1,000,000
+  elements (or one window if larger). Only overflowing medians are recomputed
+  at half scale and restored. Other modes keep their existing implementation.
+- Explicitly documented the constant arithmetic-median convention versus the
+  other modes' all-valid even-window upper-middle convention.
+- Final focused suites: 140 passed. Final make check: 916 passed / 1 skipped /
+  3 deselected plus lint/mypy/docs. Final make test-all: 919 passed / 1 skipped.
+- Independent follow-up review: 90 smooth tests passed; 1,056 mixed extreme/
+  subnormal/NaN windows across four batch budgets exactly matched a longdouble
+  median reference. Temporary windows stayed within the batch; no remaining findings.

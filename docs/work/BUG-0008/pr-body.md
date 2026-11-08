@@ -11,8 +11,9 @@ even windows. Empty arrays retain their existing SciPy path. Other modes retain
 their existing behavior. Public docstrings explain sample exclusion and averaging
 the two central values when a neighbourhood has an even number of valid samples.
 
-42 regression cases cover signed values, masks, NaN/Inf, odd/even rectangular
-windows, singleton and empty axes, all-invalid images, input immutability, and
+50 regression cases cover signed values, masks, NaN/Inf, odd/even rectangular
+windows, singleton and empty axes, all-invalid images, finite extreme/subnormal
+values, bounded temporary batches, input immutability, and
 ImageData metadata/history. Also finish the records for already merged BUG-0002,
 BUG-0006 and BUG-0007, preserving their historical validation evidence.
 
@@ -21,9 +22,9 @@ BUG-0006 and BUG-0007, preserving their historical validation evidence.
 - [x] Red: initial constant regressions: **34 failed, 2 passed, 40 deselected**.
 - [x] Red: independent review found an empty-input regression; **6 failed** before
   retaining the original empty-array path.
-- [x] Green: smooth/ops/methods suites: **132 passed**.
-- [x] `make check`: lint, mypy and docs pass; **908 passed, 1 skipped, 3 deselected**.
-- [x] `make test-all`: **911 passed, 1 skipped**.
+- [x] Green: smooth/ops/methods suites: **140 passed**.
+- [x] `make check`: lint, mypy and docs pass; **916 passed, 1 skipped, 3 deselected**.
+- [x] `make test-all`: **919 passed, 1 skipped**.
 - [x] `git diff --check` passes.
 
 Environment: Linux / Python 3.11.9 / pynbody 2.8.0, project .venv.
@@ -40,10 +41,17 @@ Environment: Linux / Python 3.11.9 / pynbody 2.8.0, project .venv.
 - [x] Bilingual work item BUG-0008, metadata, index and handoff updated.
 - [x] No testdata, environments, build output or unrelated local files included.
 
-Constant mode now always uses the existing window-based NaN path for nonempty
-images, so its documented large-window memory cost also applies to all-valid
-inputs. Other boundary modes and their even-window behavior remain outside scope.
+Constant mode reduces windows in batches of at most 1,000,000 elements (or a
+single larger window), avoiding full image-times-window-area median temporaries.
+If the mean of finite central values overflows, only those windows are recomputed
+at half scale and restored. Normal values, including subnormals, are not scaled.
+The new memory/extreme-value regressions first produced **6 failed, 2 passed**.
+Other modes keep their existing implementation; their all-valid even-window
+upper-middle convention is now explicitly distinguished in the API docs.
 
 Independent review found and verified the empty-input correction. Final review
 reported no remaining findings, with 490 constant reference comparisons,
 60 nonconstant baseline comparisons and 150 empty-input/exception comparisons.
+Follow-up independent review verified 90 smooth tests and 1,056 mixed
+extreme/subnormal/NaN windows against a longdouble reference at four batch budgets,
+with no remaining findings.

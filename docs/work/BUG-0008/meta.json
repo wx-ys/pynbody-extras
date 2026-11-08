@@ -10,7 +10,7 @@
   "updated": "2026-11-08",
   "completed": null,
   "resolution": null,
-  "pr": null,
+  "pr": 35,
   "related": [
     "BUG-0006"
   ],

@@ -30,8 +30,8 @@ median_filter([[10., 20.], [30., 40.]], size=3, mode="constant")
 
 ## Non-goals
 
-Other boundary modes (including their even-window behavior), general size validation, large-kernel
-performance redesign, dependencies, and calculator/store architecture.
+Other boundary modes (including their even-window behavior), general size validation,
+new filtering algorithms, dependencies, and calculator/store architecture.
 
 ## Acceptance criteria
 
@@ -54,6 +54,15 @@ matching SciPy's default origin=0 footprint for even windows and retaining the
 input shape. Take the arithmetic median of the remaining real samples; when
 there are two middle samples, average them as np.nanmedian already does.
 
+Review refinement: constant windows are reduced in batches bounded by a fixed
+number of window elements (or one window when it exceeds that budget). This
+avoids allocating a full image-times-window-area temporary. If averaging finite
+central values overflows, recompute only those windows at half scale and restore
+the scale. Normal values, including subnormals, keep the existing nanmedian path.
+
+- [x] Constant-mode reduction uses bounded batches.
+- [x] Representable medians of finite extreme values remain finite.
+
 ## Test plan
 
 1. Write cropped-window references with no np.pad or sliding-window reuse.
@@ -73,14 +82,17 @@ other modes keep their previous paths.
   2 passed, 40 deselected**.
 - Review regression: empty arrays failed in six new tests before preserving
   their original path.
-- Green: smooth/ops/methods suites: **132 passed** (42 new cases).
-- `make check`: lint/mypy/docs pass; **908 passed, 1 skipped, 3 deselected**.
-- `make test-all`: **911 passed, 1 skipped**.
+- Green: smooth/ops/methods suites: **140 passed** (50 new cases).
+- `make check`: lint/mypy/docs pass; **916 passed, 1 skipped, 3 deselected**.
+- `make test-all`: **919 passed, 1 skipped**.
 - The 2x2 positive example now yields 25 everywhere; with one invalid pixel,
   valid pixels yield 20 and the invalid center remains NaN.
 - Both public docstrings describe the constant-mode sample exclusion and
-  arithmetic median. All-valid constant inputs now use the window path too,
-  so its existing large-window memory warning applies to them.
+  arithmetic median, including its difference from other modes on all-valid
+  even windows. Constant-mode temporary median work is bounded by batches rather
+  than the full image times window area; one oversized window is the minimum unit.
+- PR review regressions: **6 failed, 2 passed** before batching and overflow
+  repair; tests now pass, preserving positive/negative extreme and subnormal values.
 - Closed the metadata/handoffs for already merged BUG-0002/0006/0007, retaining
   their historical red/green evidence and the required retention window.
 
