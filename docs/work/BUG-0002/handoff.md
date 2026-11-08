@@ -38,3 +38,12 @@
 - Env: Linux / Python 3.11.9 / pynbody 2.8.0 / uv 0.9.17 / project .venv.
 - Independent review: no actionable findings; 48 focused tests passed and the
   reference helper agreed with 3-D value / direct projection integrals at five h values.
+
+## 2026-11-08 — PR #34 review follow-up
+
+- Strengthened the declared-floor contract to require an explicit >=2.8.0 or
+  stronger lower bound. Temporarily changing the declaration to >=2.4.0 fails
+  even with 2.8.0 installed; restore the approved floor for green verification.
+- Sourcery's constant-padding observation is pre-existing and outside the
+  explicit boundary-mode scope; recorded in both BUG-0006 locales for follow-up.
+- User now explicitly authorizes push, PR creation and merge for both #34 and #33.

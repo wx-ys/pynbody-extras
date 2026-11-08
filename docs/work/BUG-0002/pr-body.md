@@ -51,3 +51,9 @@ Other Python/platform combinations were not run.
 Median boundary-mode semantics and even window sizes are outside this fix.
 The pre-existing untracked .github workflow is not included; its Python 3.10 matrix
 entry needs removing before that separate workflow is published.
+
+Review follow-up: strengthened the declared-floor contract to reject a lowered
+>=2.4.0 declaration even while running on 2.8.0 (verified red, then green after
+restoring the approved floor). The constant-padding observation is pre-existing,
+outside the boundary-mode scope above, and recorded in BUG-0006's bilingual
+follow-up notes; the all-valid path also needs a dedicated boundary audit.

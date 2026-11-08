@@ -124,6 +124,11 @@ The branch starts from main and does not include codec PR #33.
 
 Review/push/PR/merge remain with the maintainer. See [PR body](pr-body.md).
 
+PR #34 review follow-up: require an explicit `>=2.8.0` or stronger bound in the
+floor contract, so excluding only 2.3.3 cannot accidentally admit 2.4-2.7. Mutation
+check: temporarily declaring >=2.4.0 fails the contract on installed 2.8.0;
+restoring the approved declaration passes.
+
 ## Open questions
 
 None for this fix; the maintainer approved the support-floor change above.
