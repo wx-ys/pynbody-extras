@@ -175,7 +175,7 @@ def median_filter(
         raise ValueError(f"mode must be one of {', '.join(sorted(_PAD_MODES))}, got {mode!r}.")
     filled = np.where(valid, array, np.nan)
     pad_y, pad_x = kernel_y // 2, kernel_x // 2
-    padded = np.pad(filled, ((pad_y, pad_x), (pad_y, pad_x)), mode=_PAD_MODES[mode])
+    padded = np.pad(filled, ((pad_y, pad_y), (pad_x, pad_x)), mode=_PAD_MODES[mode])
     windows = np.lib.stride_tricks.sliding_window_view(padded, (kernel_y, kernel_x))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN windows are expected at the edges

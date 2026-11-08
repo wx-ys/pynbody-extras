@@ -57,9 +57,9 @@ median_filter(data, size=(3, 5), mask=mask)  # ValueError
 
 ## Acceptance criteria
 
-- [ ] A test with a non-square `size` and a mask fails before the fix.
-- [ ] The pad widths are `((pad_y, pad_y), (pad_x, pad_x))`.
-- [ ] The result matches a brute-force `nanmedian` reference on a small image
+- [x] A test with a non-square `size` and a mask fails before the fix.
+- [x] The pad widths are `((pad_y, pad_y), (pad_x, pad_x))`.
+- [x] The result matches a brute-force `nanmedian` reference on a small image
       for `size=(3, 5)` and `(5, 3)`, and still matches for `size=3`.
 - [ ] `make check` passes.
 
@@ -74,5 +74,24 @@ One-line fix in `pynbodyext/plot/image/smooth.py`. Check `ImageData`'s
 - Green: the fix; reference comparison; `make check`.
 
 ## Outcome
+
+Implemented on `codex/p0-median-filter-padding`, independently of codec PR #33.
+The masked/NaN path now pads each axis symmetrically using its own radius.
+Ten regression cases cover `(3, 5)`, `(5, 3)` and square windows, masks,
+NaN/Inf, all-masked images and the ImageData wrapper. A reference enumerates
+and clamps neighbour coordinates without using padding or sliding windows.
+Image geometry, units, operation history and input immutability are checked.
+
+- Red: `pytest tests/test_plot_image_smooth.py -k median -q`:
+  **8 failed, 4 passed, 28 deselected**, before the one-line fix.
+- Green: smooth/ops/methods tests: **90 passed**.
+- `make check`: ruff and mypy passed; fast tests: **824 passed, 3 failed,
+  1 skipped, 3 deselected**.
+- `make test-all`: **827 passed, 3 failed, 1 skipped**.
+- The three failures are unchanged BUG-0002 SPH failures on pynbody 2.3.3;
+  `make check` is therefore intentionally not checked off above.
+- Docs validation runs separately because make check stops at pytest.
+- No dependency, architecture, edge-mode, or even-window contract was changed.
+
 
 ## Open questions
