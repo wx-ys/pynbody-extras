@@ -51,7 +51,12 @@ __all__ = [
 ]
 
 class SimIdentityProvider(Protocol):
-    """Maps a simulation object to an identity tuple."""
+    """Maps a simulation object to an identity tuple.
+
+    Stores and SampleTable accept built-in str, bool, int, finite float, None
+    and nested tuples. Convert NumPy scalar IDs explicitly. Identity component
+    types are significant, unlike calculator-parameter numerical equivalence.
+    """
 
     def __call__(self, sim: Any) -> tuple[Any, ...]: ...
 

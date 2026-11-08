@@ -41,6 +41,7 @@ from pynbodyext.core.calculate.interfaces import is_calculator_node, is_stable_s
 from pynbodyext.core.calculate.runtime.sim_identity import SimIdentityProvider, snapshot_identity
 from pynbodyext.core.calculate.store.catalog import SignatureCatalog
 from pynbodyext.core.calculate.store.codec import ValueCodec
+from pynbodyext.core.calculate.store.identity import sim_identity_key
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -132,7 +133,7 @@ class SampleTable(InfoView):
         self._columns: dict[str, str] = {}
         #: signature key -> live calculator (None for a column loaded without one)
         self._calculators: dict[str, Any] = {}
-        self._rows: dict[tuple[Any, ...], SampleRow] = {}
+        self._rows: dict[str, SampleRow] = {}
         for label, calculator in (columns or {}).items():
             self.add_column(label, calculator)
 
@@ -221,10 +222,11 @@ class SampleTable(InfoView):
         if errors not in _ERROR_POLICIES:
             raise ValueError(f"errors must be one of {_ERROR_POLICIES}, got {errors!r}")
         identity = tuple(self.sim_identity(obj))
-        row = self._rows.get(identity)
+        identity_key = sim_identity_key(identity)
+        row = self._rows.get(identity_key)
         if row is None:
             row = SampleRow(name or _default_name(identity, len(self._rows)), identity)
-            self._rows[identity] = row
+            self._rows[identity_key] = row
         elif name is not None:
             row.name = name
         store = self._store_for(identity)
@@ -302,7 +304,7 @@ class SampleTable(InfoView):
         table = cls(columns, store=store, sim_identity=sim_identity)
         for index, given in enumerate(identities if identities is not None else store.sim_signatures()):
             identity = tuple(given)
-            table._rows.setdefault(identity, SampleRow(_default_name(identity, index), identity))
+            table._rows.setdefault(sim_identity_key(identity), SampleRow(_default_name(identity, index), identity))
         return table.fill_from_store()
 
     # ------------------------------------------------------------------
@@ -427,7 +429,7 @@ class SampleTable(InfoView):
         for item in data["rows"]:
             identity = tuple(codec.decode(item["identity"]))
             values = {label: codec.decode(value) for label, value in item["values"].items()}
-            table._rows[identity] = SampleRow(item["name"], identity, values, dict(item.get("errors", {})))
+            table._rows[sim_identity_key(identity)] = SampleRow(item["name"], identity, values, dict(item.get("errors", {})))
         return table
 
     def save(self, path: str | os.PathLike[str]) -> None:
