@@ -7,7 +7,7 @@ and NumPy numeric scalars raised TypeError. The encoded format is unchanged;
 nonliteral tuple representations now raise ValueError instead of silently
 changing identity. Includes a SQLite close/reopen regression and trailing-NUL string-width cases.
 
-Work item: [BUG-0007](docs/work/BUG-0007/en.md), first P0 checkpoint of the V1 plan.
+Work item: [BUG-0007](https://github.com/wx-ys/pynbody-extras/blob/52e7ee41c851f710ecb223d0841bde171c6da7ab/docs/work/BUG-0007/en.md), first P0 checkpoint of the V1 plan.
 
 ## Evidence
 
