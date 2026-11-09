@@ -117,6 +117,9 @@ Use these terms exactly. Don't drift to synonyms.
   or unsupported schema versions and missing/empty `version_id`.
 - **`ValueCodec`** (`store/codec.py`) — portable value serialization (numpy,
   pynbody `SimArray` with units, scalars, nested structures, pickle fallback).
+  Object arrays retain shape, C-order element boundaries and units via a
+  versioned tag. Ordinary numerical-array tags remain unchanged. Legacy object
+  tags remain readable with their original shape limitations.
 - **tangos** — the Python package this store is modeled on; a relational DB that
   interns name strings. We deliberately diverge.
 - **Repr style** — how a calculator object renders in a notebook, set by

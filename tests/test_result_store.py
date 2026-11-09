@@ -300,3 +300,18 @@ def test_record_json_roundtrips_named_provenance_value_faithfully():
 
     # And the round-tripped record still reconstructs the value through the codec.
     np.testing.assert_allclose(dict(recovered.to_result(ValueCodec()).value)["m"], dict(result.value)["m"])
+
+
+def test_memory_store_preserves_object_array_elements():
+    from pynbodyext.core.calculate.store import InMemoryResultStore
+
+    calc, sim, result = make_result()
+    value = np.empty(2, dtype=object)
+    value[0], value[1] = [1, 2], {"nested": (3, 4)}
+    result.value = value
+    store = InMemoryResultStore()
+    ref = store.store(result, sim_signature=("sim", "object-array"), calculator_signature=calculator_to_signature(calc))
+    restored = store.fetch(ref).value
+    assert restored.shape == value.shape
+    assert restored.dtype == value.dtype
+    assert restored.tolist() == value.tolist()

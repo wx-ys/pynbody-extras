@@ -6,16 +6,15 @@ those.  :class:`ValueCodec` turns such values into a self-describing,
 JSON-compatible ``dict`` so a store (in-memory, or a relational database in the
 future) can persist them without knowing about numpy or pynbody.
 
-Every encoded value is tagged with a ``"__kind"`` discriminator.  Arrays are
-stored as base64 of the raw C-contiguous bytes plus dtype and shape; sim arrays
-additionally carry their units string.  Anything that is not
-natively representable falls back to a pickled opaque blob, so the codec is
-lossless for any pickle-able object while keeping the common cases portable and
-diff-friendly.
+Every encoded value is tagged with a ``"__kind"`` discriminator. Numeric arrays
+use raw C-contiguous bytes, dtype and shape; object arrays use shaped, flat
+elements,. Sim arrays also
+carry their units string. Other values
+that are not natively representable fall back to a pickled opaque blob, keeping
+common cases portable and diff-friendly.
 
-The codec is intentionally a leaf module: it depends only on ``numpy`` (and a
-lazy import of ``pynbody.array.SimArray``) and exposes no calculator or store
-concepts.
+The codec depends on ``numpy`` (and a lazy import of
+``pynbody.array.SimArray``), never on calculators or store adapters.
 """
 
 from __future__ import annotations
@@ -65,6 +64,10 @@ def _canonical_payload(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
+
+
+
+
 class ValueCodec:
     """Encode arbitrary result values to portable dicts and back.
 
@@ -106,7 +109,7 @@ class ValueCodec:
         return self._decode(data)
 
     def content_hash(self, value: Any) -> str:
-        """Return a stable content fingerprint for ``value``."""
+        """Return a stable content fingerprint for the encoded value."""
         return hashlib.sha256(_canonical_payload(self.encode(value)).encode("utf-8")).hexdigest()
 
     def size_bytes(self, value: Any) -> int:
@@ -160,8 +163,14 @@ class ValueCodec:
         kind = "sim_array" if units is not None else "array"
 
         if value.dtype.kind == "O":
-            # object arrays are not byte-representable; encode element-by-element
-            return {"__kind": "array_objects", "items": [self._encode(v) for v in value.tolist()]}
+            payload: dict[str, Any] = {
+                "__kind": "array_objects_v2",
+                "shape": list(value.shape),
+                "items": [self._encode(item) for item in value.flat],
+            }
+            if units is not None:
+                payload["units"] = units
+            return payload
 
         contiguous = np.ascontiguousarray(value)
         payload = {
@@ -275,6 +284,8 @@ class ValueCodec:
             return {self._decode_dict_key(k): self._decode(v) for k, v in data["items"]}
         if kind in ("array", "sim_array"):
             return self._decode_array(data, sim=kind == "sim_array")
+        if kind == "array_objects_v2":
+            return self._decode_object_array(data)
         if kind == "array_objects":
             return np.array([self._decode(v) for v in data["items"]], dtype=object)
         if kind == "opaque":
@@ -282,6 +293,26 @@ class ValueCodec:
         if kind == "unencoded":
             raise ValueError(f"value was stored unencoded ({data.get('type')}); cannot decode")
         raise ValueError(f"unknown encoded value kind: {kind!r}")
+
+
+    def _decode_object_array(self, data: dict[str, Any]) -> Any:
+        shape = data.get("shape")
+        items = data.get("items")
+        if (
+            not isinstance(shape, list)
+            or any(type(n) is not int or n < 0 for n in shape)
+            or not isinstance(items, list)
+            or math.prod(shape) != len(items)
+        ):
+            raise ValueError("invalid object-array shape or element count")
+        array = np.empty(tuple(shape), dtype=object)
+        for index, item in enumerate(items):
+            array.flat[index] = self._decode(item)
+        if "units" in data:
+            from pynbody.array import SimArray
+
+            return SimArray(array, units=data["units"])
+        return array
 
     def _decode_array(self, data: dict[str, Any], *, sim: bool) -> Any:
         dtype = np.dtype(data["dtype"])
