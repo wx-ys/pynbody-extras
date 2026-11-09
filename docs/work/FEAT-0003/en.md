@@ -117,3 +117,5 @@ package-layer declaration deliberately adds orm per ADR-009.
 
 SQLite 3.35+ is needed for conditional UPDATE RETURNING. No other SQL dialect is
 claimed validated. Publication and merge are authorized.
+
+PR: [#39](https://github.com/wx-ys/pynbody-extras/pull/39).

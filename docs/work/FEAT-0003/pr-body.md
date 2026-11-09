@@ -1,6 +1,6 @@
 ## What changed
 
-Implement FEAT-0003: a new explicitly imported `pynbodyext.orm` package connects Simulation → Timestep → DataObject → Run → Recipe/ResultLink using SQLAlchemy mappings. Locations remain separate metadata, recipes reuse existing stable CalculatorSignature DAGs, and result links contain pinned RecordRef JSON. Scientific arrays and named pipeline outputs remain in ResultStore.
+Implement [FEAT-0003](https://github.com/wx-ys/pynbody-extras/blob/8af0f94/docs/work/FEAT-0003/en.md): a new explicitly imported `pynbodyext.orm` package connects Simulation → Timestep → DataObject → Run → Recipe/ResultLink using SQLAlchemy mappings. Locations remain separate metadata, recipes reuse existing stable CalculatorSignature DAGs, and result links contain pinned RecordRef JSON. Scientific arrays and named pipeline outputs remain in ResultStore.
 
 `AnalysisRepository.run` commits a running row, delegates to the existing calculator, then atomically finalizes metadata with the exact saved/reused version. Cache hits receive their own run records; refreshing a cache does not retarget historical run results. Query helpers and ordinary SQLAlchemy sessions expose the relationships.
 
@@ -19,7 +19,7 @@ SQLite 3.35+ is tested; no other dialect is claimed validated. This increment ha
 
 ## Architecture
 
-- [x] ADR-009 records separate-store lifecycle, identity rules, explicit recovery and limits.
+- [x] [ADR-009](https://github.com/wx-ys/pynbody-extras/blob/8af0f94/docs/adr/0009-orm-analysis-associations.md) records separate-store lifecycle, identity rules, explicit recovery and limits.
 - [x] Declared `orm` above `calculate` in package layering; no exceptions or reverse imports.
 - [x] CONTEXT and bilingual FEAT-0003 docs updated. No dependency or payload schema changes.
 

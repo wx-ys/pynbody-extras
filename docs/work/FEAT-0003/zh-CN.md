@@ -92,3 +92,5 @@ make test-all：1049 通过、1 跳过。旧测试行为未削弱，包分层声
 
 条件 UPDATE RETURNING 需要 SQLite 3.35+，未声称已验证其他 SQL 方言。
 发布与合并已获授权。
+
+PR： [#39](https://github.com/wx-ys/pynbody-extras/pull/39).

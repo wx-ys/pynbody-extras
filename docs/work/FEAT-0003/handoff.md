@@ -25,3 +25,11 @@
   scoped to this repository/store name. No global orphan deletion or automatic retry.
 - Next: publish PR, check base/head/checks, merge and synchronize local main under
   existing authorization. Keep unrelated pre-existing untracked directories intact.
+
+## 2026-11-09 — Codex / published
+
+- PR: https://github.com/wx-ys/pynbody-extras/pull/39
+- Validated implementation commit: 8af0f94; commit hooks ruff/mypy passed.
+- This follow-up only records PR metadata; source and tests are unchanged.
+- Merge already authorized. Verify final head/base/checks, mark ready, merge
+  without bypassing protections and fast-forward local main.
