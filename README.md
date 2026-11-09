@@ -13,16 +13,42 @@ calculators, binned profiles and ready-to-publish 2-D maps.
 Requires Python >=3.11 and pynbody >=2.8.0. Python 3.10 is no longer supported;
 the pynbody floor includes the fix for non-cubic SPH grids (BUG-0002).
 
-To use the package:
+Full installation from a checkout includes SQLAlchemy and ORM support. Install
+both local projects together so pip uses this checkout's core:
 
 ```bash
 git clone https://github.com/wx-ys/pynbody-extras.git
 cd pynbody-extras
-python -m pip install -e ".[image,store]"
+python -m pip install -e . -e './packages/pynbodyext[image]'
 ```
 
-The `image` extra adds adaptive binning (`powerbin`), and `store` adds the
-SQLAlchemy result store. A C++17 compiler builds the optional native
+For calculations without SQLAlchemy, use a fresh environment and install only
+the root core project:
+
+```bash
+python -m pip install -e .
+# Optional adaptive binning:
+python -m pip install -e '.[image]'
+```
+
+`pynbodyext-core` owns all Python/native/CSS files, including the optional ORM
+code. `pynbodyext` is a metadata-only full distribution requiring exactly the
+same core version plus SQLAlchemy >=2.0. Imports remain `pynbodyext.*`.
+Both expose `image`, `store`, `dev` and `bench` extras; `image` adds `powerbin`,
+and core's `store` adds SQLAlchemy. Installing core in an existing full environment
+does not remove SQLAlchemy. `--no-deps` is not the lightweight installation path.
+The distribution names are approved but no registry publication is implied;
+installing only `./packages/pynbodyext` can seek core on an index.
+
+For local release artifacts, supply the matching core and full wheel paths in
+one `python -m pip install` command. The same applies to both sdists with a local
+`--find-links` directory containing their matching artifacts.
+When migrating an older single-distribution `pynbodyext` installation, uninstall
+the old distribution **before** installing the new pair: its old RECORD owns
+import files now owned by core. A same-version `--upgrade` can be a no-op.
+See [installation evidence and migration commands](docs/design/installation-matrix.md).
+
+A C++17 compiler builds the optional native
 extension (`pynbodyext._native`), which the gravity solver and `bins["vcirc"]`
 need; without a compiler the extension is skipped and those features are
 unavailable. The build uses OpenMP when the compiler supports it and is
@@ -45,7 +71,13 @@ make test-all   # full suite; downloads about 1.1 GB of pynbody testdata on firs
 ```
 
 Install [uv](https://docs.astral.sh/uv/) first if it is not already available.
-`uv sync --all-extras` is the equivalent bootstrap if you prefer `uv` directly.
+`uv sync --locked --all-packages --all-extras` installs both development members
+and all extras. `make setup` also installs the pinned Python and Git hooks. For a
+lightweight uv checkout environment use
+`uv sync --locked --package pynbodyext-core --no-default-groups` without the store extra.
+After changing the sole version source in `pynbodyext/__init__.py`, run
+`python scripts/sync_distribution_versions.py`, then `uv lock`, and rebuild both
+distributions; `make check` detects generated metadata or lock drift.
 The architecture vocabulary and the invariants the tests enforce live in
 [`CONTEXT.md`](CONTEXT.md).
 Work items and cross-device handoffs live in [`docs/README.md`](docs/README.md);

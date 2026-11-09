@@ -88,3 +88,9 @@
   status review, not merged/done. No Git writes/commit/push/publication, no user
   untracked .github/.develop_notes/.test_code replacement. Root owns final
   integrated review/planning closeout; no required implementation remains here.
+
+## 2026-11-09 — scoped integration verification
+
+- User authorized commit, PR and merge. This increment was reconstructed in isolation after verified predecessors.
+- `make check`: 1679 passed, 2 skipped, 7 deselected in 64.12s (0:01:04); `make test-all`: 1686 passed, 2 skipped in 68.65s (0:01:08). Log: `/tmp/pynbody-publish-test-12.log`.
+- Independent complete-source review found no actionable findings; slice tests protect extraction boundaries. Publication/merge URL and final status are recorded after the remote operation is confirmed.

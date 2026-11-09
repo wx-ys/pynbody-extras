@@ -1,0 +1,28 @@
+# Version and exact core requirements are maintained by scripts/sync_distribution_versions.py.
+[build-system]
+requires = ["setuptools>=77.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pynbodyext"
+version = "0.0.1"
+description = "Full pynbodyext installation with ORM support"
+authors = [{ name = "Shuai LU (卢帅)", email = "lushuai@stu.xmu.edu.cn" }]
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = ["pynbodyext-core==0.0.1", "sqlalchemy>=2.0"]
+
+[project.urls]
+Repository = "https://github.com/wx-ys/pynbody-extras"
+
+[project.optional-dependencies]
+image = ["pynbodyext-core[image]==0.0.1"]
+store = ["pynbodyext-core[store]==0.0.1"]
+dev = ["pynbodyext-core[dev]==0.0.1"]
+bench = ["pynbodyext-core[bench]==0.0.1"]
+
+[tool.setuptools]
+packages = []
+
+[tool.uv.sources]
+pynbodyext-core = { workspace = true }

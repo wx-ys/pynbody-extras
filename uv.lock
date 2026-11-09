@@ -2,6 +2,12 @@ version = 1
 revision = 3
 requires-python = ">=3.11"
 
+[manifest]
+members = [
+    "pynbodyext",
+    "pynbodyext-core",
+]
+
 [[package]]
 name = "asv"
 version = "0.6.6"
@@ -1171,6 +1177,40 @@ wheels = [
 
 [[package]]
 name = "pynbodyext"
+version = "0.0.1"
+source = { editable = "packages/pynbodyext" }
+dependencies = [
+    { name = "pynbodyext-core" },
+    { name = "sqlalchemy" },
+]
+
+[package.optional-dependencies]
+bench = [
+    { name = "pynbodyext-core", extra = ["bench"] },
+]
+dev = [
+    { name = "pynbodyext-core", extra = ["dev"] },
+]
+image = [
+    { name = "pynbodyext-core", extra = ["image"] },
+]
+store = [
+    { name = "pynbodyext-core", extra = ["store"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pynbodyext-core", editable = "." },
+    { name = "pynbodyext-core", extras = ["bench"], marker = "extra == 'bench'", editable = "." },
+    { name = "pynbodyext-core", extras = ["dev"], marker = "extra == 'dev'", editable = "." },
+    { name = "pynbodyext-core", extras = ["image"], marker = "extra == 'image'", editable = "." },
+    { name = "pynbodyext-core", extras = ["store"], marker = "extra == 'store'", editable = "." },
+    { name = "sqlalchemy", specifier = ">=2.0" },
+]
+provides-extras = ["image", "store", "dev", "bench"]
+
+[[package]]
+name = "pynbodyext-core"
 source = { editable = "." }
 dependencies = [
     { name = "matplotlib" },

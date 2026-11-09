@@ -3,7 +3,7 @@
 # ======================================================================================
 
 [project]
-name = "pynbodyext"
+name = "pynbodyext-core"
 description = "Extensions and utilities for pynbody"
 authors = [
     { name = "Shuai LU (卢帅)", email = "lushuai@stu.xmu.edu.cn" }
@@ -38,7 +38,7 @@ Github = "https://github.com/wx-ys/pynbody-extras"
 # ======================================================================================
 [build-system]
 requires = [
-    "setuptools>=61",
+    "setuptools>=77.0.0",
     "pybind11>=2.12",
     "wheel",
 ]
@@ -205,3 +205,7 @@ markers = [
     "slow: long-running; excluded from the fast loop",
     "data: needs pynbody testdata (about 1.1 GB on first download)",
 ]
+
+# Full distribution owns metadata only; root owns every import/native/resource path.
+[tool.uv.workspace]
+members = ["packages/pynbodyext"]
