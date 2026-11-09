@@ -5,9 +5,10 @@ behind calculator graphs. A calculator graph is a directed acyclic graph of
 nodes that read values, build masks, apply temporary mutations, or evaluate
 several outputs in one shared run.
 
-The framework is organized around four common node roles:
+The framework provides these common node roles:
 
 - :class:`PropertyBase` for read-only derived values
+- :class:`PostprocessorBase` for processing one upstream calculator value
 - :class:`FilterBase` for boolean masks and scoped selection
 - :class:`TransformBase` for temporary mutations
 - :class:`Pipeline` for grouped multi-output evaluation
@@ -32,6 +33,12 @@ If you only want the short public import path for the common role classes, use
 Choosing A Base Class
 ---------------------
 Choose the narrowest base class that matches the node.
+
+For value-consuming calculations, subclass :class:`PostprocessorBase`, decorate
+with its ``dataclass`` helper, and implement ``process(value)``. Its inherited
+keyword-only ``source`` is a Calculator; other configuration is static, accessed
+through ``self``. ``ScaleValues(factor=2.0, source=upstream)`` uses the same
+property runtime and DAG, preserving the source value and units.
 
 1. Use :class:`PropertyBase` for a read-only derived value.
 2. Use :class:`FilterBase` for a boolean mask.
@@ -200,6 +207,7 @@ from .nodes.declarative import dataclass_calc
 from .nodes.expr import ConstantProperty, LambdaProperty, OpProperty
 from .nodes.filters import AndFilter, FilterBase, NotFilter, OrFilter
 from .nodes.pipeline import Pipeline
+from .nodes.postprocessors import PostprocessorBase
 from .nodes.properties import PropertyBase
 from .nodes.runtime_base import RuntimeCalculatorBase
 from .nodes.transforms import TransformBase, TransformChain, TransformPlan, TransformStep, chain_transforms
@@ -297,6 +305,7 @@ __all__ = [
     "TransformScope",
     "Pipeline",
     "PropertyBase",
+    "PostprocessorBase",
     "dataclass_calc",
     "ParamSpec",
     "ParamView",
