@@ -291,6 +291,7 @@ class SampleTable(InfoView):
                 hit = self.store.get(sim_signature=row.identity, calculator_signature=signature)
                 if hit is not None:
                     row.values[label] = hit.value
+                    row.errors.pop(label, None)
         return self
 
     @classmethod
