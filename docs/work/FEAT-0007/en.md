@@ -34,7 +34,7 @@ Implement design §5.3 with a frozen ExternalFileRef and versioned codec tag. Re
 - [x] Turn every criterion into behavioral tests; record red failures for missing behavior/API, not a broken environment.
 - [x] Implement the smallest scoped change; record any core contract decision before changing it.
 - [x] Run focused tests, then make check and make test-all; report exact results and limits.
-- [ ] Update both locales, meta.json and handoff; prepare one scoped PR using the template and red/green evidence.
+- [x] Update both locales, meta.json and handoff; prepare one scoped PR using the template and red/green evidence.
 
 ```bash
 .venv/bin/python -m pytest tests/test_external_file_refs.py tests/test_value_codec.py tests/test_result_versions.py -q
@@ -88,3 +88,7 @@ and handoff are updated. PR publication is deferred to the parent workflow.
 ## Handoff boundary
 
 No incidental DAG rewrite, database migration, automatic GC or release publication. Keep one reviewable increment per item; verify predecessors are merged before continuing. Commit/push permissions follow the active user authorization, not this template.
+
+## Integration outcome — 2026-11-09
+
+Merged via [FEAT-0007 PR](https://github.com/wx-ys/pynbody-extras/pull/47), merge commit `5103136ec2837ec428ea722743c24637be067616`. Current status: done; this supersedes the historical local-only/review notes above. Exact scoped integration checks are recorded in handoff.md and the [integration record](../../design/integration-2026-11-09.md). No release was published.

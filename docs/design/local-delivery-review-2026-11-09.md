@@ -1,5 +1,7 @@
 # Local delivery review / 本地交付审查 — 2026-11-09
 
+**Integration update / 集成更新 — 2026-11-09:** All authorized increments are now merged; work items are done. See the [integration record](integration-2026-11-09.md) for actual PRs and verification. Earlier local-only statements below describe the recorded pre-integration checkpoint.
+
 **Mode:** PR Review（本地未提交改动，无远端 PR）
 **Scope:** `codex/sequential-review-fixes`，HEAD `5df15dd`；审查 tracked diff
 及新增源码、测试、ADR、工作项和打包文件。改动超过 300 行，采用高风险路径抽样；

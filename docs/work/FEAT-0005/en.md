@@ -90,3 +90,7 @@ def test_sample_keeps_original_receipt_after_refresh(tmp_path):
 ## Handoff boundary
 
 No incidental DAG rewrite, database migration, automatic GC or release publication. Keep one reviewable increment per item; use the approved, verified local predecessors sequentially without claiming they are merged. Commit/push permissions follow the active user authorization, not this template.
+
+## Integration outcome — 2026-11-09
+
+Merged via [FEAT-0005 PR](https://github.com/wx-ys/pynbody-extras/pull/45), merge commit `1fbde1c4aeca11844cb7ede0339731756a33832f`. Current status: done; this supersedes the historical local-only/review notes above. Exact scoped integration checks are recorded in handoff.md and the [integration record](../../design/integration-2026-11-09.md). No release was published.

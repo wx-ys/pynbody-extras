@@ -1,16 +1,16 @@
 {
   "id": "FEAT-0008",
   "type": "feature",
-  "status": "review",
+  "status": "done",
   "title_en": "Add a value-consuming postprocessor on the existing DAG",
   "title_zh": "在现有 DAG 上增加消费结果值的后处理器",
   "owner": "",
   "issue": 0,
   "created": "2026-11-09",
   "updated": "2026-11-09",
-  "completed": null,
-  "resolution": null,
-  "pr": null,
+  "completed": "2026-11-09",
+  "resolution": "implemented",
+  "pr": 48,
   "related": [
     "BUG-0010",
     "BUG-0011"

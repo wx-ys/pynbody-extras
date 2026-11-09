@@ -29,7 +29,7 @@ After a successful fill_from_store hit, set the value and remove only that colum
 - [x] Turn every criterion into behavioral tests; record red failures for missing behavior/API, not a broken environment.
 - [x] Implement the smallest scoped change; record any core contract decision before changing it.
 - [x] Run focused tests, then make check and make test-all; report exact results and limits.
-- [ ] Publish a scoped PR after authorization; local bilingual handoff and red/green evidence are ready.
+- [x] Publish a scoped PR after authorization; local bilingual handoff and red/green evidence are ready.
 
 ```bash
 .venv/bin/python -m pytest tests/test_sample_recovery.py tests/test_sample_table.py -q
@@ -91,3 +91,7 @@ After a successful cached value assignment, clear only that column error. Added 
 - `make test-all`: 1159 passed, 1 skipped.
 
 Status: review; locally implemented and verified, not committed, published or merged. No migration or unrelated architecture change. SQLite/Linux verified; other platforms/backends not certified.
+
+## Integration outcome — 2026-11-09
+
+Merged via [BUG-0012 PR](https://github.com/wx-ys/pynbody-extras/pull/44), merge commit `1c35d9892a93f5d175b86cf432065c0f389d4c74`. Current status: done; this supersedes the historical local-only/review notes above. Exact scoped integration checks are recorded in handoff.md and the [integration record](../../design/integration-2026-11-09.md). No release was published.

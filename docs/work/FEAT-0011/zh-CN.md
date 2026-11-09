@@ -34,7 +34,7 @@
 - [x] 只在文件范围内实施最小改动；若需变更核心合同，先记录设计决定。
 - [x] 重跑专项，再运行 make check、make test-all；报告准确计数及未验证范围。
 - [x] 更新两种语言、meta.json 和 handoff，保留红绿证据。
-- [ ] 父任务集成流程：获得发布授权后按模板整理单独 PR。
+- [x] 父任务集成流程：获得发布授权后按模板整理单独 PR。
 
 ```bash
 .venv/bin/python -m pytest tests/test_orm_jobs.py tests/test_orm_loading.py tests/test_signature_roundtrip.py -q
@@ -63,3 +63,7 @@ TDD 红灯证据：缺失 `orm.JobSpec` API 导致 **1 failed**，见 `/tmp/feat
 ## 交接边界
 
 不顺带重写 DAG、不新增数据库迁移/自动 GC、不发布 release。一个工作项一个可审阅改动；检查本地前项验证结果，不声称远程合并。具体提交/推送权限沿用届时用户授权，不从此模板推断。
+
+## 集成结果 — 2026-11-09
+
+已通过 [FEAT-0011 PR](https://github.com/wx-ys/pynbody-extras/pull/51) 合并，merge commit `a7d6f6a053ed41a439a55ce3e88e3c6b2f2f46cb`。当前状态为 done，取代上文历史记录中的仅本地/review 状态。逐项集成验证见 handoff.md 与[集成记录](../../design/integration-2026-11-09.md)。未发布 release。

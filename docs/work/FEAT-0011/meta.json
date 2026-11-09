@@ -1,16 +1,16 @@
 {
   "id": "FEAT-0011",
   "type": "feature",
-  "status": "review",
+  "status": "done",
   "title_en": "Replay root-input jobs from a versioned JSON manifest",
   "title_zh": "从版本化 JSON 清单重放根输入任务",
   "owner": "",
   "issue": 0,
   "created": "2026-11-09",
   "updated": "2026-11-09",
-  "completed": null,
-  "resolution": null,
-  "pr": null,
+  "completed": "2026-11-09",
+  "resolution": "implemented",
+  "pr": 51,
   "related": [
     "FEAT-0006"
   ],

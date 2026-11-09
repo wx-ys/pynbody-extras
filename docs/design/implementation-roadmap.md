@@ -1,5 +1,7 @@
 # GPT‑6.1 sol 逐项实施入口
 
+**Integration update / 集成更新 — 2026-11-09:** All authorized increments are now merged; work items are done. See the [integration record](integration-2026-11-09.md) for actual PRs and verification. Earlier local-only statements below describe the recorded pre-integration checkpoint.
+
 2026-11-09 实施更新：BUG-0010–0012 与 FEAT-0005–0012 已逐项本地实现并通过
 独立审查，状态 review，未提交或合并。全部合同及发行名称/归属均已获用户批准，
 记录为 ADR-011–019；FEAT-0010 另获批准采用根 family 块顺序，跨块重排明确拒绝。

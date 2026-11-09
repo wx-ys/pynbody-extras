@@ -87,3 +87,7 @@ def test_sample_keeps_original_receipt_after_refresh(tmp_path):
 ## 交接边界
 
 不顺带重写 DAG、不新增数据库迁移/自动 GC、不发布 release。一个工作项一个可审阅改动；按已批准且本地验证的前置变更顺序推进，不宣称前项已合并。具体提交/推送权限沿用届时用户授权，不从此模板推断。
+
+## 集成结果 — 2026-11-09
+
+已通过 [FEAT-0005 PR](https://github.com/wx-ys/pynbody-extras/pull/45) 合并，merge commit `1fbde1c4aeca11844cb7ede0339731756a33832f`。当前状态为 done，取代上文历史记录中的仅本地/review 状态。逐项集成验证见 handoff.md 与[集成记录](../../design/integration-2026-11-09.md)。未发布 release。

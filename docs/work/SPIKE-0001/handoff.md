@@ -18,3 +18,10 @@
 - Offline install: initial uv-cache sandbox error (exit 2), normal approved retry exit 1 because registry dependencies absent from cache. No network or global installs. Matrix remains unverified.
 - Evidence: /tmp/pynbody-packaging-spike/{commands.json,inventory.json,sdist-rebuild.json,*-build.log,full-install.log}; experiment scripts /tmp/pynbody-packaging-{spike,rebuild}.py. Documentation records exact setup, commands, versions and limits.
 - Status: review; TASK-0002 blocked pending human approval. No production packaging edits or release publication.
+
+## 2026-11-09 — remote integration confirmed / 远端集成确认
+
+- Merged: https://github.com/wx-ys/pynbody-extras/pull/41; merge commit `674ea4f21b473df282ea2e67f1ec9f8426596eb8`.
+- Actual remote state confirmed MERGED before status=done. User authorized autonomous PR/merge; predecessors were merged in dependency order.
+- Checks: Documentation/decision record in PR41; actual installation matrix verified and merged with TASK-0002..
+- Local main is synchronized separately and verified against the complete final source. Platform/backend limitations from the specification remain.

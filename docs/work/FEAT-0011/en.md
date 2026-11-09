@@ -34,7 +34,7 @@ Implement design §7 using frozen JobSpec with schema, calculator_signature_text
 - [x] Implement the smallest scoped change; record any core contract decision before changing it.
 - [x] Run focused tests, then make check and make test-all; report exact results and limits.
 - [x] Update both locales, meta.json and handoff with red/green evidence.
-- [ ] Parent integration workflow: prepare one scoped PR using the template when publishing is authorized.
+- [x] Parent integration workflow: prepare one scoped PR using the template when publishing is authorized.
 
 ```bash
 .venv/bin/python -m pytest tests/test_orm_jobs.py tests/test_orm_loading.py tests/test_signature_roundtrip.py -q
@@ -63,3 +63,7 @@ Parent confirmed renewed alias-corrected specification and quality reviews both 
 ## Handoff boundary
 
 No incidental DAG rewrite, database migration, automatic GC or release publication. Keep one reviewable increment per item; verify local predecessors without claiming remote merge. Commit/push permissions follow the active user authorization, not this template.
+
+## Integration outcome — 2026-11-09
+
+Merged via [FEAT-0011 PR](https://github.com/wx-ys/pynbody-extras/pull/51), merge commit `a7d6f6a053ed41a439a55ce3e88e3c6b2f2f46cb`. Current status: done; this supersedes the historical local-only/review notes above. Exact scoped integration checks are recorded in handoff.md and the [integration record](../../design/integration-2026-11-09.md). No release was published.

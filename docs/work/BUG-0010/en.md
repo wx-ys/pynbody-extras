@@ -31,7 +31,7 @@ Use a versioned object-array tag carrying shape, optional units and C-order flat
 - [x] Turn every criterion into behavioral tests; record red failures for missing behavior/API, not a broken environment.
 - [x] Implement the smallest scoped change; record any core contract decision before changing it.
 - [x] Run focused tests, then make check and make test-all; report exact results and limits.
-- [ ] Publish a scoped PR after authorization; local bilingual handoff and red/green evidence are ready.
+- [x] Publish a scoped PR after authorization; local bilingual handoff and red/green evidence are ready.
 
 ```bash
 .venv/bin/python -m pytest tests/test_value_codec.py tests/test_result_store.py tests/test_sql_store.py -q
@@ -80,3 +80,7 @@ Versioned object-array payload stores shape, C-order elements and units; reconst
 - `make test-all`: 1107 passed, 1 skipped.
 
 Status: review; locally implemented and verified, not committed, published or merged. No migration or unrelated architecture change. SQLite/Linux verified; other platforms/backends not certified.
+
+## Integration outcome — 2026-11-09
+
+Merged via [BUG-0010 PR](https://github.com/wx-ys/pynbody-extras/pull/42), merge commit `1b4f1b8f7c3187df2d7f3ac18e6ecdcfe8749e37`. Current status: done; this supersedes the historical local-only/review notes above. Exact scoped integration checks are recorded in handoff.md and the [integration record](../../design/integration-2026-11-09.md). No release was published.

@@ -35,7 +35,7 @@ Implement design §7: run_study(repo, input_ids, calculators, store_name, locati
 - [x] Implement the smallest scoped change; record any core contract decision before changing it.
 - [x] Run focused tests, then make check and make test-all; report exact results and limits.
 - [x] Update both locales, meta.json and handoff with red/green evidence.
-- [ ] Parent integration workflow: prepare a scoped PR when publishing is authorized.
+- [x] Parent integration workflow: prepare a scoped PR when publishing is authorized.
 
 ```bash
 .venv/bin/python -m pytest tests/test_orm_study.py tests/test_orm_associations.py tests/test_sample_refs.py tests/test_package_layers_contract.py -q
@@ -54,3 +54,7 @@ Red evidence: **91 failed**, all missing new API (`/tmp/feat0012-red.log`). Init
 ## Handoff boundary
 
 No incidental DAG rewrite, database migration, automatic GC or release publication. Keep one reviewable increment per item; verify local predecessors without claiming remote merge. Commit/push permissions follow the active user authorization, not this template.
+
+## Integration outcome — 2026-11-09
+
+Merged via [FEAT-0012 PR](https://github.com/wx-ys/pynbody-extras/pull/52), merge commit `1843f7608a8b0255e1aa3b798380a017f42f420f`. Current status: done; this supersedes the historical local-only/review notes above. Exact scoped integration checks are recorded in handoff.md and the [integration record](../../design/integration-2026-11-09.md). No release was published.

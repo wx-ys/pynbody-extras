@@ -1,16 +1,16 @@
 {
   "id": "FEAT-0007",
   "type": "feature",
-  "status": "review",
+  "status": "done",
   "title_en": "Encode explicit local external-file result references",
   "title_zh": "编码显式的本地外部文件结果引用",
   "owner": "",
   "issue": 0,
   "created": "2026-11-09",
   "updated": "2026-11-09",
-  "completed": null,
-  "resolution": null,
-  "pr": null,
+  "completed": "2026-11-09",
+  "resolution": "implemented",
+  "pr": 47,
   "related": [
     "BUG-0010",
     "BUG-0011"

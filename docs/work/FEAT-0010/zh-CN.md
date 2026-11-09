@@ -48,7 +48,7 @@ Selection 表保存 root_input_id、view_input_id、schema、definition_json、e
 - [x] 只在文件范围内实施最小改动；若需变更核心合同，先记录设计决定。
 - [x] 重跑专项，再运行 make check、make test-all；报告准确计数及未验证范围。
 - [x] 更新两种语言、meta.json 和 handoff，保留红绿证据。
-- [ ] 父级流程：按模板整理单独 PR。
+- [x] 父级流程：按模板整理单独 PR。
 
 ```bash
 .venv/bin/python -m pytest tests/test_orm_selections.py tests/test_orm_loading.py tests/test_logical_snapshot_identity.py tests/test_orm_associations.py -q
@@ -69,3 +69,7 @@ run_selection 在 loader/selector IO 前提交视图 Run、准确 selection_id�
 ## 交接边界
 
 不顺带重写 DAG、不新增数据库迁移/自动 GC、不发布 release。一个工作项一个可审阅改动；后续任务先验证本地前项，不假称远程已合并。具体提交/推送权限沿用届时用户授权，不从此模板推断。
+
+## 集成结果 — 2026-11-09
+
+已通过 [FEAT-0010 PR](https://github.com/wx-ys/pynbody-extras/pull/50) 合并，merge commit `448fe1156f19d32aed42118cd108c1cfe0cb6c74`。当前状态为 done，取代上文历史记录中的仅本地/review 状态。逐项集成验证见 handoff.md 与[集成记录](../../design/integration-2026-11-09.md)。未发布 release。

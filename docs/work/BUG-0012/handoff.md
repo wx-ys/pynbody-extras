@@ -33,3 +33,10 @@
 - User authorized commit, PR and merge. This increment was reconstructed in isolation after verified predecessors.
 - `make check`: 1155 passed, 1 skipped, 4 deselected in 29.36s; `make test-all`: 1159 passed, 1 skipped in 29.52s. Log: `/tmp/pynbody-publish-test-3.log`.
 - Independent complete-source review found no actionable findings; slice tests protect extraction boundaries. Publication/merge URL and final status are recorded after the remote operation is confirmed.
+
+## 2026-11-09 — remote integration confirmed / 远端集成确认
+
+- Merged: https://github.com/wx-ys/pynbody-extras/pull/44; merge commit `1c35d9892a93f5d175b86cf432065c0f389d4c74`.
+- Actual remote state confirmed MERGED before status=done. User authorized autonomous PR/merge; predecessors were merged in dependency order.
+- Checks: 1155 passed, 1 skipped, 4 deselected in 29.36s; 1159 passed, 1 skipped in 29.52s.
+- Local main is synchronized separately and verified against the complete final source. Platform/backend limitations from the specification remain.

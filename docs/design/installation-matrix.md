@@ -1,5 +1,7 @@
 # Installation matrix — TASK-0002 / ADR-019
 
+**Integration update / 集成更新 — 2026-11-09:** All authorized increments are now merged; work items are done. See the [integration record](integration-2026-11-09.md) for actual PRs and verification. Earlier local-only statements below describe the recorded pre-integration checkpoint.
+
 2026-11-09. Final local source after FEAT-0005–FEAT-0012, version **0.0.1**.
 No upload, package-name reservation, commit or version bump occurred.
 

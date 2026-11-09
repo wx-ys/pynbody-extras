@@ -50,7 +50,7 @@ are logged with the original process exception preserved.
 - [x] Turn every criterion into behavioral tests; record red failures for missing behavior/API, not a broken environment.
 - [x] Implement the smallest scoped change; record any core contract decision before changing it.
 - [x] Run focused tests, then make check and make test-all; report exact results and limits.
-- [ ] Update both locales, meta.json and handoff; prepare one scoped PR using the template and red/green evidence.
+- [x] Update both locales, meta.json and handoff; prepare one scoped PR using the template and red/green evidence.
 
 ```bash
 .venv/bin/python -m pytest tests/test_postprocessors.py tests/test_calculate_contract.py tests/test_signature_roundtrip.py tests/test_layering_contract.py -q
@@ -108,3 +108,7 @@ not certified by this increment. PR publication remains with the parent workflow
 ## Handoff boundary
 
 No incidental DAG rewrite, database migration, automatic GC or release publication. Keep one reviewable increment per item; verify predecessors are merged before continuing. Commit/push permissions follow the active user authorization, not this template.
+
+## Integration outcome — 2026-11-09
+
+Merged via [FEAT-0008 PR](https://github.com/wx-ys/pynbody-extras/pull/48), merge commit `83ae4b5b3c363ef151f179265157c1d03f799cf4`. Current status: done; this supersedes the historical local-only/review notes above. Exact scoped integration checks are recorded in handoff.md and the [integration record](../../design/integration-2026-11-09.md). No release was published.

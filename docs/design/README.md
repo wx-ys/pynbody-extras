@@ -1,5 +1,7 @@
 # Design entry point / 设计入口
 
+**Integration update / 集成更新 — 2026-11-09:** All authorized increments are now merged; work items are done. See the [integration record](integration-2026-11-09.md) for actual PRs and verification. Earlier local-only statements below describe the recorded pre-integration checkpoint.
+
 Current review baseline: `5df15dd`, 2026-11-09.
 
 - [Updated V1 design / 更新后的 V1 设计](v1-2026-11-09.md)

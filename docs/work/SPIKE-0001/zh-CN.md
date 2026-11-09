@@ -44,3 +44,7 @@ make docs-check
 已整理具体[发行方案](../../design/packaging-decision.md)：未保留的候选名称、完整文件归属、依赖元数据、安装/卸载预期及真实临时 wheel/sdist 实验。离线安装因依赖缓存不足未完成；sdist 重建退出 0 但缺头文件导致 native 编译失败并被省略，已列为 TASK-0002 发布验收要求。未改正式打包。
 
 Status: review; human approval pending. Source builds and metadata checks passed, isolated installation and uninstall not certified; TASK-0002 remains blocked. Logs: /tmp/pynbody-packaging-spike/.
+
+## 集成结果 — 2026-11-09
+
+已通过 [SPIKE-0001 PR](https://github.com/wx-ys/pynbody-extras/pull/41) 合并，merge commit `674ea4f21b473df282ea2e67f1ec9f8426596eb8`。当前状态为 done，取代上文历史记录中的仅本地/review 状态。逐项集成验证见 handoff.md 与[集成记录](../../design/integration-2026-11-09.md)。未发布 release。
