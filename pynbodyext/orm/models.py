@@ -65,6 +65,12 @@ class DataLocation(Base):
     data_object: Mapped[DataObject] = relationship(back_populates="locations")
 
 
+
+
+
+
+
+
 class Recipe(Base):
     __tablename__ = "pynbodyext_orm_recipes"
 
@@ -93,10 +99,16 @@ class Run(Base):
     reused: Mapped[bool | None] = mapped_column(Boolean)
     error_type: Mapped[str | None] = mapped_column(Text)
     error_message: Mapped[str | None] = mapped_column(Text)
+    _execution_context_json: Mapped[str] = mapped_column("execution_context", Text)
     input: Mapped[DataObject] = relationship(back_populates="runs")
     input_location: Mapped[DataLocation | None] = relationship()
     recipe: Mapped[Recipe] = relationship(back_populates="runs")
     result_link: Mapped[ResultLink | None] = relationship(back_populates="run", uselist=False)
+
+    @property
+    def execution_context(self) -> dict[str, Any]:
+        """A fresh copy of the immutable invocation snapshot committed at begin."""
+        return dict(json.loads(self._execution_context_json))
 
 
 class ResultLink(Base):

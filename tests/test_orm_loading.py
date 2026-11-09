@@ -387,3 +387,100 @@ def test_corrupted_run_location_ownership_is_reported(env):
     assert repo.audit()[0].code == "invalid_link"
     with pytest.raises(ValueError, match="location"):
         repo.fetch_result(recorded.run.id)
+
+
+def test_context_snapshots_selected_prefix_before_loader_io(env):
+    make, identity, path, _ = env
+    identity = replace(identity, revision="r2", loader_id="custom")
+    metadata = {"tool_versions": {"script": "v1"}, "random_seed": 7}
+    observed = []
+
+    def loader(uri):
+        assert repo.engine.pool.checkedout() == 0
+        pending = make().runs(status="running")[0]
+        context = pending.execution_context
+        assert context["input"] == {"uri": uri, "loader_id": "custom", "revision": "r2"}
+        assert context["tool_versions"] == {"script": "v1"}
+        assert context["random_seed"] == 7
+        observed.append(context)
+        metadata["tool_versions"]["script"] = "mutated during loading"
+        return snapshot(uri + ".0.hdf5")
+
+    repo = make({"custom": loader})
+    data = repo.register_input(identity, location=str(path))
+    repo.register_input(identity, location=str(path) + ".alias")
+    location = next(item for item in repo.get_input(data.id).locations if item.uri.endswith(".alias"))
+    recorded = repo.run_input(
+        ParamSum("mass"), data.id, location_id=location.id, store_name="results", execution_metadata=metadata
+    )
+    assert recorded.run.execution_context == observed[0]
+    assert recorded.run.execution_context["input"]["uri"] == location.uri
+    with repo.session() as session, session.begin():
+        session.get(orm.DataLocation, location.id).uri = str(path) + ".moved"
+    repo.engine.dispose()
+    reopened = make().get_run(recorded.run.id)
+    assert reopened.input_location.uri.endswith(".moved")
+    assert reopened.execution_context == observed[0]
+
+
+@pytest.mark.parametrize("failure", ["loader", "returned_root", "failure_metadata", "result_metadata"])
+def test_load_failures_and_recovery_retain_context(env, failure):
+    make, identity, path, _ = env
+
+    def loader(uri):
+        if failure in ("loader", "failure_metadata"):
+            raise OSError("snapshot unavailable")
+        return object() if failure == "returned_root" else snapshot(uri)
+
+    repo = make({"default": loader})
+    data = repo.register_input(identity, location=str(path))
+
+    def block_metadata(conn, cursor, statement, parameters, context, executemany):
+        prefix = "UPDATE pynbodyext_orm_runs" if failure == "failure_metadata" else "INSERT INTO pynbodyext_orm_result_links"
+        if statement.startswith(prefix):
+            raise RuntimeError("metadata unavailable")
+
+    if failure.endswith("metadata"):
+        sa.event.listen(repo.engine, "before_cursor_execute", block_metadata)
+    try:
+        error = orm.RunPersistenceError if failure.endswith("metadata") else orm.RunExecutionError
+        with pytest.raises(error) as caught:
+            repo.run_input(
+                ParamSum("mass"), data.id, store_name="results",
+                execution_metadata={"tool_versions": {"script": "v1"}, "random_seed": 5},
+            )
+    finally:
+        if failure.endswith("metadata"):
+            sa.event.remove(repo.engine, "before_cursor_execute", block_metadata)
+    run = repo.get_run(caught.value.run_id)
+    original = run.execution_context
+    assert original["input"] == {"uri": str(path), "loader_id": "default", "revision": None}
+    assert original["tool_versions"] == {"script": "v1"} and original["random_seed"] == 5
+    repo.engine.dispose()
+    reopened = make()
+    assert reopened.get_run(run.id).execution_context == original
+    if failure == "result_metadata":
+        assert run.status == "running"
+        assert reopened.finish_run(run.id, caught.value.result_ref).execution_context == original
+    elif failure == "failure_metadata":
+        assert run.status == "running"
+        assert reopened.fail_run(run.id, OSError("confirmed unavailable")).execution_context == original
+    else:
+        assert run.status == "failed"
+        assert isinstance(caught.value.__cause__, (OSError, TypeError))
+
+
+def test_context_collection_failure_is_preflight(env, monkeypatch):
+    import importlib.metadata
+
+    make, identity, path, store = env
+    repo = make({"default": lambda uri: pytest.fail("must not load")})
+    data = repo.register_input(identity, location=str(path))
+
+    def broken_version(name):
+        raise RuntimeError("metadata collector unavailable")
+
+    monkeypatch.setattr(importlib.metadata, "version", broken_version)
+    with pytest.raises(RuntimeError, match="metadata collector unavailable"):
+        repo.run_input(ParamSum("mass"), data.id, store_name="results")
+    assert repo.runs() == [] and store.list_refs() == []

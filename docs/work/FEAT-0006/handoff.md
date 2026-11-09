@@ -81,3 +81,9 @@
   recorded in the final TASK-0002 handoff and installation matrix.
 - 最终组合审查补齐代码拥有者版本：保留 full 独立字段，新增 core 字段；先改双语
   合同与 ADR，再确认四项红灯和环境模块 49 项绿灯。未扩大缓存或环境采集范围。
+
+## 2026-11-09 — scoped integration verification
+
+- User authorized commit, PR and merge. This increment was reconstructed in isolation after verified predecessors.
+- `make check`: 1225 passed, 2 skipped, 4 deselected in 34.33s; `make test-all`: 1229 passed, 2 skipped in 34.17s. Log: `/tmp/pynbody-publish-test-5.log`.
+- Independent complete-source review found no actionable findings; slice tests protect extraction boundaries. Publication/merge URL and final status are recorded after the remote operation is confirmed.

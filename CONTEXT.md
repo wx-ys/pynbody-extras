@@ -257,7 +257,17 @@ full/lightweight distribution split is a separate packaging decision (ADR-005).
 - **Run** — one invocation, with input/recipe FKs, named result backend, wall-clock
   start/end, status (`running`, `succeeded`, `failed`), error details and nullable
   `reused`. Cache hits also get separate Run records. Failed is terminal; retry
-  means a new Run. Manual recovery may leave reuse unknown.
+  means a new Run. Manual recovery may leave reuse unknown. `execution_context`
+  is a versioned JSON snapshot committed with the initial running row, before
+  loading/calculation: Python and installed pynbodyext/NumPy/pynbody versions,
+  already-loaded native module information, selected URI and logical
+  loader_id/revision, plus explicit `tool_versions` and `random_seed`. Missing
+  package/native version information is null; collection never imports native.
+  Native null means no loaded-module information was observed, not unavailable.
+  This is the invocation environment, including on cache hits; the pinned
+  payload's producer environment remains unknown. `execution_context` returns a
+  fresh decoded copy with no setter, and repository finalization/recovery never
+  rewrites it. Caller-owned direct session writes remain caller responsibility.
 - **ResultLink** — one root output's pinned RecordRef JSON and result-store schema,
   associated with a Run. The backend name lives on Run. Arrays/named pipeline
   outputs remain in ResultStore; no payload copies in ORM.
