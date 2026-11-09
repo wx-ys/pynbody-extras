@@ -25,3 +25,9 @@
 - Final frozen-source focused study/associations/loading/SampleTable refs/layering/calculator contracts: **193 passed, 1 skipped** in 17.76s (`/tmp/feat0012-focused.log`). `make check`: lint/mypy124/docs27 passed, **1670 passed, 2 skipped, 5 deselected** in 70.78s (`/tmp/feat0012-check.log`). `make test-all`: **1675 passed, 2 skipped** in 72.39s (`/tmp/feat0012-all.log`). Optional pandas accounts for skips; other SQL dialects/platforms are unverified.
 - Status=review, generated index refreshed; source/tests frozen before broad checks and parent reviews. Only documentation/status updated afterward. Verified local prerequisites do not imply remote merge; no Git/subagent/dependency/migration/remote actions in this increment.
 - Next: parent completes independent specification/quality reviews and records results, then manages any separately authorized integration. No automatic attach/delete/retry/resume or exactly-once promise.
+
+## 2026-11-09 — scoped integration verification
+
+- User authorized commit, PR and merge. This increment was reconstructed in isolation after verified predecessors.
+- `make check`: 1672 passed, 2 skipped, 5 deselected in 60.39s (0:01:00); `make test-all`: 1677 passed, 2 skipped in 61.61s (0:01:01). Log: `/tmp/pynbody-publish-test-11.log`.
+- Independent complete-source review found no actionable findings; slice tests protect extraction boundaries. Publication/merge URL and final status are recorded after the remote operation is confirmed.
