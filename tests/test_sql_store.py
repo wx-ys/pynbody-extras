@@ -229,3 +229,53 @@ def test_object_arrays_survive_sqlite_reopen(tmp_path, shape):
     assert restored.tolist() == value.tolist()
     assert str(restored.units) == str(value.units)
     reopened.engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        np.dtype([("id", ">i4"), ("mass", "<f8")]),
+        np.dtype([("nested", [("id", "i2"), ("mass", "f8")])]),
+        np.dtype([("velocity", ">f8", (2,)), ("id", "i4")]),
+        np.dtype([("id", "i1"), ("mass", "f8")], align=True),
+        np.dtype({"names": ["id", "mass"], "formats": ["i4", "f8"], "offsets": [0, 16], "itemsize": 32}),
+    ],
+)
+@pytest.mark.parametrize("shape", [(2,), (), (0, 2)])
+def test_structured_arrays_survive_sqlite_reopen(tmp_path, dtype, shape):
+    from pynbody.array import SimArray
+
+    from pynbodyext.core.calculate.store.sqlalchemy_store import SQLAlchemyResultStore
+
+    calc, sim, result = make_result()
+    value = SimArray(np.ones(shape, dtype=dtype), units="Msol")
+    result.value = value
+    url = f"sqlite:///{tmp_path / 'structured.sqlite'}"
+    store = SQLAlchemyResultStore(url)
+    ref = store.store(result, sim_signature=("sim", "structured-array"), calculator_signature=calculator_to_signature(calc))
+    store.engine.dispose()
+    reopened = SQLAlchemyResultStore(url)
+    restored = reopened.fetch(ref).value
+    assert restored.shape == value.shape
+    assert restored.dtype == value.dtype
+    assert str(restored.units) == str(value.units)
+    np.testing.assert_array_equal(restored, value)
+    reopened.engine.dispose()
+
+
+def test_object_bearing_structured_array_is_rejected_before_any_sql_commit(tmp_path):
+    from pynbodyext.core.calculate.store.sqlalchemy_store import SQLAlchemyResultStore
+
+    calc, sim, result = make_result()
+    result.value = np.zeros(1, dtype=[("unsafe", object)])
+    url = f"sqlite:///{tmp_path / 'rejected.sqlite'}"
+    store = SQLAlchemyResultStore(url)
+    with pytest.raises(TypeError, match="object fields"):
+        store.store(result, sim_signature=("sim", "structured-object"), calculator_signature=calculator_to_signature(calc))
+    store.engine.dispose()
+    reopened = SQLAlchemyResultStore(url)
+    assert reopened.list_refs() == []
+    from pynbodyext.core.calculate.store import RecordRef
+    ref = RecordRef(("sim", "structured-object"), calculator_to_signature(calc).hash)
+    assert reopened.list_versions(ref) == []
+    reopened.engine.dispose()

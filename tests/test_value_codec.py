@@ -156,3 +156,113 @@ def test_legacy_object_array_tag_remains_readable():
     assert restored.shape == (1,)
     assert restored.dtype == object
     assert restored.tolist() == [3]
+
+
+STRUCTURED_DTYPES = [
+    np.dtype([("id", ">i4"), ("mass", "<f8")]),
+    np.dtype([("nested", [("id", "i2"), ("mass", "f8")])]),
+    np.dtype([("velocity", ">f8", (2, 3)), ("id", "i4")]),
+    np.dtype([("id", "i1"), ("mass", "f8")], align=True),
+    np.dtype({"names": ["id", "mass"], "formats": ["i4", "f8"], "offsets": [0, 16], "itemsize": 32}),
+]
+
+
+@pytest.mark.parametrize("dtype", STRUCTURED_DTYPES)
+@pytest.mark.parametrize("shape", [(2,), (), (0, 2)])
+def test_structured_array_dtype_shape_and_values_survive_json(dtype, shape):
+    value = np.ones(shape, dtype=dtype)
+    codec = ValueCodec()
+    restored = codec.decode(json.loads(json.dumps(codec.encode(value))))
+    assert restored.shape == value.shape
+    assert restored.dtype == value.dtype
+    assert restored.dtype.itemsize == value.dtype.itemsize
+    np.testing.assert_array_equal(restored, value)
+
+
+def test_noncontiguous_structured_simarray_preserves_units():
+    from pynbody.array import SimArray
+
+    value = SimArray(np.ones((3, 4), dtype=STRUCTURED_DTYPES[0]), units="kpc")[:, ::2]
+    assert not value.flags.c_contiguous
+    codec = ValueCodec()
+    restored = codec.decode(json.loads(json.dumps(codec.encode(value))))
+    assert isinstance(restored, SimArray)
+    assert restored.dtype == value.dtype
+    assert restored.shape == value.shape
+    assert str(restored.units) == str(value.units)
+    np.testing.assert_array_equal(restored, value)
+
+
+@pytest.mark.parametrize("dtype", [np.dtype([("object", object)]), np.dtype([("nested", [("object", object)])])])
+def test_structured_object_fields_are_rejected_before_encoding(dtype):
+    with pytest.raises(TypeError, match="object fields"):
+        ValueCodec().encode(np.zeros(2, dtype=dtype))
+
+
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        np.dtype([("id", "i4")], metadata={"unit": "count"}),
+        np.dtype([("id", np.dtype("i4", metadata={"unit": "count"}))]),
+        np.dtype([("nested", [("id", np.dtype("i4", metadata={"unit": "count"}))])]),
+        np.dtype([("vector", np.dtype("f8", metadata={"unit": "kpc"}), (2,))]),
+    ],
+)
+def test_structured_dtype_metadata_is_rejected_without_silent_loss(dtype):
+    with pytest.raises(TypeError, match="metadata"):
+        ValueCodec().encode(np.zeros(2, dtype=dtype))
+
+
+@pytest.mark.parametrize("offsets", [[0, 0], [8, 0]])
+def test_unrepresentable_structured_layout_is_rejected_during_encoding(offsets):
+    dtype = np.dtype({"names": ["a", "b"], "formats": ["i8", "i8"], "offsets": offsets})
+    with pytest.raises(TypeError, match="losslessly"):
+        ValueCodec().encode(np.zeros(2, dtype=dtype))
+
+
+@pytest.mark.parametrize("payload_kind", ["truncated", "object", "numeric", "npz"])
+def test_invalid_structured_payload_is_rejected_without_pickle(payload_kind, monkeypatch):
+    import base64
+    import io
+    import pickle
+
+    def fail_pickle(*args, **kwargs):
+        pytest.fail("structured-array decoding must not invoke pickle")
+
+    buffer = io.BytesIO()
+    if payload_kind == "npz":
+        np.savez(buffer, data=np.zeros(1, dtype=STRUCTURED_DTYPES[0]))
+    else:
+        dtype = [("object", object)] if payload_kind == "object" else STRUCTURED_DTYPES[0]
+        value = np.zeros(1) if payload_kind == "numeric" else np.zeros(1, dtype=dtype)
+        np.save(buffer, value, allow_pickle=payload_kind == "object")
+    raw = buffer.getvalue()
+    if payload_kind == "truncated":
+        raw = raw[:-3]
+    monkeypatch.setattr(pickle, "load", fail_pickle)
+    monkeypatch.setattr(pickle, "loads", fail_pickle)
+    with pytest.raises((ValueError, EOFError)):
+        ValueCodec().decode({"__kind": "structured_array_v1", "data_b64": base64.b64encode(raw).decode("ascii")})
+
+
+@pytest.mark.parametrize("title", [frozenset({1}), np.int64(2)])
+def test_unreadable_structured_field_titles_are_rejected_during_encoding(title):
+    dtype = np.dtype([((title, "field"), "i4")])
+    with pytest.raises(TypeError, match="losslessly"):
+        ValueCodec().encode(np.zeros(1, dtype=dtype))
+
+
+def test_large_structured_header_roundtrips_with_pickle_disabled():
+    value = np.ones(1, dtype=[(f"field_{index}", "f8") for index in range(500)])
+    codec = ValueCodec()
+    restored = codec.decode(json.loads(json.dumps(codec.encode(value))))
+    assert restored.dtype == value.dtype
+    np.testing.assert_array_equal(restored, value)
+
+
+def test_literal_field_titles_survive_structured_encoding():
+    value = np.ones(1, dtype=[(("mass label", "mass"), "f8"), (((1, "id"), "id"), "i4")])
+    codec = ValueCodec()
+    restored = codec.decode(json.loads(json.dumps(codec.encode(value))))
+    assert restored.dtype == value.dtype
+    np.testing.assert_array_equal(restored, value)
