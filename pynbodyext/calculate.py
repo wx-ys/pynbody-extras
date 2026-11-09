@@ -19,6 +19,7 @@ and composing calculator graphs without importing from the longer
 Most users only need:
 
 - :class:`PropertyBase`
+- :class:`PostprocessorBase` for processing one upstream result value
 - :class:`FilterBase`
 - :class:`TransformBase`
 - :class:`Param`
@@ -33,6 +34,12 @@ Advanced users may also need:
 Choosing A Base Class
 ---------------------
 For new calculators, prefer the narrowest base class that matches the node.
+
+Use :class:`PostprocessorBase` when the input is another Calculator's public
+value. Decorated subclasses implement ``process(value)`` and read static fields
+from ``self``; construct them with ``ScaleValues(factor=2.0, source=upstream)``.
+The required keyword-only ``source`` is the only dynamic parameter, and its
+value and units pass through the existing property runtime unchanged.
 
 1. Start with :class:`PropertyBase` for a read-only derived value.
 2. Use :class:`FilterBase` for a boolean mask.
@@ -160,6 +167,7 @@ from .core.calculate import (
     LogicalSnapshotIdentity,
     Param,
     Pipeline,
+    PostprocessorBase,
     PropertyBase,
     RuntimeCalculatorBase,
     SampleTable,
@@ -178,6 +186,7 @@ __all__ = [
     "Bin1D",
     "RuntimeCalculatorBase",
     "PropertyBase",
+    "PostprocessorBase",
     "FilterBase",
     "TransformBase",
     "Pipeline",

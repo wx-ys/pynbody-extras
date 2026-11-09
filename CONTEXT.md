@@ -8,7 +8,7 @@ and result-store subsystems, plus the architecture invariants the tests enforce.
 Use these terms exactly. Don't drift to synonyms.
 
 - **Calculator DAG** — the composed execution graph (`CalculatorBase` +
-  mixins, `PropertyBase`, `FilterBase`, `TransformBase`, `Pipeline`). Each node
+  mixins, `PropertyBase`, `PostprocessorBase`, `FilterBase`, `TransformBase`, `Pipeline`). Each node
   produces a `ResultNode`; the graph is resolved and executed by `EvalEngine`.
 - **`CalculatorSignature`** (`result/signature.py`) — a frozen, structured
   description of a calculator (class + `deps` + parameters), with a content
@@ -579,3 +579,18 @@ object a caller normally holds.
   descriptors only: fetching an old version cannot restore overwritten external
   bytes. Callers maintain distinct/versioned paths for reproducible history; no
   automatic copy/delete/externalization is provided. See ADR-013.
+- **`PostprocessorBase`** (`nodes/postprocessors.py`) — a value-consuming property
+  role exported by `pynbodyext.calculate`. Decorated scientific subclasses
+  implement `process(value)`; the adapter owns `calculate(sim, params)` and
+  delivers `params.source` unchanged, including units. Its required keyword-only
+  `source` is one Calculator dependency declared through `Param`; raw `Result`,
+  `RecordRef`, and extra dynamic parameters are rejected. Other dataclass fields
+  are static configuration read through `self`. The existing Calculator DAG,
+  property/runtime lifecycle, signatures, and result-store receipts remain the
+  owning seams; there is no second executor or signature node kind. See ADR-014.
+  On an exception the adapter invokes cleanup for its own applied bound scope,
+  respecting revert policies and nonrevertible handles; it does not invoke an
+  inherited ancestor's cleanup callback. Native compound handles retain their
+  existing cascading revert semantics, and cleanup failures are logged while
+  preserving the original exception. Transform/filter application failures before
+  entering the adapter and generic property success cleanup are outside this path.

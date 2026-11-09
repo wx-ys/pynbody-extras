@@ -69,3 +69,9 @@ make test-all
 make docs-index
 make docs-check
 ```
+
+## 2026-11-09 — scoped integration verification
+
+- User authorized commit, PR and merge. This increment was reconstructed in isolation after verified predecessors.
+- `make check`: 1357 passed, 2 skipped, 4 deselected in 35.02s; `make test-all`: 1361 passed, 2 skipped in 34.77s. Log: `/tmp/pynbody-publish-test-7.log`.
+- Independent complete-source review found no actionable findings; slice tests protect extraction boundaries. Publication/merge URL and final status are recorded after the remote operation is confirmed.

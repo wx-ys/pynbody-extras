@@ -5,6 +5,7 @@ from .base import CalculatorBase, CombinedCalculator
 from .expr import ConstantProperty, LambdaProperty, OpProperty
 from .filters import AndFilter, FilterBase, NotFilter, OrFilter
 from .pipeline import Pipeline
+from .postprocessors import PostprocessorBase
 from .properties import PropertyBase
 from .runtime_base import RuntimeCalculatorBase
 from .transforms import TransformBase, TransformChain, TransformPlan, TransformStep, chain_transforms
@@ -14,6 +15,7 @@ __all__ = [
     "RuntimeCalculatorBase",
     "CombinedCalculator",
     "PropertyBase",
+    "PostprocessorBase",
     "FilterBase",
     "TransformBase",
     "Pipeline",
