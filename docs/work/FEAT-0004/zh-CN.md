@@ -91,3 +91,5 @@ Catalogue 命名空间与 Halo/Subhalo 身份、可重建粒子选择及容器�
 make check：ruff、117 个源文件 mypy 与文档通过；1082 通过、1 跳过、4 未选中。
 make test-all：1086 通过、1 跳过，包含重开数据库后真实 pynbody 本地加载。
 本阶段验证 SQLite；不声称支持远端加载、选择重建或已验证其他 SQL 方言。不迁移旧库。
+
+PR: [#40](https://github.com/wx-ys/pynbody-extras/pull/40).

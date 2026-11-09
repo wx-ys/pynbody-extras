@@ -42,3 +42,12 @@
   ('is_type_form'). No code/typing-rule change was made. Re-running the exact
   file-scoped check with both original and fresh cache passed (4 source files).
   Commit uses MYPY_CACHE_DIR=/tmp/pynbody-loading-mypy-isolated-20261109; no hook bypass.
+
+## 2026-11-09 — published
+
+- PR: https://github.com/wx-ys/pynbody-extras/pull/40
+- Validated source commit: 6eff07446c143cbe7d198d4bc17cead40d261792.
+- Commit hooks passed with isolated mypy cache; no checks bypassed.
+- This follow-up records PR metadata only. Verify final head/checks, mark ready,
+  merge under existing authorization and synchronize main. PR status is the
+  authoritative publication record. No unrelated user directories staged.

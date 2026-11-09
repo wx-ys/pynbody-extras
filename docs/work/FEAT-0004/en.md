@@ -120,3 +120,5 @@ ownership regressions passed; final loading suite has 37 tests. Focused integrat
 4 deselected. `make test-all`: 1086 passed, 1 skipped, including real local pynbody
 loading after database reopen. SQLite is verified; remote loading, selection
 reconstruction and other SQL dialects are not claimed. No legacy migration.
+
+PR: [#40](https://github.com/wx-ys/pynbody-extras/pull/40).
