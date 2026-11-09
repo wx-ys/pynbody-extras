@@ -1,0 +1,22 @@
+{
+  "id": "FEAT-0002",
+  "type": "feature",
+  "status": "done",
+  "title_en": "Configure logical snapshot identities independently of location",
+  "title_zh": "配置与位置解耦的快照逻辑身份",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-09",
+  "updated": "2026-11-09",
+  "completed": "2026-11-09",
+  "resolution": "implemented",
+  "pr": 38,
+  "related": [
+    "FEAT-0001",
+    "BUG-0009"
+  ],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

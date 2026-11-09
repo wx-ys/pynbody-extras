@@ -53,6 +53,21 @@ Use these terms exactly. Don't drift to synonyms.
   particle indices it selects. It falls back to a session identity for a
   snapshot without a file or with a transformation applied outside the
   calculator. `calc.run(sim, store=<persistent store>)` uses it by default.
+- **`LogicalSnapshotIdentity`** (`runtime/logical_identity.py`) — explicit
+  project/simulation/timestep string IDs, optional data `revision` (default None),
+  and user-managed `loader_id` (default "default"). None revision means data edits
+  do not change the key; users refresh affected computations with `reuse=False`.
+  A supplied revision or changed loader ID creates a separate cache identity.
+  This data revision is distinct from `RecordRef.version_id`, which identifies
+  a result save. Labels assert equivalence; they do not prove file contents equal.
+- **`ConfiguredSnapshotIdentity`** — callable `sim_identity` provider mapping
+  explicit local paths/prefixes to logical identities. Paths are normalized at
+  configuration time and are not part of configured cache keys. Aliases may share
+  an identity; conflicting normalized locations raise ValueError. The copied
+  configuration has versioned JSON round-trip with absolute locations. Unknown
+  snapshots retain `snapshot_identity` fallback, and externally transformed roots
+  or views stay session-only. No file scanning, fingerprints, automatic loading or
+  global registry. See ADR-008; revision is optional by explicit user choice.
 - **Read-through store** — `calc.run(sim, store=store)` returns the stored
   result when the key is present (`result.from_store`), and computes and stores
   it otherwise; `reuse=False` recomputes, saves a new version and updates the
@@ -93,7 +108,9 @@ Use these terms exactly. Don't drift to synonyms.
   `column`, `where`, `missing`; `to_dataframe` (column metadata in
   `df.attrs["pynbodyext"]`), lossless `save` / `load` (JSON, values via
   `ValueCodec`, columns via the catalog). Cells are separate runs: shared
-  dependencies are not shared between columns.
+  dependencies are not shared between columns. Default labels for configured
+  logical snapshots include their logical fields plus any halo/subset suffix;
+  callers can still supply an explicit row name.
 - **Record** (`store/base.py::ResultRecord`) — one self-describing, codec-encoded
   row (value + named + provenance), serializable via `to_json`/`from_json`.
   The current schema is `pynbodyext.result.store/v4`; JSON loading refuses missing
@@ -152,6 +169,29 @@ calc(sim, store=store, sim_identity=path_identity)    # __call__ alias
 The result is persisted automatically on a clean run keyed by
 `(sim_identity(sim), root CalculatorSignature.hash)`. `store` and
 `sim_identity` are both optional, so existing callers are unaffected.
+
+To give a snapshot a location-independent identity, pass an explicit provider:
+
+```python
+from pynbodyext.calculate import ConfiguredSnapshotIdentity, LogicalSnapshotIdentity
+
+logical = LogicalSnapshotIdentity("my-project", "simulation-A", "099")
+identity = ConfiguredSnapshotIdentity({
+    "/data/old/snapshot_099": logical,
+    "/data/new/snapshot_099": logical,
+})
+result = calc.run(sim, store=store, sim_identity=identity)
+# After changing data, explicitly refresh each affected calculation/subset:
+refreshed = calc.run(sim, store=store, sim_identity=identity, reuse=False)
+```
+
+For separate data versions use `revision="r2"`; for interpretation changes use a
+new `loader_id`. Construct a new provider when changing bindings or IDs. Without
+revision there is no automatic invalidation of other cached computations/subsets.
+The provider serializes with `to_json()` / `from_json()`; paths are local location
+configuration, so moving to another machine requires rebinding its locations.
+These APIs also work with `EvalEngine(sim_identity=identity)` and
+`SampleTable(..., sim_identity=identity)`.
 
 Loading back is the mirror image — `store.load(sim_signature=...,
 calculator_signature_text=...)` deserializes the stored signature text into a

@@ -113,12 +113,17 @@ def snapshot_identity(sim: Any) -> tuple[Any, ...]:
         return id_based_sim_identity(sim)
 
     path = os.path.abspath(os.fspath(filename))
+    return _snapshot_view_identity(sim, ancestor, (STABLE_TAG, path))
+
+
+def _snapshot_view_identity(sim: Any, ancestor: Any, base: tuple[Any, ...]) -> tuple[Any, ...]:
+    """Append the existing halo/subset address to a path or logical root identity."""
     if sim is ancestor:
-        return (STABLE_TAG, path)
+        return base
 
     digest = _index_digest(sim, ancestor)
     halo_number = getattr(sim, "_halo_number", None)
     if halo_number is not None:
         number = halo_number.item() if isinstance(halo_number, np.generic) else halo_number
-        return (STABLE_TAG, path, "halo", number, digest)
-    return (STABLE_TAG, path, "subset", digest)
+        return base + ("halo", number, digest)
+    return base + ("subset", digest)

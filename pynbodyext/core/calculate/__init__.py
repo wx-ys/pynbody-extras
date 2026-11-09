@@ -226,6 +226,7 @@ from .runtime.cache import CacheEvent, ExecutionValue, RuntimeCache
 from .runtime.context import ExecutionContext, LogEvent, resolve_value
 from .runtime.engine import EvalEngine
 from .runtime.input import FilterResult, NodeInput, TransformResult
+from .runtime.logical_identity import ConfiguredSnapshotIdentity, LogicalSnapshotIdentity
 from .runtime.options import RunOptions
 from .runtime.progress import NullProgressSink, ProgressSink
 from .runtime.scopes import Scope, ScopeSpec, TransformScope
@@ -266,6 +267,8 @@ __all__ = [
     "ExecutionContext",
     "RunOptions",
     "snapshot_identity",
+    "ConfiguredSnapshotIdentity",
+    "LogicalSnapshotIdentity",
     "SampleTable",
     "SampleRow",
     "SignatureCatalog",
