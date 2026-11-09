@@ -8,8 +8,9 @@ future) can persist them without knowing about numpy or pynbody.
 
 Every encoded value is tagged with a ``"__kind"`` discriminator. Numeric arrays
 use raw C-contiguous bytes, dtype and shape; object arrays use shaped, flat
-elements,. Sim arrays also
-carry their units string. Other values
+elements, and structured arrays use NPY with pickle disabled. Sim arrays also
+carry their units string. Structured object fields, dtype metadata and layouts
+that NPY cannot represent losslessly are rejected during encoding. Other values
 that are not natively representable fall back to a pickled opaque blob, keeping
 common cases portable and diff-friendly.
 
@@ -22,6 +23,7 @@ from __future__ import annotations
 import ast
 import base64
 import hashlib
+import io
 import json
 import math
 import pickle
@@ -64,8 +66,29 @@ def _canonical_payload(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
+def _reject_dtype_metadata(dtype: np.dtype[Any]) -> None:
+    if dtype.metadata is not None:
+        raise TypeError("structured dtype metadata is unsupported")
+    if dtype.subdtype is not None:
+        _reject_dtype_metadata(dtype.subdtype[0])
+    if dtype.fields is not None:
+        for name in dtype.names or ():
+            _reject_dtype_metadata(dtype.fields[name][0])
 
 
+def _validate_structured_dtype(dtype: np.dtype[Any]) -> None:
+    """Check header readability without allocating another full value array."""
+    _reject_dtype_metadata(dtype)
+    buffer = io.BytesIO()
+    try:
+        np.save(buffer, np.empty(0, dtype=dtype), allow_pickle=False)
+        size = buffer.tell()
+        buffer.seek(0)
+        restored = np.load(buffer, allow_pickle=False, max_header_size=size)
+        if restored.dtype != dtype:
+            raise ValueError("NPY changes the structured dtype")
+    except (TypeError, ValueError) as exc:
+        raise TypeError("structured dtype cannot be represented losslessly") from exc
 
 
 class ValueCodec:
@@ -162,8 +185,22 @@ class ValueCodec:
         units = _sim_array_units(value)
         kind = "sim_array" if units is not None else "array"
 
+        if value.dtype.fields is not None:
+            if value.dtype.hasobject:
+                raise TypeError("structured arrays containing object fields are unsupported")
+            _validate_structured_dtype(value.dtype)
+            buffer = io.BytesIO()
+            try:
+                np.save(buffer, np.asarray(value), allow_pickle=False)
+            except (TypeError, ValueError) as exc:
+                raise TypeError("structured dtype cannot be represented losslessly") from exc
+            payload: dict[str, Any] = {"__kind": "structured_array_v1", "data_b64": _b64(buffer.getvalue())}
+            if units is not None:
+                payload["units"] = units
+            return payload
+
         if value.dtype.kind == "O":
-            payload: dict[str, Any] = {
+            payload = {
                 "__kind": "array_objects_v2",
                 "shape": list(value.shape),
                 "items": [self._encode(item) for item in value.flat],
@@ -286,6 +323,8 @@ class ValueCodec:
             return self._decode_array(data, sim=kind == "sim_array")
         if kind == "array_objects_v2":
             return self._decode_object_array(data)
+        if kind == "structured_array_v1":
+            return self._decode_structured_array(data)
         if kind == "array_objects":
             return np.array([self._decode(v) for v in data["items"]], dtype=object)
         if kind == "opaque":
@@ -294,6 +333,19 @@ class ValueCodec:
             raise ValueError(f"value was stored unencoded ({data.get('type')}); cannot decode")
         raise ValueError(f"unknown encoded value kind: {kind!r}")
 
+    def _decode_structured_array(self, data: dict[str, Any]) -> Any:
+        raw = _unb64(data["data_b64"])
+        with io.BytesIO(raw) as buffer:
+            # Wide scientific records may legitimately exceed NumPy's default
+            # header limit. Bound it by this payload, while keeping pickle off.
+            array = np.load(buffer, allow_pickle=False, max_header_size=len(raw))
+        if not isinstance(array, np.ndarray) or array.dtype.fields is None or array.dtype.hasobject:
+            raise ValueError("invalid structured-array payload")
+        if "units" in data:
+            from pynbody.array import SimArray
+
+            return SimArray(array, units=data["units"])
+        return array
 
     def _decode_object_array(self, data: dict[str, Any]) -> Any:
         shape = data.get("shape")

@@ -118,7 +118,9 @@ Use these terms exactly. Don't drift to synonyms.
 - **`ValueCodec`** (`store/codec.py`) — portable value serialization (numpy,
   pynbody `SimArray` with units, scalars, nested structures, pickle fallback).
   Object arrays retain shape, C-order element boundaries and units via a
-  versioned tag. Ordinary numerical-array tags remain unchanged. Legacy object
+  versioned tag. Structured arrays use NPY with pickle disabled; object fields,
+  nested dtype metadata and unreadable/non-lossless dtype headers are rejected
+  before saving. Ordinary numerical-array tags remain unchanged. Legacy object
   tags remain readable with their original shape limitations.
 - **tangos** — the Python package this store is modeled on; a relational DB that
   interns name strings. We deliberately diverge.
