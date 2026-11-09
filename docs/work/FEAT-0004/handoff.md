@@ -12,3 +12,8 @@
   decisions persist. Preserve unrelated untracked user directories.
 - Next after design approval: red tests, implementation plan, implementation,
   independent review, make check/test-all, scoped PR and merge under authorization.
+
+- Baseline before implementation: ORM, package-layer and logical-identity suites
+  passed (78 tests, 6.57 s); log /tmp/pynbody-loading-baseline.log.
+- docs-check passed with 14 work items. Clarified preflight rejects unstable
+  calculator signatures; constructibility is not a new run requirement.

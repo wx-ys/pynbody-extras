@@ -52,7 +52,7 @@ LoadedInput.sim_identity 沿用现有 subset/halo 与外部变换语义。
 
 ## 失败与恢复
 
-未知输入/loader/store、非法层级、不支持的位置、多位置未选择及非法请求在预检
+未知输入/loader/store、非法层级、不支持的位置、多位置未选择及不稳定流程签名在预检
 失败，不调用加载器、不建 Run。建 Run 后加载失败或返回值校验失败，记录 failed，
 抛出带 run_id 和原异常链的 RunExecutionError。状态写入失败抛 RunPersistenceError，
 保留可检查的 running，与 FEAT-0003 一致。单独 load_input 原样传播错误。

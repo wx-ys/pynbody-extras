@@ -70,7 +70,7 @@ created snapshots without a file identity and returned subviews fail validation.
 ## Failures and recovery
 
 Unknown input/loader/store, invalid hierarchy, unsupported location, ambiguous
-location or unconstructible request fail preflight without calling the loader or
+location or unstable calculator signature fail preflight without calling the loader or
 creating a Run. A loading/returned-object validation error after run creation
 produces failed, with RunExecutionError carrying run_id and the original cause.
 A failed metadata status write produces RunPersistenceError and leaves an
