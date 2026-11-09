@@ -25,3 +25,11 @@
 - No DB schema, dependencies or automatic data-loading changes. No migration.
 - Next: publish, record PR, verify head/checks, merge under existing authorization,
   fast-forward local main. Next roadmap layer: ORM logical object/Run associations.
+
+## 2026-11-09 — Codex / published
+
+- PR: https://github.com/wx-ys/pynbody-extras/pull/38
+- Validated implementation commit: 6478e12; pre-commit ruff/mypy passed.
+- This follow-up records publication only; tested source/tests are unchanged.
+- Merge is authorized. Check final head/base and required checks, mark ready,
+  merge without bypassing protections, and synchronize local main.

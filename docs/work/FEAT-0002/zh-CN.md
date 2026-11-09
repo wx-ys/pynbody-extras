@@ -70,3 +70,5 @@ make check：ruff/mypy/文档检查通过，1020 通过、1 跳过、3 未选中
 make test-all：1023 通过、1 跳过。原有测试未修改。
 独立审查发现并复核了 JSON 工厂的类型修正（改为明确构造当前配置类的静态工厂），
 并确认行名修正后无剩余问题。发布与合并已获授权，无待决实现问题。
+
+PR： [#38](https://github.com/wx-ys/pynbody-extras/pull/38).

@@ -87,3 +87,5 @@ Final make test-all: 1023 passed, 1 skipped. Existing tests were unchanged.
 Independent review found a public factory typing issue (fixed with concrete static
 JSON construction) and confirmed the final implementation and naming correction.
 Publication/merge are authorized; no remaining implementation questions.
+
+PR: [#38](https://github.com/wx-ys/pynbody-extras/pull/38).

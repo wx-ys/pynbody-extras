@@ -10,7 +10,7 @@
   "updated": "2026-11-09",
   "completed": "2026-11-09",
   "resolution": "implemented",
-  "pr": null,
+  "pr": 38,
   "related": [
     "FEAT-0001",
     "BUG-0009"
