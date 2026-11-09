@@ -84,6 +84,7 @@ class Run(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     input_id: Mapped[int] = mapped_column(ForeignKey(DataObject.id, ondelete="RESTRICT"), index=True)
+    input_location_id: Mapped[int | None] = mapped_column(ForeignKey(DataLocation.id, ondelete="RESTRICT"), index=True)
     recipe_hash: Mapped[str] = mapped_column(ForeignKey(Recipe.hash, ondelete="RESTRICT"), index=True)
     store_name: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(16), index=True)
@@ -93,6 +94,7 @@ class Run(Base):
     error_type: Mapped[str | None] = mapped_column(Text)
     error_message: Mapped[str | None] = mapped_column(Text)
     input: Mapped[DataObject] = relationship(back_populates="runs")
+    input_location: Mapped[DataLocation | None] = relationship()
     recipe: Mapped[Recipe] = relationship(back_populates="runs")
     result_link: Mapped[ResultLink | None] = relationship(back_populates="run", uselist=False)
 

@@ -235,7 +235,8 @@ full/lightweight distribution split is a separate packaging decision (ADR-005).
   revision, loader and any halo/subset suffix. Views link to their root input.
   Only logical identities are accepted; path/session fallback is not promoted.
 - **DataLocation** — root input URI metadata. Aliases and historical reuse of a
-  location by different revisions are allowed; no file loading or fingerprinting.
+  location by different revisions are allowed. Explicit loader bindings can load
+  local absolute paths/prefixes for registered roots (ADR-010); no fingerprinting.
 - **Recipe** — the existing stable CalculatorSignature hash and JSON DAG. ORM
   records the recipe; it does not implement a second graph or execution engine.
 - **Run** — one invocation, with input/recipe FKs, named result backend, wall-clock
@@ -292,6 +293,68 @@ concurrent registration may raise a uniqueness conflict. SQLite is tested; other
 SQL dialects need validation; conditional UPDATE RETURNING needs SQLite 3.35+.
 Catalogues, complete particle-container hierarchy,
 RunStep and MergerTree models remain later increments.
+
+### Loading registered inputs
+
+`AnalysisRepository(..., loaders={loader_id: callable})` copies explicit, trusted
+project-code bindings. Each callable accepts a local absolute path/prefix and
+returns a root `pynbody.snapshot.SimSnap`. Pre-bind parameters in project code;
+reopen with equivalent bindings. There is no implicit default loader, persisted
+callable, automatic configuration fingerprint or directory discovery. Changing
+interpretation requires a new loader_id. Revision remains optional/manual.
+
+```python
+import pynbody
+from pynbodyext.calculate import LogicalSnapshotIdentity
+from pynbodyext.orm import AnalysisRepository
+
+repo = AnalysisRepository(
+    "sqlite:///metadata.sqlite",
+    stores={"results": payloads},
+    loaders={"default": pynbody.load},
+)
+data = repo.register_input(
+    LogicalSnapshotIdentity("my-project", "simulation-A", "099"),
+    location="/data/simulation-A/snapshot_099",
+)
+recorded = repo.run_input(calc, data.id, store_name="results")
+assert recorded.run.input_location.uri == "/data/simulation-A/snapshot_099"
+original = repo.fetch_result(recorded.run.id)
+
+# Inspect or load independently, without creating a Run:
+registered = repo.get_input(data.id)  # hierarchy, parent and locations are loaded
+loaded = repo.load_input(data.id)
+result = calc.run(loaded.sim, sim_identity=loaded.sim_identity, store=payloads)
+```
+
+`get_input` returns detached metadata with timestep/simulation, parent and locations
+loaded. **LoadedInput** bundles `sim`, `input`, `location` and `sim_identity`; that
+provider retains the existing view/transformation identity rules. A normalized
+filename returned by the loader is bound to the registered logical identity;
+this declares equivalence, not proof of file contents. Invalid roots, subviews,
+missing/local-relative filenames and active external transformations are rejected.
+
+With multiple locations pass `location_id=registered.locations[...].id` to either
+loading entry point; no location is guessed and no failure switches to another
+copy. Local absolute file paths and multipart prefixes are supported, without an
+`isfile` precheck. Remote/relative locations can remain metadata but cannot load.
+Registered halo/subset objects cannot be reconstructed from their index digests;
+root-only loading is the deliberate first increment.
+
+`run_input` validates input hierarchy, selected location ownership, bindings and
+stable recipe before creating a Run. It then commits running **before loader IO**,
+without holding a metadata transaction during loading/calculation. Loading or
+returned-object validation errors are recorded as failed and raise
+`RunExecutionError` with run_id and the original cause. Metadata failure follows
+`RunPersistenceError` and explicit recovery, as above. `load_input` alone propagates
+errors and creates no Run. Even cache hits load in this increment.
+
+**Run.input_location_id / input_location** records the selected source relation;
+existing `run(calc, sim, ...)` leaves it null because it did not perform a managed
+load. This relation is not a historical copy of mutable DataLocation metadata.
+Run queries eagerly load it; reference validation/audit check ownership. Binding
+loaders never imports ORM into the calculator layer. No new dependency or legacy
+schema migration is provided (ADR-010).
 
 ## Architecture invariants (each one is a test)
 

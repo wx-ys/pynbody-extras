@@ -17,3 +17,28 @@
   passed (78 tests, 6.57 s); log /tmp/pynbody-loading-baseline.log.
 - docs-check passed with 14 work items. Clarified preflight rejects unstable
   calculator signatures; constructibility is not a new run requirement.
+
+## 2026-11-09 — design approved
+
+- User selected: implement the draft with explicit loader/configuration bindings
+  in project code. ADR-010 accepted. Execute the plan inline on the current branch.
+
+## 2026-11-09 — implemented and verified
+
+- Added orm/loading.py with LoadedInput/SnapshotLoader and local root validation.
+- Repository copies loader bindings; get_input/load_input/run_input expose the
+  accepted flow. Run.input_location records the selected source. Shared execution
+  helper retains previous error/result/recovery semantics. No existing tests edited.
+- RED: 30 missing-API failures plus 2 tightened binding-message failures. GREEN:
+  initial loading+ORM 58 passed; expanded focused 133 passed (37 loading tests).
+- Independent review approved: 68 loading/ORM/layer tests passed, no blockers.
+- make check exit 0: ruff, mypy 117 modules, docs; 1082 passed, 1 skipped, 4 deselected.
+- make test-all exit 0: 1086 passed, 1 skipped, including real local pynbody load.
+- Logs: /tmp/pynbody-loading-{red,bindings-red,green,focused,check,all}.log.
+- Remote main still 2d32336; next publish PR and merge under persistent user
+  authorization. Keep unrelated untracked user directories untouched.
+
+- First commit hook hit a transient mypy cache-deserialization KeyError
+  ('is_type_form'). No code/typing-rule change was made. Re-running the exact
+  file-scoped check with both original and fresh cache passed (4 source files).
+  Commit uses MYPY_CACHE_DIR=/tmp/pynbody-loading-mypy-isolated-20261109; no hook bypass.

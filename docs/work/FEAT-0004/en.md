@@ -1,6 +1,6 @@
 # FEAT-0004: Load registered snapshots through explicit loader bindings
 
-Status: proposed design; loading configuration boundary awaits user review.
+Status: implemented and verified; user explicitly selected runtime loader bindings.
 
 ## Goal and scope
 
@@ -14,7 +14,7 @@ Preserve optional revision/manual refresh, location-independent identity,
 separate metadata/payload commits and explicit recovery. No old database/cache
 migration is required. No new dependency, execution engine or import layer.
 
-## Proposed loading boundary
+## Accepted loading boundary
 
 AnalysisRepository gains loaders={loader_id: callable}. Copy and validate this
 process-local mapping, as with named stores. A loader accepts one location string
@@ -80,18 +80,18 @@ finish_run remains explicit and never chooses a version automatically.
 
 ## Acceptance criteria
 
-- [ ] Reopen SQLite; inspect/load a registered root and use its provider with run.
-- [ ] run_input records input, selected location, recipe, status and pinned output.
-- [ ] Alias relocation preserves cache identity; revision/loader differences split it.
-- [ ] Multiple locations require a choice; wrong-owner IDs and invalid local paths
+- [x] Reopen SQLite; inspect/load a registered root and use its provider with run.
+- [x] run_input records input, selected location, recipe, status and pinned output.
+- [x] Alias relocation preserves cache identity; revision/loader differences split it.
+- [x] Multiple locations require a choice; wrong-owner IDs and invalid local paths
   fail before IO; multipart prefixes are not rejected by file-existence checks.
-- [ ] Missing bindings, corrupted hierarchy and registered views fail preflight.
-- [ ] Reject non-SimSnap, subview, no-file and externally transformed loader output.
-- [ ] Loading errors yield failed Runs; status-write failure remains recoverable.
-- [ ] Cache hit/refresh/history and final metadata failure preserve FEAT-0003 rules.
-- [ ] No ORM session transaction covers loader execution; no SQLAlchemy import is
+- [x] Missing bindings, corrupted hierarchy and registered views fail preflight.
+- [x] Reject non-SimSnap, subview, no-file and externally transformed loader output.
+- [x] Loading errors yield failed Runs; status-write failure remains recoverable.
+- [x] Cache hit/refresh/history and final metadata failure preserve FEAT-0003 rules.
+- [x] No ORM session transaction covers loader execution; no SQLAlchemy import is
   introduced into pure calculation; existing tests remain intact.
-- [ ] Focused tests first fail for missing behavior, then pass; make check and
+- [x] Focused tests first fail for missing behavior, then pass; make check and
   make test-all pass, including a real local pynbody load/reopen integration test.
 
 ## Follow-on scope
@@ -102,4 +102,21 @@ full/lightweight packaging. These are separate increments, not prerequisites to
 this root-snapshot path. No directory scanning, downloads, fingerprints, automatic
 fallback, global registries or cached live snapshots in this increment.
 
-See [proposed ADR-010](../../adr/0010-explicit-snapshot-loading.md).
+See [ADR-010](../../adr/0010-explicit-snapshot-loading.md).
+
+## Verification and outcome
+
+Implemented `LoadedInput`/`SnapshotLoader`, explicit bindings, get_input/load_input/
+run_input, selected Run location and shared execution/finalization. No existing
+test was changed. The new input hierarchy helper preserves prior validation.
+
+RED: 30 missing-API failures; the two binding-validation cases were tightened to
+require the intended message and also failed before implementation. GREEN: initial
+32 loading contracts plus 26 existing ORM tests passed. Five additional failure/
+ownership regressions passed; final loading suite has 37 tests. Focused integration
+133 passed. Independent review approved, with 68 loading/ORM/layer tests passed.
+
+`make check`: ruff, mypy 117 source files and docs passed; 1082 passed, 1 skipped,
+4 deselected. `make test-all`: 1086 passed, 1 skipped, including real local pynbody
+loading after database reopen. SQLite is verified; remote loading, selection
+reconstruction and other SQL dialects are not claimed. No legacy migration.

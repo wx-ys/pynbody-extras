@@ -4,6 +4,7 @@ The calculator core does not import this package. Result payloads stay in a
 named ResultStore; AnalysisRepository manages relationships and run lifecycle.
 """
 
+from .loading import LoadedInput, SnapshotLoader
 from .models import Base, DataLocation, DataObject, Recipe, ResultLink, Run, Simulation, Timestep
 from .records import AssociationIssue, RecordedRun, RunExecutionError, RunPersistenceError
 from .repository import AnalysisRepository
@@ -14,6 +15,7 @@ __all__ = [
     "Base",
     "DataLocation",
     "DataObject",
+    "LoadedInput",
     "Recipe",
     "RecordedRun",
     "ResultLink",
@@ -21,5 +23,6 @@ __all__ = [
     "RunExecutionError",
     "RunPersistenceError",
     "Simulation",
+    "SnapshotLoader",
     "Timestep",
 ]
