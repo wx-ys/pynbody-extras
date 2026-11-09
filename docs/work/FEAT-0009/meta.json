@@ -1,0 +1,19 @@
+{
+  "id": "FEAT-0009",
+  "type": "feature",
+  "status": "review",
+  "title_en": "Register catalogue-scoped halo and subhalo metadata",
+  "title_zh": "登记有目录命名空间的 halo 与 subhalo 元数据",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-09",
+  "updated": "2026-11-09",
+  "completed": null,
+  "resolution": null,
+  "pr": null,
+  "related": [],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

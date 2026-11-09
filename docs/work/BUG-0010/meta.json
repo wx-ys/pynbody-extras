@@ -1,0 +1,19 @@
+{
+  "id": "BUG-0010",
+  "type": "bug",
+  "status": "review",
+  "title_en": "Preserve object-array shape and element boundaries",
+  "title_zh": "保留 object 数组形状与元素边界",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-09",
+  "updated": "2026-11-09",
+  "completed": null,
+  "resolution": null,
+  "pr": null,
+  "related": [],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

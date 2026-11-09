@@ -78,7 +78,6 @@ data/
 
 # uv
 
-# Local architecture and agent notes, not part of the shared docs yet.
-docs/adr/
+# ADRs are shared review records; local agent notes remain private.
 docs/agents/
 docs/superpowers/
