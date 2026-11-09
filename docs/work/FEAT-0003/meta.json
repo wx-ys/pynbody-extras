@@ -1,0 +1,22 @@
+{
+  "id": "FEAT-0003",
+  "type": "feature",
+  "status": "done",
+  "title_en": "Link simulation inputs, calculator recipes and saved results through ORM runs",
+  "title_zh": "通过 ORM 运行记录关联模拟输入、计算流程和保存结果",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-09",
+  "updated": "2026-11-09",
+  "completed": "2026-11-09",
+  "resolution": "implemented",
+  "pr": 39,
+  "related": [
+    "FEAT-0001",
+    "FEAT-0002"
+  ],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}
