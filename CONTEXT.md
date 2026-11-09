@@ -669,3 +669,53 @@ new Run, even on a cache hit with the same pinned ref; `reuse=False` saves a new
 version while prior references retain historical values. Loader/calculation/store
 and metadata failures retain RunExecutionError/RunPersistenceError receipts and
 explicit recovery. No new executor, automatic binding or migration (ADR-017).
+
+
+### Serial recorded studies
+
+**`run_study`** (`orm/study.py`) executes registered root-input IDs × an ordered
+label-to-Calculator mapping through `repo.run_input`, input-major then mapping
+order. IDs are unique positive built-in integers, never bool. Labels are unique
+nonempty built-in strings; distinct labels can use the same calculator signature.
+Optional `location_ids` maps requested roots to owned positive location IDs.
+The whole request is checked read-only, including bindings, hierarchy, selected
+locations, stable calculator signatures and existing Recipe payload conflicts,
+before any Run, loader call or recipe write. Empty axes are valid after checking
+the supplied request. Views/selections remain excluded, including those replayable
+through `run_selection`. Live calculator options and stable nonconstructible
+calculators are supported; JobSpec's reconstruction restrictions do not apply.
+
+```python
+from pynbodyext.orm import run_study, StudyReport
+
+report = run_study(repo, [first.id, second.id], {"mass": mass_calculator}, "results",
+                   errors="record")
+cell = report.cell(first.id, "mass")
+report.save("study.json")
+restored = StudyReport.load("study.json")  # values/refs only; no backend or execution
+```
+
+**StudyCell / StudyReport** retain full requested input/typed-identity/column-hash
+axes and ordered completed attempts. Each cell has input ID, label, Run ID,
+succeeded/failed status, actual value, structured ErrorInfo diagnostics and the
+actual pinned `Result.store_ref` on success. A successful None remains a success;
+failed cells have errors and no saved-result ref. `cell` raises KeyError for an
+unattempted coordinate. JSON schema `pynbodyext.orm.study/v1` uses ValueCodec for
+values/units/typed identities and RecordRef JSON for versioned references. Strict
+loading rejects duplicate/unknown/missing fields, malformed axes/cells/errors and
+unpinned or mismatched typed refs. Loading never reconstructs calculators, finds a
+backend, fetches values or changes Runs. `store_name` is an ownership label; pair
+refs with the explicit owning backend to fetch historical payloads.
+
+`errors="raise"` stops on execution failure. `errors="record"` continues only
+RunExecutionError already recorded as failed, or a returned failed RecordedRun.
+RunPersistenceError always stops: **StudyPersistenceError** holds prior completed
+cells in `report`, interrupted `input_id`/`label`, and the exact original `receipt`;
+its run_id/result_ref/result aliases are unchanged. The exception chains from that
+receipt, which retains the original metadata cause. The interrupted cell is absent
+from completed cells; no automatic attach, failure marking, retry or deletion is
+performed. Other exceptions propagate. Resume is an explicit new invocation,
+creating a new Run for every requested cell; reuse may retain existing pinned
+payload refs, and refresh preserves older reports after database reopen. There is
+no exactly-once promise, parallel executor or cross-column DAG optimization
+(ADR-018).

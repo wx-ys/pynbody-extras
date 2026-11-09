@@ -22,6 +22,7 @@ from .models import (
 from .records import AssociationIssue, RecordedRun, RunExecutionError, RunPersistenceError
 from .repository import AnalysisRepository
 from .selections import SelectionSpec
+from .study import StudyCell, StudyPersistenceError, StudyReport, run_study
 
 __all__ = [
     "AnalysisRepository",
@@ -43,5 +44,9 @@ __all__ = [
     "SelectionSpec",
     "Simulation",
     "SnapshotLoader",
+    "StudyCell",
+    "StudyPersistenceError",
+    "StudyReport",
     "Timestep",
+    "run_study",
 ]
