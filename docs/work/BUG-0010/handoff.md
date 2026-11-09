@@ -27,3 +27,9 @@
 - make test-all: 1107 passed, 1 skipped.
 - Status: review, not committed/published/merged. No schema migration or architectural expansion.
 - Next: human review and separately authorized Git publication. Later local items use the verified preceding diff; no claim that predecessors merged.
+
+## 2026-11-09 — scoped integration verification
+
+- User authorized commit, PR and merge. This increment was reconstructed in isolation after verified predecessors.
+- `make check`: 1103 passed, 1 skipped, 4 deselected in 35.12s; `make test-all`: 1107 passed, 1 skipped in 33.92s. Log: `/tmp/pynbody-publish-test-1.log`.
+- Independent complete-source review found no actionable findings; slice tests protect extraction boundaries. Publication/merge URL and final status are recorded after the remote operation is confirmed.

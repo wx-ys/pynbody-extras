@@ -204,3 +204,28 @@ def test_sql_store_reopen_preserves_scalar_dtypes_and_dictionary_keys(tmp_path):
             np.testing.assert_equal(actual[key], value)
     finally:
         reopened.engine.dispose()
+
+
+@pytest.mark.parametrize("shape", [(2,), (), (0, 2), (2, 0, 3)])
+def test_object_arrays_survive_sqlite_reopen(tmp_path, shape):
+    from pynbody.array import SimArray
+
+    from pynbodyext.core.calculate.store.sqlalchemy_store import SQLAlchemyResultStore
+
+    calc, sim, result = make_result()
+    value = np.empty(shape, dtype=object)
+    for index in range(value.size):
+        value.flat[index] = {"nested": (index, [1, 2])}
+    value = SimArray(value, units="Msol")
+    result.value = value
+    url = f"sqlite:///{tmp_path / 'objects.sqlite'}"
+    store = SQLAlchemyResultStore(url)
+    ref = store.store(result, sim_signature=("sim", "object-array"), calculator_signature=calculator_to_signature(calc))
+    store.engine.dispose()
+    reopened = SQLAlchemyResultStore(url)
+    restored = reopened.fetch(ref).value
+    assert restored.shape == value.shape
+    assert restored.dtype == value.dtype
+    assert restored.tolist() == value.tolist()
+    assert str(restored.units) == str(value.units)
+    reopened.engine.dispose()
