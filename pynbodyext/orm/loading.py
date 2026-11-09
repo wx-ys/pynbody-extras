@@ -21,11 +21,12 @@ SnapshotLoader = Callable[[str], SimSnap]
 
 @dataclass(frozen=True)
 class LoadedInput:
-    """A loaded root, selected metadata and the provider for calculator.run.
+    """A loaded root or explicitly replayed view and its calculator provider.
 
     ``sim_identity`` follows the existing view/transformation rules. Metadata
     objects are detached; immediate input hierarchy and locations are loaded.
     Keep the loader's interpretation equivalent when reusing its loader_id.
+    For load_selection, input names the view while location belongs to its root.
     """
 
     sim: SimSnap

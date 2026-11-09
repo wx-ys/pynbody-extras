@@ -101,6 +101,19 @@ class CatalogueObject(Base):
     subhalos: Mapped[list[CatalogueObject]] = relationship(back_populates="host")
 
 
+class Selection(Base):
+    __tablename__ = "pynbodyext_orm_selections"
+    __table_args__ = (CheckConstraint("expected_count >= 0"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    root_input_id: Mapped[int] = mapped_column(ForeignKey(DataObject.id, ondelete="RESTRICT"), index=True)
+    view_input_id: Mapped[int] = mapped_column(ForeignKey(DataObject.id, ondelete="RESTRICT"), index=True)
+    schema: Mapped[str] = mapped_column(Text)
+    definition_json: Mapped[str] = mapped_column(Text)
+    expected_count: Mapped[int] = mapped_column(Integer)
+    descriptor_key: Mapped[str] = mapped_column(String(64), unique=True)
+    root_input: Mapped[DataObject] = relationship(foreign_keys=[root_input_id])
+    view_input: Mapped[DataObject] = relationship(foreign_keys=[view_input_id])
 
 
 class Recipe(Base):
@@ -123,6 +136,7 @@ class Run(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     input_id: Mapped[int] = mapped_column(ForeignKey(DataObject.id, ondelete="RESTRICT"), index=True)
     input_location_id: Mapped[int | None] = mapped_column(ForeignKey(DataLocation.id, ondelete="RESTRICT"), index=True)
+    selection_id: Mapped[int | None] = mapped_column(ForeignKey(Selection.id, ondelete="RESTRICT"), index=True)
     recipe_hash: Mapped[str] = mapped_column(ForeignKey(Recipe.hash, ondelete="RESTRICT"), index=True)
     store_name: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(16), index=True)
@@ -134,6 +148,7 @@ class Run(Base):
     _execution_context_json: Mapped[str] = mapped_column("execution_context", Text)
     input: Mapped[DataObject] = relationship(back_populates="runs")
     input_location: Mapped[DataLocation | None] = relationship()
+    selection: Mapped[Selection | None] = relationship()
     recipe: Mapped[Recipe] = relationship(back_populates="runs")
     result_link: Mapped[ResultLink | None] = relationship(back_populates="run", uselist=False)
 
