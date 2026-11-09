@@ -14,11 +14,13 @@ from .models import (
     Recipe,
     ResultLink,
     Run,
+    Selection,
     Simulation,
     Timestep,
 )
 from .records import AssociationIssue, RecordedRun, RunExecutionError, RunPersistenceError
 from .repository import AnalysisRepository
+from .selections import SelectionSpec
 
 __all__ = [
     "AnalysisRepository",
@@ -35,6 +37,8 @@ __all__ = [
     "Run",
     "RunExecutionError",
     "RunPersistenceError",
+    "Selection",
+    "SelectionSpec",
     "Simulation",
     "SnapshotLoader",
     "Timestep",

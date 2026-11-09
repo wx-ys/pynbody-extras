@@ -37,10 +37,12 @@ from .models import (
     Recipe,
     ResultLink,
     Run,
+    Selection,
     Simulation,
     Timestep,
 )
 from .records import AssociationIssue, RecordedRun, RunExecutionError, RunPersistenceError
+from .selections import SELECTION_SCHEMA, SelectionSpec, descriptor_key
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -93,11 +95,23 @@ def _run_query() -> Any:
         joinedload(Run.input_location),
         joinedload(Run.recipe),
         joinedload(Run.result_link),
+        joinedload(Run.selection).options(*_selection_relations()),
     )
 
 
+def _selection_relations() -> tuple[Any, ...]:
+    return (
+        joinedload(Selection.root_input).joinedload(DataObject.timestep).joinedload(Timestep.simulation),
+        joinedload(Selection.root_input).joinedload(DataObject.parent),
+        joinedload(Selection.root_input).selectinload(DataObject.locations),
+        joinedload(Selection.view_input).joinedload(DataObject.timestep).joinedload(Timestep.simulation),
+        joinedload(Selection.view_input).joinedload(DataObject.parent),
+        joinedload(Selection.view_input).selectinload(DataObject.locations),
+    )
 
 
+def _selection_query() -> Any:
+    return select(Selection).options(*_selection_relations())
 
 
 def _catalogue_query() -> Any:
@@ -418,12 +432,179 @@ class AnalysisRepository:
                 self._validate_catalogue_object(data)
             return rows
 
+    @staticmethod
+    def _validate_selection(selection: Selection) -> SelectionSpec:
+        root = selection.root_input
+        view = selection.view_input
+        root_signature = AnalysisRepository._validate_input_metadata(root)
+        view_signature = AnalysisRepository._validate_input_metadata(view)
+        if (
+            root.kind != "snapshot"
+            or root.id != selection.root_input_id
+            or view.id != selection.view_input_id
+            or view.kind != "subset"
+            or view.parent_id != root.id
+            or sim_identity_key(view_signature[:7]) != sim_identity_key(root_signature)
+        ):
+            raise ValueError("selection root/view metadata is inconsistent")
+        if selection.schema != SELECTION_SCHEMA:
+            raise ValueError("unsupported selection schema")
+        spec = SelectionSpec.from_json(selection.definition_json)
+        if (
+            spec.to_json() != selection.definition_json
+            or descriptor_key(root.id, selection.expected_count, spec) != selection.descriptor_key
+        ):
+            raise ValueError("selection descriptor conflicts with its definition or root particle count")
+        return spec
 
+    def get_selection(self, selection_id: int) -> Selection:
+        """Return a validated detached definition with root/view hierarchy loaded."""
+        with self.session() as session:
+            selection = session.scalar(_selection_query().where(Selection.id == selection_id))
+            if selection is None:
+                raise KeyError(f"unknown selection {selection_id!r}")
+            self._validate_selection(selection)
+            return selection
 
+    def _validate_loaded_root(self, loaded: LoadedInput) -> DataObject:
+        from pynbody.snapshot import SimSnap
 
+        from pynbodyext.core.calculate.runtime.logical_identity import ConfiguredSnapshotIdentity
 
+        if not isinstance(loaded, LoadedInput):
+            raise TypeError("selection registration requires a LoadedInput root")
+        root = self.get_input(loaded.input.id)
+        signature = self._validate_input_metadata(root)
+        supplied = self._validate_input_metadata(loaded.input)
+        if root.kind != "snapshot" or sim_identity_key(supplied) != sim_identity_key(signature):
+            raise ValueError("selection requires matching registered root metadata")
+        location = next((item for item in root.locations if item.id == loaded.location.id), None)
+        if location is None or loaded.location.data_object_id != root.id or location.uri != loaded.location.uri:
+            raise ValueError("selection loaded location does not belong to registered root")
+        validate_local_location(location.uri)
+        sim = loaded.sim
+        if not isinstance(sim, SimSnap) or sim.ancestor is not sim:
+            raise ValueError("selection registration requires a root snapshot, not a view")
+        validate_local_location(os.fspath(sim.filename))
+        if (
+            not isinstance(loaded.sim_identity, ConfiguredSnapshotIdentity)
+            or getattr(sim, "_transformations", None)
+            or sim_identity_key(loaded.sim_identity(sim)) != sim_identity_key(signature)
+        ):
+            raise ValueError("selection root has an external transformation or mismatched provider identity")
+        return root
 
+    def register_selection(self, loaded_root: LoadedInput, spec: SelectionSpec) -> Selection:
+        """Materialize once, then atomically register the definition and view.
 
+        expected_count is derived from this untransformed root. Multiple
+        definitions can share a DataObject without overwriting one another.
+        """
+        root = self._validate_loaded_root(loaded_root)
+        if not isinstance(spec, SelectionSpec):
+            raise TypeError("selection requires a SelectionSpec")
+        expected_count = len(loaded_root.sim)
+        view_sim = spec.materialize(loaded_root)
+        self._validate_loaded_root(loaded_root)
+        signature, _, kind = _logical_input(loaded_root.sim_identity(view_sim))
+        if kind != "subset" or sim_identity_key(signature[:7]) != root.identity_key:
+            raise ValueError("materialized selection has an invalid view identity")
+        key = descriptor_key(root.id, expected_count, spec)
+        with self.session() as session, session.begin():
+            fresh_root = session.get(DataObject, root.id)
+            if fresh_root is None or self._validate_input_metadata(fresh_root) != root.signature:
+                raise ValueError("selection root changed during registration")
+            location = session.get(DataLocation, loaded_root.location.id)
+            if location is None or location.data_object_id != root.id or location.uri != loaded_root.location.uri:
+                raise ValueError("selection root location changed during registration")
+            view = self._input_row(session, fresh_root.timestep, signature, kind, fresh_root)
+            selection = session.scalar(select(Selection).where(Selection.descriptor_key == key))
+            if selection is None:
+                selection = Selection(
+                    root_input=fresh_root,
+                    view_input=view,
+                    schema=SELECTION_SCHEMA,
+                    definition_json=spec.to_json(),
+                    expected_count=expected_count,
+                    descriptor_key=key,
+                )
+                session.add(selection)
+                session.flush()
+            else:
+                self._validate_selection(selection)
+                if (
+                    selection.view_input_id != view.id
+                    or selection.root_input_id != root.id
+                    or selection.expected_count != expected_count
+                    or selection.definition_json != spec.to_json()
+                ):
+                    raise ValueError("existing selection descriptor conflicts with materialized view")
+            selection_id = selection.id
+        return self.get_selection(selection_id)
+
+    @staticmethod
+    def _replay_selection(selection: Selection, spec: SelectionSpec, loaded: LoadedInput) -> LoadedInput:
+        if sim_identity_key(loaded.sim_identity(loaded.sim)) != selection.root_input.identity_key:
+            raise ValueError("loaded root identity/revision conflicts with selection")
+        if len(loaded.sim) != selection.expected_count:
+            raise ValueError("loaded root particle count differs from selection expected_count")
+        view = spec.materialize(loaded)
+        if (
+            sim_identity_key(loaded.sim_identity(loaded.sim)) != selection.root_input.identity_key
+            or sim_identity_key(loaded.sim_identity(view)) != selection.view_input.identity_key
+        ):
+            raise ValueError("materialized selection identity/digest differs from registered view")
+        return LoadedInput(view, selection.view_input, loaded.location, loaded.sim_identity)
+
+    def load_selection(self, selection_id: int, *, location_id: int | None = None) -> LoadedInput:
+        """Load the selected root location and replay one validated definition.
+
+        Count and index digest cannot detect arbitrary same-count data edits;
+        callers maintain revisions or explicitly refresh affected calculations.
+        """
+        selection = self.get_selection(selection_id)
+        spec = self._validate_selection(selection)
+        request = self._prepare_load(selection.root_input_id, location_id)
+        return self._replay_selection(selection, spec, load_snapshot(*request))
+
+    def run_selection(
+        self,
+        calculator: CalculatorBase,
+        selection_id: int,
+        *,
+        store_name: str,
+        location_id: int | None = None,
+        reuse: bool = True,
+        options: RunOptions | None = None,
+        execution_metadata: Mapping[str, Any] | None = None,
+    ) -> RecordedRun:
+        """Commit a view Run before root loading/replay, then use the existing DAG.
+
+        Selected URI is the root source; input and pinned receipt identify the
+        view. Replay also runs before cache reuse. Errors follow run_input.
+        """
+        metadata = validate_execution_metadata(execution_metadata)
+        backend = self._store(store_name)
+        selection = self.get_selection(selection_id)
+        spec = self._validate_selection(selection)
+        request = self._prepare_load(selection.root_input_id, location_id)
+        recipe = self.register_recipe(calculator.to_signature())
+        run = self.begin_run(
+            selection.view_input_id,
+            recipe.hash,
+            store_name=store_name,
+            input_location_id=request[1].id,
+            selection_id=selection.id,
+            execution_metadata=metadata,
+        )
+
+        def execute() -> Result:
+            loaded = self._replay_selection(selection, spec, load_snapshot(*request))
+            return calculator.run(
+                loaded.sim, store=backend, sim_identity=loaded.sim_identity, reuse=reuse, options=options
+            )
+
+        return self._execute_run(run, execute)
 
     def _prepare_load(
         self, input_id: int, location_id: int | None
@@ -498,6 +679,7 @@ class AnalysisRepository:
         *,
         store_name: str,
         input_location_id: int | None = None,
+        selection_id: int | None = None,
         execution_metadata: Mapping[str, Any] | None = None,
     ) -> Run:
         """Commit running and its context before work starts.
@@ -513,11 +695,19 @@ class AnalysisRepository:
             if data is None or session.get(Recipe, recipe_hash) is None:
                 raise KeyError("input and recipe must be registered before beginning a run")
             location_owner = input_id
+            if selection_id is not None:
+                selection = session.get(Selection, selection_id)
+                if selection is None:
+                    raise KeyError(f"unknown selection {selection_id!r}")
+                self._validate_selection(selection)
+                if selection.view_input_id != input_id:
+                    raise ValueError("selection does not match run input")
+                location_owner = selection.root_input_id
             location = None
             if input_location_id is not None:
                 location = session.get(DataLocation, input_location_id)
                 if location is None or location.data_object_id != location_owner:
-                    raise ValueError("selected location does not belong to input")
+                    raise ValueError("selected location does not belong to input or selection root")
             _, logical, _ = _logical_input(data.signature)
             context = execution_context_json(
                 metadata,
@@ -530,6 +720,7 @@ class AnalysisRepository:
                     id=run_id,
                     input_id=input_id,
                     input_location_id=input_location_id,
+                    selection_id=selection_id,
                     recipe_hash=recipe_hash,
                     store_name=store_name,
                     status="running",
@@ -594,6 +785,12 @@ class AnalysisRepository:
     def _validate_run_metadata(run: Run) -> tuple[Any, ...]:
         signature = AnalysisRepository._validate_input_metadata(run.input)
         location_owner = run.input_id
+        if run.selection_id is not None:
+            selection = run.selection
+            if selection is None or selection.id != run.selection_id or selection.view_input_id != run.input_id:
+                raise ValueError("stored run selection conflicts with its input")
+            AnalysisRepository._validate_selection(selection)
+            location_owner = selection.root_input_id
         if run.input_location_id is not None:
             location = run.input_location
             if location is None or location.data_object_id != location_owner:

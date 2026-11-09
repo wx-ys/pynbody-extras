@@ -604,3 +604,16 @@ object a caller normally holds.
   agree. Only subhalos may have a host, which must be a halo in the same catalogue;
   an unknown host can remain None. Physical hosts do not change `DataObject.parent`
   or existing snapshot-view/provider signatures and do not imply loadable objects.
+- **Selection / SelectionSpec** — a versioned root-relative replay definition
+  (`indices`, named `family`, or stable constructible FilterBase signature), kept
+  separately from its materialized view DataObject. Registration requires a
+  validated untransformed LoadedInput root and materializes once; expected_count
+  records the ROOT particle count. Canonical descriptors distinguish definitions
+  even when they select the same view. Indices are strict built-in integer lists,
+  ordered and duplicate-preserving within root family-block ordering; cross-block
+  reordering/interleaving raises ValueError without sorting. For a dm=2/star=2
+  root, `[1,0,1,3,2,3]` is preserved, while `[3,1,3,0]` is rejected. This approved
+  limit follows pynbody's contiguous-family views. Bounds and family presence are explicit.
+  Filters run through the existing DAG in original coordinates without persistent
+  mask caching; scoped transforms are rejected and root identity is checked again
+  after evaluation. See ADR-016.
