@@ -51,3 +51,9 @@
 - Parent reported alias-corrected specification and quality re-reviews both passed; targeted reviewer verification: **10 passed, 55 deselected**. Parent independently verified final focused229/check1575+2skip+5deselected/all1580+2skip logs. No source/test changes or broad reruns followed this confirmation.
 - Both locales record final review results and completed documentation work. Metadata remains status=review; generated index is refreshed from current metadata and final docs-check remains passing. No commit/PR/remote merge is claimed.
 - Parent is proceeding to FEAT-0012. This subtask did not start FEAT-0012 or perform Git/subagent/remote actions; shared dirty state is preserved.
+
+## 2026-11-09 — scoped integration verification
+
+- User authorized commit, PR and merge. This increment was reconstructed in isolation after verified predecessors.
+- `make check`: 1577 passed, 2 skipped, 5 deselected in 55.11s; `make test-all`: 1582 passed, 2 skipped in 54.59s. Log: `/tmp/pynbody-publish-test-10.log`.
+- Independent complete-source review found no actionable findings; slice tests protect extraction boundaries. Publication/merge URL and final status are recorded after the remote operation is confirmed.
