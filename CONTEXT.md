@@ -617,3 +617,55 @@ object a caller normally holds.
   Filters run through the existing DAG in original coordinates without persistent
   mask caching; scoped transforms are rejected and root identity is checked again
   after evaluation. See ADR-016.
+
+### Root-input job manifests
+
+**JobSpec** (`orm/jobs.py`) is a frozen root recipe/address with strict schema
+`pynbodyext.orm.job/v1` and exactly six JSON fields: `schema`,
+`calculator_signature_text`, `input_id`, nullable `location_id`, `store_name`,
+and `reuse`. IDs are positive built-in integers (never bool); store_name is a
+nonempty built-in string and reuse is a built-in bool. IDs belong to the explicitly
+supplied metadata repository; this format does not migrate IDs between databases.
+
+```python
+from pynbodyext.orm import JobSpec
+from pynbodyext.properties import ParamSum  # explicit import registers the type
+
+job = JobSpec.from_calculator(ParamSum("mass"), data.id, store_name="results")
+manifest = job.to_json()
+# In another process, reopen the same metadata repository and bind loaders/stores:
+replayed = JobSpec.from_json(manifest).execute(repo)
+```
+
+Construction/`from_json` rejects unknown/missing/duplicate fields, unsupported
+schemas, invalid built-in types and unstable/nonconstructible recipes. Before any
+calculator constructor, the whole nested signature is checked against explicit
+registered names/aliases; enum parameters require already-loaded Enum classes.
+Recorded calculator versions must match their registered classes before any
+constructor runs. Rebuilt recipe identity must match after normalizing registered
+aliases and numerical equivalence; parameter drift fails before loading a snapshot.
+An explicit alias is sufficient even when its class has no `signature_name`:
+rebuilt canonical names are recognized only through a job-local mapping of the
+already-vetted types, without registering those names globally. Incoming canonical
+class paths still require explicit registration.
+Project code must import/register required calculators first. A class-path-only
+custom calculator is excluded even when importable. General signature decoding's
+import fallback is unchanged; the job boundary never imports a manifest-selected
+application module. General signature version warnings remain unchanged outside
+JobSpec. Registered constructors and `from_signature_payload` are
+trusted project code, so this is not a sandbox for hostile registered plugins.
+
+Only default RunOptions are accepted across the graph, checked before signature
+conversion can discard live options and again after reconstruction. The manifest
+contains no loader/store objects, credentials, backend URL, callable, live snapshot
+or executable pickle; scientific parameter strings are retained without secret
+redaction. `execute(repo)` rechecks type availability and root-only input, then
+delegates to `repo.run_input`. Missing bindings or invalid input/location fail
+before loader IO, calculation or Run creation. Selections/views remain excluded
+from v1, including those supported by the separate `run_selection` API.
+
+The existing runner owns subsequent lifecycle/errors. Each execution creates a
+new Run, even on a cache hit with the same pinned ref; `reuse=False` saves a new
+version while prior references retain historical values. Loader/calculation/store
+and metadata failures retain RunExecutionError/RunPersistenceError receipts and
+explicit recovery. No new executor, automatic binding or migration (ADR-017).
