@@ -1,0 +1,22 @@
+{
+  "id": "FEAT-0012",
+  "type": "feature",
+  "status": "review",
+  "title_en": "Record a serial study over registered inputs and calculators",
+  "title_zh": "记录登记输入与计算器的串行批量研究",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-09",
+  "updated": "2026-11-09",
+  "completed": null,
+  "resolution": null,
+  "pr": null,
+  "related": [
+    "FEAT-0005",
+    "FEAT-0006"
+  ],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

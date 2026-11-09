@@ -1,0 +1,23 @@
+{
+  "id": "FEAT-0005",
+  "type": "feature",
+  "status": "review",
+  "title_en": "Pin SampleTable cell provenance to saved result versions",
+  "title_zh": "将 SampleTable 单元格来源固定到保存版本",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-09",
+  "updated": "2026-11-09",
+  "completed": null,
+  "resolution": null,
+  "pr": null,
+  "related": [
+    "BUG-0010",
+    "BUG-0011",
+    "BUG-0012"
+  ],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

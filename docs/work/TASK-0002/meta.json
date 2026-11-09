@@ -1,0 +1,21 @@
+{
+  "id": "TASK-0002",
+  "type": "task",
+  "status": "review",
+  "title_en": "Implement and verify the approved installation matrix",
+  "title_zh": "实施并验证批准后的安装矩阵",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-09",
+  "updated": "2026-11-09",
+  "completed": null,
+  "resolution": null,
+  "pr": null,
+  "related": [
+    "SPIKE-0001"
+  ],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

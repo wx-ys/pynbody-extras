@@ -1,0 +1,21 @@
+{
+  "id": "BUG-0011",
+  "type": "bug",
+  "status": "review",
+  "title_en": "Round-trip structured NumPy arrays without dtype string parsing",
+  "title_zh": "结构化 NumPy 数组无损往返，避免解析 dtype 展示字符串",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-09",
+  "updated": "2026-11-09",
+  "completed": null,
+  "resolution": null,
+  "pr": null,
+  "related": [
+    "BUG-0010"
+  ],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

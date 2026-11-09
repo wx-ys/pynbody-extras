@@ -1,0 +1,19 @@
+{
+  "id": "FEAT-0006",
+  "type": "feature",
+  "status": "review",
+  "title_en": "Snapshot execution environment and selected input facts on Run",
+  "title_zh": "为 Run 保存执行环境和选中输入事实快照",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-09",
+  "updated": "2026-11-09",
+  "completed": null,
+  "resolution": null,
+  "pr": null,
+  "related": [],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

@@ -6,6 +6,9 @@ This directory is the shared record for work that crosses devices, sessions, or
 agents. A new contributor should be able to pick up a task without reading a
 chat log.
 
+For the current implementation review, revised V1 design and sequential agent
+tasks, start with [Design entry point](design/README.md).
+
 ## Three records per work item
 
 | Record | File | Purpose |
