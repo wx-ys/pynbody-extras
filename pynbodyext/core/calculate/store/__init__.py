@@ -31,11 +31,14 @@ from .base import (
 )
 from .catalog import CatalogEntry, SignatureCatalog
 from .codec import ValueCodec
+from .external import ExternalFileInspection, ExternalFileRef
 from .sqlalchemy_store import SQLAlchemyResultStore
 
 __all__ = [
     "RESULT_STORE_SCHEMA",
     "ValueCodec",
+    "ExternalFileRef",
+    "ExternalFileInspection",
     "RecordRef",
     "ResultRecord",
     "ResultStore",

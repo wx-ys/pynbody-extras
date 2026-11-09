@@ -562,3 +562,20 @@ object a caller normally holds.
   exposure (bigger = deeper; variance `(data + background) / exposure`). Both are
   seeded (`rng=`), leave non-finite pixels alone, honour a mask, and record what
   they did in `.ops`.
+
+## Newly implemented contracts
+
+- **`ExternalFileRef`** (`store/external.py`, exported by `core.calculate.store`)
+  — frozen descriptor of a caller-owned absolute local path or file URI (empty or
+  localhost authority), nonempty `media_type`, nullable nonnegative integer
+  `size_bytes` and lowercase 64-hex `sha256`. Strict descriptor JSON uses
+  `pynbodyext.result.external-file-ref/v1`; ValueCodec uses `external_file_ref_v1`.
+  Construction/JSON/codec operations never access the file, and ordinary strings
+  remain strings. Explicit `inspect(verify_checksum=False)` returns a frozen
+  `ExternalFileInspection(status, reason, checksum_verified)`; statuses are
+  available/missing/changed, access errors propagate, and SHA256 reads occur only
+  when requested with a supplied digest. Available without a verified checksum
+  does not establish content equality or readability. ResultStore versions pin
+  descriptors only: fetching an old version cannot restore overwritten external
+  bytes. Callers maintain distinct/versioned paths for reproducible history; no
+  automatic copy/delete/externalization is provided. See ADR-013.
