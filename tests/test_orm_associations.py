@@ -283,7 +283,7 @@ def test_metadata_tables_have_no_payload_columns(environment):
     repo = repository(environment)
     inspector = sa.inspect(repo.engine)
     tables = inspector.get_table_names()
-    assert len(tables) == 7
+    assert len(tables) == 9
     assert not any(
         column["name"] in {"value", "named", "record_json", "payload"}
         for table in tables

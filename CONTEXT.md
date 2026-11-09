@@ -316,8 +316,7 @@ for intentional ORM writes. SQLite foreign keys/unique constraints are enforced.
 The repository does not scan all external store data or promise concurrency retries;
 concurrent registration may raise a uniqueness conflict. SQLite is tested; other
 SQL dialects need validation; conditional UPDATE RETURNING needs SQLite 3.35+.
-Catalogues, complete particle-container hierarchy,
-RunStep and MergerTree models remain later increments.
+Complete particle-container hierarchy, RunStep and MergerTree models remain later increments.
 
 ### Loading registered inputs
 
@@ -594,3 +593,14 @@ object a caller normally holds.
   existing cascading revert semantics, and cleanup failures are logged while
   preserving the original exception. Transform/filter application failures before
   entering the adapter and generic property success cleanup are outside this path.
+- **Catalogue** — scientific catalogue metadata for a validated snapshot root.
+  Its canonical typed identity includes that root's logical signature plus
+  `catalogue_id`, `finder`, optional `revision` and `loader_id`; None revision is
+  a real identity component, independent of the root data revision. Registration
+  requires no loader binding or location and performs no snapshot/payload IO.
+- **CatalogueObject** — halo/subhalo metadata unique by catalogue, kind and
+  `typed_object_key`. Built-in string/int/bool/finite float keys use
+  `sim_identity_key`: `1`, `"1"`, `True` and `1.0` differ; signed floating zeros
+  agree. Only subhalos may have a host, which must be a halo in the same catalogue;
+  an unknown host can remain None. Physical hosts do not change `DataObject.parent`
+  or existing snapshot-view/provider signatures and do not imply loadable objects.

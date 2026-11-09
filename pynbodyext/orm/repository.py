@@ -16,7 +16,7 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import create_engine, event, select, update
+from sqlalchemy import and_, create_engine, event, or_, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, joinedload, selectinload, sessionmaker
 
@@ -25,10 +25,13 @@ from pynbodyext.core.calculate.runtime.logical_identity import LogicalSnapshotId
 from pynbodyext.core.calculate.store import RESULT_STORE_SCHEMA, RecordRef, ResultStore
 from pynbodyext.core.calculate.store.identity import sim_identity_key
 
+from .catalogues import CatalogueObjectKey, catalogue_identity_key, typed_object_key, validate_kind
 from .environment import execution_context_json, validate_execution_metadata
 from .loading import LoadedInput, SnapshotLoader, load_snapshot, validate_local_location
 from .models import (
     Base,
+    Catalogue,
+    CatalogueObject,
     DataLocation,
     DataObject,
     Recipe,
@@ -97,8 +100,22 @@ def _run_query() -> Any:
 
 
 
+def _catalogue_query() -> Any:
+    return select(Catalogue).options(
+        joinedload(Catalogue.root_input).joinedload(DataObject.timestep).joinedload(Timestep.simulation),
+        joinedload(Catalogue.root_input).joinedload(DataObject.parent),
+    )
 
 
+def _catalogue_object_query() -> Any:
+    return select(CatalogueObject).options(
+        joinedload(CatalogueObject.catalogue)
+        .joinedload(Catalogue.root_input)
+        .joinedload(DataObject.timestep)
+        .joinedload(Timestep.simulation),
+        joinedload(CatalogueObject.catalogue).joinedload(Catalogue.root_input).joinedload(DataObject.parent),
+        joinedload(CatalogueObject.host),
+    )
 
 
 class AnalysisRepository:
@@ -235,13 +252,171 @@ class AnalysisRepository:
                 raise KeyError(f"unknown input {input_id!r}")
             return data
 
+    @staticmethod
+    def _validate_catalogue(catalogue: Catalogue) -> None:
+        root = catalogue.root_input
+        signature = AnalysisRepository._validate_input_metadata(root)
+        if root.kind != "snapshot":
+            raise ValueError("catalogue root must be a registered root snapshot")
+        key = catalogue_identity_key(
+            signature, catalogue.catalogue_id, catalogue.finder, catalogue.revision, catalogue.loader_id
+        )
+        if catalogue.identity_key != key:
+            raise ValueError("stored catalogue metadata conflicts with its identity")
 
+    @staticmethod
+    def _validate_catalogue_object(data: CatalogueObject) -> None:
+        AnalysisRepository._validate_catalogue(data.catalogue)
+        validate_kind(data.kind)
+        if data.host_id is not None:
+            host = data.host
+            if data.kind != "subhalo" or host is None or host.kind != "halo" or host.catalogue_fk != data.catalogue_fk:
+                raise ValueError("subhalo host must be a halo in the same catalogue")
 
+    def register_catalogue(
+        self,
+        root_input_id: int,
+        catalogue_id: str,
+        *,
+        finder: str,
+        revision: str | None = None,
+        loader_id: str = "default",
+    ) -> Catalogue:
+        """Idempotently register metadata for a validated root, without loading it.
 
+        Scientific identity includes the root logical signature and all labels.
+        An absent revision is part of this identity, not a SQL wildcard.
+        """
+        with self.session() as session, session.begin():
+            root = session.get(DataObject, root_input_id)
+            if root is None:
+                raise KeyError(f"unknown input {root_input_id!r}")
+            signature = self._validate_input_metadata(root)
+            if root.kind != "snapshot":
+                raise ValueError("catalogue root must be a registered root snapshot")
+            key = catalogue_identity_key(signature, catalogue_id, finder, revision, loader_id)
+            data = session.scalar(
+                _catalogue_query().where(
+                    or_(
+                        Catalogue.identity_key == key,
+                        and_(
+                            Catalogue.root_input_id == root_input_id,
+                            Catalogue.catalogue_id == catalogue_id,
+                            Catalogue.finder == finder,
+                            Catalogue.revision == revision,
+                            Catalogue.loader_id == loader_id,
+                        ),
+                    )
+                )
+            )
+            if data is None:
+                data = Catalogue(
+                    root_input=root,
+                    identity_key=key,
+                    catalogue_id=catalogue_id,
+                    finder=finder,
+                    revision=revision,
+                    loader_id=loader_id,
+                )
+                session.add(data)
+                session.flush()
+            else:
+                self._validate_catalogue(data)
+                if data.root_input_id != root_input_id:
+                    raise ValueError("stored catalogue root conflicts with its identity")
+            catalogue_pk = data.id
+        return self.get_catalogue(catalogue_pk)
 
+    def get_catalogue(self, catalogue_pk: int) -> Catalogue:
+        """Return detached metadata with root, parent and timestep/simulation loaded."""
+        with self.session() as session:
+            data = session.scalar(_catalogue_query().where(Catalogue.id == catalogue_pk))
+            if data is None:
+                raise KeyError(f"unknown catalogue {catalogue_pk!r}")
+            self._validate_catalogue(data)
+            return data
 
+    def catalogues(self, root_input_id: int) -> list[Catalogue]:
+        """List catalogues for a root by primary key, with get_catalogue relations."""
+        with self.session() as session:
+            rows = list(
+                session.scalars(
+                    _catalogue_query().where(Catalogue.root_input_id == root_input_id).order_by(Catalogue.id)
+                )
+            )
+            for data in rows:
+                self._validate_catalogue(data)
+            return rows
 
+    def register_catalogue_object(
+        self, catalogue_pk: int, object_key: CatalogueObjectKey, *, kind: str = "halo", host_id: int | None = None
+    ) -> CatalogueObject:
+        """Register a typed object key; conflicting host metadata never reparents.
 
+        Only subhalos can have hosts, and a supplied host must be a halo in the
+        same catalogue. A subhalo without a known host is valid.
+        """
+        validate_kind(kind)
+        key = typed_object_key(object_key)
+        with self.session() as session, session.begin():
+            catalogue = session.scalar(_catalogue_query().where(Catalogue.id == catalogue_pk))
+            if catalogue is None:
+                raise KeyError(f"unknown catalogue {catalogue_pk!r}")
+            self._validate_catalogue(catalogue)
+            if host_id is not None:
+                host = session.get(CatalogueObject, host_id)
+                if host is None:
+                    raise KeyError(f"unknown catalogue host {host_id!r}")
+                if kind != "subhalo" or host.kind != "halo" or host.catalogue_fk != catalogue_pk:
+                    raise ValueError("subhalo host must be a halo in the same catalogue")
+            data = session.scalar(
+                _catalogue_object_query().where(
+                    CatalogueObject.catalogue_fk == catalogue_pk,
+                    CatalogueObject.kind == kind,
+                    CatalogueObject.typed_object_key == key,
+                )
+            )
+            if data is None:
+                data = CatalogueObject(catalogue_fk=catalogue_pk, kind=kind, typed_object_key=key, host_id=host_id)
+                session.add(data)
+                session.flush()
+            else:
+                self._validate_catalogue_object(data)
+                if data.host_id != host_id:
+                    raise ValueError("stored catalogue object conflicts with requested host")
+            object_pk = data.id
+        return self.get_catalogue_object(object_pk)
+
+    def get_catalogue_object(self, object_pk: int) -> CatalogueObject:
+        """Return detached object with catalogue/root hierarchy and scalar host loaded."""
+        with self.session() as session:
+            data = session.scalar(_catalogue_object_query().where(CatalogueObject.id == object_pk))
+            if data is None:
+                raise KeyError(f"unknown catalogue object {object_pk!r}")
+            self._validate_catalogue_object(data)
+            return data
+
+    def catalogue_objects(
+        self, catalogue_pk: int, *, kind: str | None = None, host_id: int | None = None
+    ) -> list[CatalogueObject]:
+        """List objects by primary key; None omits a kind/host filter.
+
+        Immediate relations match get_catalogue_object; collection navigation and
+        unhosted-only queries use a caller-owned session.
+        """
+        stmt = (
+            _catalogue_object_query().where(CatalogueObject.catalogue_fk == catalogue_pk).order_by(CatalogueObject.id)
+        )
+        if kind is not None:
+            validate_kind(kind)
+            stmt = stmt.where(CatalogueObject.kind == kind)
+        if host_id is not None:
+            stmt = stmt.where(CatalogueObject.host_id == host_id)
+        with self.session() as session:
+            rows = list(session.scalars(stmt))
+            for data in rows:
+                self._validate_catalogue_object(data)
+            return rows
 
 
 
