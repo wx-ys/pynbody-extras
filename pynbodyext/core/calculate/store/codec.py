@@ -12,10 +12,11 @@ elements, and structured arrays use NPY with pickle disabled. Sim arrays also
 carry their units string. Structured object fields, dtype metadata and layouts
 that NPY cannot represent losslessly are rejected during encoding. Other values
 that are not natively representable fall back to a pickled opaque blob, keeping
-common cases portable and diff-friendly.
+common cases portable and diff-friendly. ExternalFileRef has an explicit
+versioned descriptor tag; encoding, decoding and hashing it never inspect files.
 
-The codec depends on ``numpy`` (and a lazy import of
-``pynbody.array.SimArray``), never on calculators or store adapters.
+The codec depends on ``numpy``, the stdlib-only external-file value type (and a
+lazy import of ``pynbody.array.SimArray``), never on calculators or store adapters.
 """
 
 from __future__ import annotations
@@ -30,6 +31,8 @@ import pickle
 from typing import Any
 
 import numpy as np
+
+from .external import ExternalFileRef
 
 __all__ = ["ValueCodec"]
 
@@ -132,7 +135,7 @@ class ValueCodec:
         return self._decode(data)
 
     def content_hash(self, value: Any) -> str:
-        """Return a stable content fingerprint for the encoded value."""
+        """Hash the encoded value; external-file hashes describe descriptors only."""
         return hashlib.sha256(_canonical_payload(self.encode(value)).encode("utf-8")).hexdigest()
 
     def size_bytes(self, value: Any) -> int:
@@ -178,6 +181,9 @@ class ValueCodec:
 
         if isinstance(value, dict):
             return {"__kind": "dict", "items": self._encode_dict(value)}
+
+        if isinstance(value, ExternalFileRef):
+            return {"__kind": "external_file_ref_v1", "descriptor": value._to_payload()}
 
         return self._encode_opaque(value)
 
@@ -327,6 +333,10 @@ class ValueCodec:
             return self._decode_structured_array(data)
         if kind == "array_objects":
             return np.array([self._decode(v) for v in data["items"]], dtype=object)
+        if kind == "external_file_ref_v1":
+            if set(data) != {"__kind", "descriptor"}:
+                raise ValueError("invalid external-file reference envelope fields")
+            return ExternalFileRef._from_payload(data["descriptor"])
         if kind == "opaque":
             return pickle.loads(_unb64(data["pickle_b64"]))
         if kind == "unencoded":
