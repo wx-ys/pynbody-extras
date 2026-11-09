@@ -221,6 +221,78 @@ assert original.store_ref == first.store_ref
 assert refreshed.store_ref != first.store_ref
 ```
 
+## ORM associations (`pynbodyext.orm`)
+
+An explicitly imported layer above `calculate`, with SQLAlchemy 2 models and an
+`AnalysisRepository`. Importing/running pure calculators does not import this
+package or require SQLAlchemy. For now use the existing `store` extra; the planned
+full/lightweight distribution split is a separate packaging decision (ADR-005).
+
+- **Simulation / Timestep** — logical project/simulation and timestep hierarchy.
+  `Simulation.logical_id` is the provider's simulation_id;
+  `Timestep.logical_id` is its timestep_id. Database PKs do not replace these IDs.
+- **DataObject** — exact configured logical root/view identity, including optional
+  revision, loader and any halo/subset suffix. Views link to their root input.
+  Only logical identities are accepted; path/session fallback is not promoted.
+- **DataLocation** — root input URI metadata. Aliases and historical reuse of a
+  location by different revisions are allowed; no file loading or fingerprinting.
+- **Recipe** — the existing stable CalculatorSignature hash and JSON DAG. ORM
+  records the recipe; it does not implement a second graph or execution engine.
+- **Run** — one invocation, with input/recipe FKs, named result backend, wall-clock
+  start/end, status (`running`, `succeeded`, `failed`), error details and nullable
+  `reused`. Cache hits also get separate Run records. Failed is terminal; retry
+  means a new Run. Manual recovery may leave reuse unknown.
+- **ResultLink** — one root output's pinned RecordRef JSON and result-store schema,
+  associated with a Run. The backend name lives on Run. Arrays/named pipeline
+  outputs remain in ResultStore; no payload copies in ORM.
+
+```python
+from pynbodyext.orm import AnalysisRepository
+from pynbodyext.core.calculate.store import SQLAlchemyResultStore
+
+payloads = SQLAlchemyResultStore("sqlite:///payloads.sqlite")
+repo = AnalysisRepository("sqlite:///metadata.sqlite", stores={"results": payloads})
+recorded = repo.run(calc, sim, sim_identity=identity, store_name="results")
+run_id = recorded.run.id
+stored = repo.fetch_result(run_id)  # exact saved version, even after refresh
+assert stored.store_ref == recorded.result.store_ref
+```
+
+`sim_identity` is the configured logical provider from the example above. Metadata
+and payload commits are separate, even with a shared database URL: commit running,
+execute/save/reuse, then commit status and result link together. Raised execution
+or store errors are wrapped in `RunExecutionError` with run_id and original cause;
+collected calculator errors return a failed RecordedRun and its Result. Metadata
+finalization errors raise `RunPersistenceError` with run_id, result_ref and result
+when available. A running record remains inspectable; a commit whose outcome is
+uncertain must be checked before recovery.
+
+After fixing the metadata failure, explicitly validate/attach the known receipt:
+
+```python
+issues = repo.audit()  # does not decode scientific payload values
+candidates = repo.unlinked_versions(run_id)  # candidates, never automatic choices
+recovered = repo.finish_run(run_id, known_ref)  # caller explicitly selects a receipt
+```
+
+`finish_run` checks input hierarchy, recipe, backend and pinned version; its status
+transition and link insertion are atomic. Same-reference completion is idempotent;
+conflicting terminal transitions fail. Unlinked means unreferenced by this metadata
+repository under that store name, not globally orphaned or safe to delete. Audit
+reports unfinished/missing/invalid associations; neither operation mutates payloads.
+No automatic retry, attachment, GC or distributed exactly-once promise (ADR-009).
+
+`get_run` / `runs(input_id=..., recipe_hash=..., status=...)` load the immediate
+input→timestep→simulation, recipe and result-link chain before closing their session.
+For collection navigation/joins use `with repo.session() as session:` with the
+exported mapped classes and ordinary SQLAlchemy `select`. Use an explicit transaction
+for intentional ORM writes. SQLite foreign keys/unique constraints are enforced.
+The repository does not scan all external store data or promise concurrency retries;
+concurrent registration may raise a uniqueness conflict. SQLite is tested; other
+SQL dialects need validation; conditional UPDATE RETURNING needs SQLite 3.35+.
+Catalogues, complete particle-container hierarchy,
+RunStep and MergerTree models remain later increments.
+
 ## Architecture invariants (each one is a test)
 
 These are the rules a change has to keep, and the test that says so.  When a rule

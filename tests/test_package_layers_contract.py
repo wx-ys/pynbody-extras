@@ -7,7 +7,7 @@ for the whole repository.
 
 The order, lowest first::
 
-    log  <  root  <  util  <  plot  <  gravity  <  core  <  calculate  <  filters  <  properties  <  transforms
+    log  <  root  <  util  <  plot  <  gravity  <  core  <  calculate  <  orm  <  filters  <  properties  <  transforms
 
 Notes a reader will want:
 
@@ -48,6 +48,7 @@ _ORDER = (
     "gravity",
     "core",
     "calculate",
+    "orm",  # ADR-009: associations depend on calculators; core never imports ORM
     "filters",
     "properties",
     "transforms",
@@ -70,6 +71,7 @@ _LAYERS: dict[str, str] = {
     "pynbodyext.core": "core",
     "pynbodyext.core.calculate": "core",
     "pynbodyext.calculate": "calculate",
+    "pynbodyext.orm": "orm",
     "pynbodyext.filters": "filters",
     "pynbodyext.properties": "properties",
     "pynbodyext.transforms": "transforms",
