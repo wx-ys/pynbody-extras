@@ -65,8 +65,40 @@ class DataLocation(Base):
     data_object: Mapped[DataObject] = relationship(back_populates="locations")
 
 
+class Catalogue(Base):
+    __tablename__ = "pynbodyext_orm_catalogues"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    root_input_id: Mapped[int] = mapped_column(ForeignKey(DataObject.id, ondelete="RESTRICT"), index=True)
+    identity_key: Mapped[str] = mapped_column(Text, unique=True)
+    catalogue_id: Mapped[str] = mapped_column(Text)
+    finder: Mapped[str] = mapped_column(Text)
+    revision: Mapped[str | None] = mapped_column(Text)
+    loader_id: Mapped[str] = mapped_column(Text)
+    root_input: Mapped[DataObject] = relationship()
+    objects: Mapped[list[CatalogueObject]] = relationship(back_populates="catalogue")
 
 
+class CatalogueObject(Base):
+    __tablename__ = "pynbodyext_orm_catalogue_objects"
+    __table_args__ = (
+        UniqueConstraint("catalogue_fk", "kind", "typed_object_key"),
+        CheckConstraint("kind IN ('halo', 'subhalo')"),
+        CheckConstraint("host_id IS NULL OR kind = 'subhalo'"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    catalogue_fk: Mapped[int] = mapped_column(ForeignKey(Catalogue.id, ondelete="RESTRICT"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    typed_object_key: Mapped[str] = mapped_column(Text)
+    host_id: Mapped[int | None] = mapped_column(
+        ForeignKey("pynbodyext_orm_catalogue_objects.id", ondelete="RESTRICT"), index=True
+    )
+    catalogue: Mapped[Catalogue] = relationship(back_populates="objects")
+    host: Mapped[CatalogueObject | None] = relationship(
+        back_populates="subhalos", remote_side=lambda: CatalogueObject.id
+    )
+    subhalos: Mapped[list[CatalogueObject]] = relationship(back_populates="host")
 
 
 
