@@ -18,18 +18,19 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import create_engine, event, select, update
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, joinedload, sessionmaker
+from sqlalchemy.orm import Session, joinedload, selectinload, sessionmaker
 
 from pynbodyext.core.calculate.result.signature import CalculatorSignature
 from pynbodyext.core.calculate.runtime.logical_identity import LogicalSnapshotIdentity
 from pynbodyext.core.calculate.store import RESULT_STORE_SCHEMA, RecordRef, ResultStore
 from pynbodyext.core.calculate.store.identity import sim_identity_key
 
+from .loading import LoadedInput, SnapshotLoader, load_snapshot, validate_local_location
 from .models import Base, DataLocation, DataObject, Recipe, ResultLink, Run, Simulation, Timestep
 from .records import AssociationIssue, RecordedRun, RunExecutionError, RunPersistenceError
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from pynbodyext.core.calculate.nodes.base import CalculatorBase
     from pynbodyext.core.calculate.result.result import Result
@@ -76,6 +77,7 @@ def _run_query() -> Any:
     return select(Run).options(
         joinedload(Run.input).joinedload(DataObject.timestep).joinedload(Timestep.simulation),
         joinedload(Run.input).joinedload(DataObject.parent),
+        joinedload(Run.input_location),
         joinedload(Run.recipe),
         joinedload(Run.result_link),
     )
@@ -84,13 +86,20 @@ def _run_query() -> Any:
 class AnalysisRepository:
     """Relate scientific objects, recipes, runs and named-store result references.
 
-    SQLite is the tested backend. Store bindings are copied and kept in process;
-    reopen with the same names/backends. They are not credentials stored in SQL.
+    SQLite is the tested backend. Store and loader bindings are copied and kept
+    in process; reopen with equivalent bindings. Loader callables accept one local
+    absolute path/prefix and return a root SimSnap; pre-bind options in project
+    code. No implicit loader, serialized callable or credentials stored in SQL.
     Explicitly importing this package requires the existing ``store`` extra.
     """
 
     def __init__(
-        self, url_or_engine: str | Engine, *, stores: Mapping[str, ResultStore] | None = None, create: bool = True
+        self,
+        url_or_engine: str | Engine,
+        *,
+        stores: Mapping[str, ResultStore] | None = None,
+        loaders: Mapping[str, SnapshotLoader] | None = None,
+        create: bool = True,
     ) -> None:
         self.engine = url_or_engine if isinstance(url_or_engine, Engine) else create_engine(url_or_engine)
         if self.engine.dialect.name == "sqlite" and not event.contains(self.engine, "checkout", _foreign_keys):
@@ -100,6 +109,11 @@ class AnalysisRepository:
             _nonempty(name, "store_name")
             if not isinstance(store, ResultStore):
                 raise TypeError("store bindings must implement ResultStore")
+        self._loaders = dict(loaders or {})
+        for name, loader in self._loaders.items():
+            _nonempty(name, "loader_id")
+            if not callable(loader):
+                raise TypeError("loader bindings must be callable")
         self._sessions = sessionmaker(self.engine, expire_on_commit=False)
         if create:
             Base.metadata.create_all(self.engine)
@@ -187,17 +201,100 @@ class AnalysisRepository:
                 raise ValueError("stored recipe conflicts with its hash")
             return recipe
 
-    def begin_run(self, input_id: int, recipe_hash: str, *, store_name: str) -> Run:
+    def get_input(self, input_id: int) -> DataObject:
+        """Return detached input metadata with hierarchy, parent and locations loaded."""
+        with self.session() as session:
+            data = session.scalar(
+                select(DataObject)
+                .where(DataObject.id == input_id)
+                .options(
+                    joinedload(DataObject.timestep).joinedload(Timestep.simulation),
+                    joinedload(DataObject.parent),
+                    selectinload(DataObject.locations),
+                )
+            )
+            if data is None:
+                raise KeyError(f"unknown input {input_id!r}")
+            return data
+
+    def _prepare_load(
+        self, input_id: int, location_id: int | None
+    ) -> tuple[DataObject, DataLocation, LogicalSnapshotIdentity, SnapshotLoader]:
+        data = self.get_input(input_id)
+        signature = self._validate_input_metadata(data)
+        _, logical, kind = _logical_input(signature)
+        if kind != "snapshot":
+            raise ValueError("only registered root snapshots can be loaded; view selection is not reconstructible")
+        if logical.loader_id not in self._loaders:
+            raise KeyError(f"snapshot loader {logical.loader_id!r} is not bound")
+        location: DataLocation | None
+        if location_id is None:
+            if len(data.locations) != 1:
+                raise ValueError("input needs exactly one location, or an explicit location_id")
+            location = data.locations[0]
+        else:
+            location = next((item for item in data.locations if item.id == location_id), None)
+            if location is None:
+                raise ValueError("selected location does not belong to input")
+        validate_local_location(location.uri)
+        return data, location, logical, self._loaders[logical.loader_id]
+
+    def load_input(self, input_id: int, *, location_id: int | None = None) -> LoadedInput:
+        """Load a registered root using its loader_id binding, without creating a Run.
+
+        One location is selected automatically; with multiple locations pass its
+        database ``location_id`` explicitly. Local absolute paths/prefixes only.
+        Errors propagate; no alternate location, retry or live-snapshot cache.
+        """
+        return load_snapshot(*self._prepare_load(input_id, location_id))
+
+    def run_input(
+        self,
+        calculator: CalculatorBase,
+        input_id: int,
+        *,
+        store_name: str,
+        location_id: int | None = None,
+        reuse: bool = True,
+        options: RunOptions | None = None,
+    ) -> RecordedRun:
+        """Commit a Run, load a selected registered root, then execute the calculator.
+
+        Invalid requests fail preflight. Loading/validation failures after Run
+        creation are recorded like calculation errors. Even cache hits load the
+        snapshot; result refresh and explicit recovery follow ``run`` semantics.
+        """
+        backend = self._store(store_name)
+        request = self._prepare_load(input_id, location_id)
+        recipe = self.register_recipe(calculator.to_signature())
+        run = self.begin_run(input_id, recipe.hash, store_name=store_name, input_location_id=request[1].id)
+
+        def execute() -> Result:
+            loaded = load_snapshot(*request)
+            return calculator.run(
+                loaded.sim, store=backend, sim_identity=loaded.sim_identity, reuse=reuse, options=options
+            )
+
+        return self._execute_run(run, execute)
+
+    def begin_run(
+        self, input_id: int, recipe_hash: str, *, store_name: str, input_location_id: int | None = None
+    ) -> Run:
         """Commit running before work starts. Unknown inputs/recipes/stores fail."""
         self._store(store_name)
         run_id = str(uuid.uuid4())
         with self.session() as session, session.begin():
             if session.get(DataObject, input_id) is None or session.get(Recipe, recipe_hash) is None:
                 raise KeyError("input and recipe must be registered before beginning a run")
+            if input_location_id is not None:
+                location = session.get(DataLocation, input_location_id)
+                if location is None or location.data_object_id != input_id:
+                    raise ValueError("selected location does not belong to input")
             session.add(
                 Run(
                     id=run_id,
                     input_id=input_id,
+                    input_location_id=input_location_id,
                     recipe_hash=recipe_hash,
                     store_name=store_name,
                     status="running",
@@ -229,8 +326,7 @@ class AnalysisRepository:
             return list(session.scalars(stmt))
 
     @staticmethod
-    def _validate_run_metadata(run: Run) -> tuple[Any, ...]:
-        data = run.input
+    def _validate_input_metadata(data: DataObject) -> tuple[Any, ...]:
         signature, logical, kind = _logical_input(data.signature)
         timestep = data.timestep
         simulation = timestep.simulation
@@ -256,6 +352,15 @@ class AnalysisRepository:
                 or parent.identity_key != sim_identity_key(logical.signature())
             ):
                 raise ValueError("view parent conflicts with its logical root")
+        return signature
+
+    @staticmethod
+    def _validate_run_metadata(run: Run) -> tuple[Any, ...]:
+        signature = AnalysisRepository._validate_input_metadata(run.input)
+        if run.input_location_id is not None:
+            location = run.input_location
+            if location is None or location.data_object_id != run.input_id:
+                raise ValueError("stored run location conflicts with its input")
         recipe = CalculatorSignature.from_json(run.recipe.signature_text)
         if not recipe.stable or recipe.hash != run.recipe_hash:
             raise ValueError("stored recipe metadata is inconsistent")
@@ -338,8 +443,14 @@ class AnalysisRepository:
         data = self.register_input(signature, location=location)
         recipe = self.register_recipe(calculator.to_signature())
         run = self.begin_run(data.id, recipe.hash, store_name=store_name)
+        return self._execute_run(
+            run, lambda: calculator.run(sim, store=backend, sim_identity=sim_identity, reuse=reuse, options=options)
+        )
+
+    def _execute_run(self, run: Run, execute: Callable[[], Result]) -> RecordedRun:
+        """Complete an already committed run, preserving one failure/recovery path."""
         try:
-            result = calculator.run(sim, store=backend, sim_identity=sim_identity, reuse=reuse, options=options)
+            result = execute()
         except Exception as exc:
             try:
                 self.fail_run(run.id, exc)
