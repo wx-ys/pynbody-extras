@@ -3,6 +3,32 @@
 Single-context repo. This file defines the vocabulary used across the calculator
 and result-store subsystems, plus the architecture invariants the tests enforce.
 
+The [2026-11-09 design review](docs/design/README.md) maps implemented contracts
+to remaining V1 requirements and sequential work items. Proposed APIs there are
+not current contracts; this glossary and accepted ADRs describe implemented
+behavior. The older Workspace/Artifact rebuild notes are historical alternatives.
+
+## Distribution ownership (ADR-019)
+
+`pynbodyext-core` is the root distribution and sole owner of all `pynbodyext/**`
+Python, native and CSS files, including optional ORM code. `pynbodyext` is the
+metadata-only full workspace member in `packages/pynbodyext`; it requires exactly
+the same core version and SQLAlchemy >=2.0. Both retain image/store/dev/bench
+extras; full forwards each extra to the exact core version. Imports remain
+`pynbodyext.*`. A fresh core installation calculates without SQLAlchemy.
+
+`pynbodyext/__init__.py:__version__` is the only authored version. After editing it,
+run `python scripts/sync_distribution_versions.py`, then `uv lock`; rebuild both
+projects together. The generated full metadata is self-contained in its sdist.
+uv can omit a version field for the dynamic editable core in its lock; built
+METADATA supplies the actual version, which must match full's exact requirement.
+`make check` validates synchronization; `tests/test_installation_contract.py`
+checks metadata and actual sdists. See the [installation matrix](docs/design/installation-matrix.md)
+for observed platform results and the required old-distribution migration order.
+Run invocation context records both distribution versions independently: the
+code owner `pynbodyext-core` and the full metadata package `pynbodyext`; a missing
+distribution is null rather than inferred from the other installed package.
+
 ## Glossary
 
 Use these terms exactly. Don't drift to synonyms.
@@ -10,6 +36,21 @@ Use these terms exactly. Don't drift to synonyms.
 - **Calculator DAG** — the composed execution graph (`CalculatorBase` +
   mixins, `PropertyBase`, `PostprocessorBase`, `FilterBase`, `TransformBase`, `Pipeline`). Each node
   produces a `ResultNode`; the graph is resolved and executed by `EvalEngine`.
+- **`PostprocessorBase`** (`nodes/postprocessors.py`) — a value-consuming property
+  role exported by `pynbodyext.calculate`. Decorated scientific subclasses
+  implement `process(value)`; the adapter owns `calculate(sim, params)` and
+  delivers `params.source` unchanged, including units. Its required keyword-only
+  `source` is one Calculator dependency declared through `Param`; raw `Result`,
+  `RecordRef`, and extra dynamic parameters are rejected. Other dataclass fields
+  are static configuration read through `self`. The existing Calculator DAG,
+  property/runtime lifecycle, signatures, and result-store receipts remain the
+  owning seams; there is no second executor or signature node kind. See ADR-014.
+  On an exception the adapter invokes cleanup for its own applied bound scope,
+  respecting revert policies and nonrevertible handles; it does not invoke an
+  inherited ancestor's cleanup callback. Native compound handles retain their
+  existing cascading revert semantics, and cleanup failures are logged while
+  preserving the original exception. Transform/filter application failures before
+  entering the adapter and generic property success cleanup are outside this path.
 - **`CalculatorSignature`** (`result/signature.py`) — a frozen, structured
   description of a calculator (class + `deps` + parameters), with a content
   hash (sha256 of schema + payload) and a JSON text. *Not* a display name.
@@ -132,6 +173,20 @@ Use these terms exactly. Don't drift to synonyms.
   nested dtype metadata and unreadable/non-lossless dtype headers are rejected
   before saving. Ordinary numerical-array tags remain unchanged. Legacy object
   tags remain readable with their original shape limitations.
+- **`ExternalFileRef`** (`store/external.py`, exported by `core.calculate.store`)
+  — frozen descriptor of a caller-owned absolute local path or file URI (empty or
+  localhost authority), nonempty `media_type`, nullable nonnegative integer
+  `size_bytes` and lowercase 64-hex `sha256`. Strict descriptor JSON uses
+  `pynbodyext.result.external-file-ref/v1`; ValueCodec uses `external_file_ref_v1`.
+  Construction/JSON/codec operations never access the file, and ordinary strings
+  remain strings. Explicit `inspect(verify_checksum=False)` returns a frozen
+  `ExternalFileInspection(status, reason, checksum_verified)`; statuses are
+  available/missing/changed, access errors propagate, and SHA256 reads occur only
+  when requested with a supplied digest. Available without a verified checksum
+  does not establish content equality or readability. ResultStore versions pin
+  descriptors only: fetching an old version cannot restore overwritten external
+  bytes. Callers maintain distinct/versioned paths for reproducible history; no
+  automatic copy/delete/externalization is provided. See ADR-013.
 - **tangos** — the Python package this store is modeled on; a relational DB that
   interns name strings. We deliberately diverge.
 - **Repr style** — how a calculator object renders in a notebook, set by
@@ -252,6 +307,30 @@ full/lightweight distribution split is a separate packaging decision (ADR-005).
 - **DataLocation** — root input URI metadata. Aliases and historical reuse of a
   location by different revisions are allowed. Explicit loader bindings can load
   local absolute paths/prefixes for registered roots (ADR-010); no fingerprinting.
+- **Catalogue** — scientific catalogue metadata for a validated snapshot root.
+  Its canonical typed identity includes that root's logical signature plus
+  `catalogue_id`, `finder`, optional `revision` and `loader_id`; None revision is
+  a real identity component, independent of the root data revision. Registration
+  requires no loader binding or location and performs no snapshot/payload IO.
+- **CatalogueObject** — halo/subhalo metadata unique by catalogue, kind and
+  `typed_object_key`. Built-in string/int/bool/finite float keys use
+  `sim_identity_key`: `1`, `"1"`, `True` and `1.0` differ; signed floating zeros
+  agree. Only subhalos may have a host, which must be a halo in the same catalogue;
+  an unknown host can remain None. Physical hosts do not change `DataObject.parent`
+  or existing snapshot-view/provider signatures and do not imply loadable objects.
+- **Selection / SelectionSpec** — a versioned root-relative replay definition
+  (`indices`, named `family`, or stable constructible FilterBase signature), kept
+  separately from its materialized view DataObject. Registration requires a
+  validated untransformed LoadedInput root and materializes once; expected_count
+  records the ROOT particle count. Canonical descriptors distinguish definitions
+  even when they select the same view. Indices are strict built-in integer lists,
+  ordered and duplicate-preserving within root family-block ordering; cross-block
+  reordering/interleaving raises ValueError without sorting. For a dm=2/star=2
+  root, `[1,0,1,3,2,3]` is preserved, while `[3,1,3,0]` is rejected. This approved
+  limit follows pynbody's contiguous-family views. Bounds and family presence are explicit.
+  Filters run through the existing DAG in original coordinates without persistent
+  mask caching; scoped transforms are rejected and root identity is checked again
+  after evaluation. See ADR-016.
 - **Recipe** — the existing stable CalculatorSignature hash and JSON DAG. ORM
   records the recipe; it does not implement a second graph or execution engine.
 - **Run** — one invocation, with input/recipe FKs, named result backend, wall-clock
@@ -316,7 +395,19 @@ for intentional ORM writes. SQLite foreign keys/unique constraints are enforced.
 The repository does not scan all external store data or promise concurrency retries;
 concurrent registration may raise a uniqueness conflict. SQLite is tested; other
 SQL dialects need validation; conditional UPDATE RETURNING needs SQLite 3.35+.
-Complete particle-container hierarchy, RunStep and MergerTree models remain later increments.
+Complete particle-container hierarchy, RunStep and MergerTree models remain later
+increments.
+
+`register_catalogue` / `get_catalogue` / `catalogues(root_input_id)` return detached
+catalogue metadata with root, root parent and root timestep/simulation loaded.
+`register_catalogue_object` / `get_catalogue_object` / `catalogue_objects` also load
+the object's catalogue/root hierarchy and scalar host; collections and further
+host relations require a caller-owned session. Lists order by primary key;
+`kind=None` / `host_id=None` omit filters. Matching registration is idempotent;
+conflicting host metadata fails without attaching, detaching or reparenting.
+Unique/FK/check constraints protect stored keys, basic kind and halo-with-host
+rules; same-catalogue halo-host and logical root validation belong to repository
+methods, not a promise about arbitrary direct SQL writes. See ADR-015.
 
 ### Loading registered inputs
 
@@ -363,7 +454,15 @@ loading entry point; no location is guessed and no failure switches to another
 copy. Local absolute file paths and multipart prefixes are supported, without an
 `isfile` precheck. Remote/relative locations can remain metadata but cannot load.
 Registered halo/subset objects cannot be reconstructed from their index digests;
-root-only loading is the deliberate first increment.
+load_input remains root-only, including views with a Selection. Explicitly use
+register_selection(loaded_root, SelectionSpec.indices([...])) and
+load_selection(selection_id, location_id=...) to replay a saved definition.
+Loading validates the root logical identity/revision and expected root count,
+reconstructs the view, then requires its provider identity/index digest to match
+the registered view. Different selections can share a view DataObject/cache key
+without overwriting either definition. Count and index digest cannot detect
+arbitrary same-count reordered/edited particles; maintain a revision or explicitly
+refresh affected results with reuse=False. No automatic content fingerprint exists.
 
 `run_input` validates input hierarchy, selected location ownership, bindings and
 stable recipe before creating a Run. It then commits running **before loader IO**,
@@ -373,12 +472,144 @@ returned-object validation errors are recorded as failed and raise
 `RunPersistenceError` and explicit recovery, as above. `load_input` alone propagates
 errors and creates no Run. Even cache hits load in this increment.
 
+`run_selection` commits running before root loading or selector evaluation and
+delegates the same execution/failure path as run_input, including on cache hits.
+Run.input identifies the view; nullable Run.selection_id records the actual
+definition. A root-owned input_location is allowed only through a validated
+Selection matching that Run input. Merely having a DataObject.parent does not
+permit a parent's location. Finalization, fetch, audit and explicit receipt
+recovery validate the descriptor, root/view hierarchy and root location while
+comparing the receipt against the VIEW identity and recipe. Audit never loads
+snapshots or decodes scientific values. A metadata-link failure preserves the
+pinned receipt through RunPersistenceError for explicit finish_run recovery.
+
+`run`, `run_input`, `run_selection` and `begin_run` accept optional `execution_metadata`, validated
+and JSON-copied before Run creation or execution. Its only keys are `tool_versions`
+(string-to-string mapping, default `{}`) and `random_seed` (integer or null,
+default null; booleans are rejected). This records a seed without setting RNG
+state, changing signatures or changing cache keys. Invalid metadata raises
+ValueError before loading/calculation. Unexpected collection or initial commit
+errors also precede execution; a later loading/execution failure retains the
+committed context through the normal failure/recovery path (ADR-012).
+
+For selection runs the unchanged invocation-context schema records the selected
+root URI and logical loader_id/revision; view identity stays on Run.input and the
+pinned result reference. The context's URI is the selected DataLocation value, including a multipart prefix
+when the loader returns a different normalized filename. Later edits to location
+metadata or caller dictionaries do not alter earlier contexts. Direct `run` on a
+caller-supplied snapshot and manual `begin_run` without a selected location record
+URI null; they do not infer selection from a filename or registered alias. Logical
+loader_id/revision can still be known. The schema is
+`pynbodyext.orm.execution-context/v1`, with `scope="invocation"`; this increment
+adds no payload-producer context, fingerprints, environment scanning or migration.
+
 **Run.input_location_id / input_location** records the selected source relation;
 existing `run(calc, sim, ...)` leaves it null because it did not perform a managed
 load. This relation is not a historical copy of mutable DataLocation metadata.
 Run queries eagerly load it; reference validation/audit check ownership. Binding
 loaders never imports ORM into the calculator layer. No new dependency or legacy
 schema migration is provided (ADR-010).
+
+### Root-input job manifests
+
+**JobSpec** (`orm/jobs.py`) is a frozen root recipe/address with strict schema
+`pynbodyext.orm.job/v1` and exactly six JSON fields: `schema`,
+`calculator_signature_text`, `input_id`, nullable `location_id`, `store_name`,
+and `reuse`. IDs are positive built-in integers (never bool); store_name is a
+nonempty built-in string and reuse is a built-in bool. IDs belong to the explicitly
+supplied metadata repository; this format does not migrate IDs between databases.
+
+```python
+from pynbodyext.orm import JobSpec
+from pynbodyext.properties import ParamSum  # explicit import registers the type
+
+job = JobSpec.from_calculator(ParamSum("mass"), data.id, store_name="results")
+manifest = job.to_json()
+# In another process, reopen the same metadata repository and bind loaders/stores:
+replayed = JobSpec.from_json(manifest).execute(repo)
+```
+
+Construction/`from_json` rejects unknown/missing/duplicate fields, unsupported
+schemas, invalid built-in types and unstable/nonconstructible recipes. Before any
+calculator constructor, the whole nested signature is checked against explicit
+registered names/aliases; enum parameters require already-loaded Enum classes.
+Recorded calculator versions must match their registered classes before any
+constructor runs. Rebuilt recipe identity must match after normalizing registered
+aliases and numerical equivalence; parameter drift fails before loading a snapshot.
+An explicit alias is sufficient even when its class has no `signature_name`:
+rebuilt canonical names are recognized only through a job-local mapping of the
+already-vetted types, without registering those names globally. Incoming canonical
+class paths still require explicit registration.
+Project code must import/register required calculators first. A class-path-only
+custom calculator is excluded even when importable. General signature decoding's
+import fallback is unchanged; the job boundary never imports a manifest-selected
+application module. General signature version warnings remain unchanged outside
+JobSpec. Registered constructors and `from_signature_payload` are
+trusted project code, so this is not a sandbox for hostile registered plugins.
+
+Only default RunOptions are accepted across the graph, checked before signature
+conversion can discard live options and again after reconstruction. The manifest
+contains no loader/store objects, credentials, backend URL, callable, live snapshot
+or executable pickle; scientific parameter strings are retained without secret
+redaction. `execute(repo)` rechecks type availability and root-only input, then
+delegates to `repo.run_input`. Missing bindings or invalid input/location fail
+before loader IO, calculation or Run creation. Selections/views remain excluded
+from v1, including those supported by the separate `run_selection` API.
+
+The existing runner owns subsequent lifecycle/errors. Each execution creates a
+new Run, even on a cache hit with the same pinned ref; `reuse=False` saves a new
+version while prior references retain historical values. Loader/calculation/store
+and metadata failures retain RunExecutionError/RunPersistenceError receipts and
+explicit recovery. No new executor, automatic binding or migration (ADR-017).
+
+### Serial recorded studies
+
+**`run_study`** (`orm/study.py`) executes registered root-input IDs × an ordered
+label-to-Calculator mapping through `repo.run_input`, input-major then mapping
+order. IDs are unique positive built-in integers, never bool. Labels are unique
+nonempty built-in strings; distinct labels can use the same calculator signature.
+Optional `location_ids` maps requested roots to owned positive location IDs.
+The whole request is checked read-only, including bindings, hierarchy, selected
+locations, stable calculator signatures and existing Recipe payload conflicts,
+before any Run, loader call or recipe write. Empty axes are valid after checking
+the supplied request. Views/selections remain excluded, including those replayable
+through `run_selection`. Live calculator options and stable nonconstructible
+calculators are supported; JobSpec's reconstruction restrictions do not apply.
+
+```python
+from pynbodyext.orm import run_study, StudyReport
+
+report = run_study(repo, [first.id, second.id], {"mass": mass_calculator}, "results",
+                   errors="record")
+cell = report.cell(first.id, "mass")
+report.save("study.json")
+restored = StudyReport.load("study.json")  # values/refs only; no backend or execution
+```
+
+**StudyCell / StudyReport** retain full requested input/typed-identity/column-hash
+axes and ordered completed attempts. Each cell has input ID, label, Run ID,
+succeeded/failed status, actual value, structured ErrorInfo diagnostics and the
+actual pinned `Result.store_ref` on success. A successful None remains a success;
+failed cells have errors and no saved-result ref. `cell` raises KeyError for an
+unattempted coordinate. JSON schema `pynbodyext.orm.study/v1` uses ValueCodec for
+values/units/typed identities and RecordRef JSON for versioned references. Strict
+loading rejects duplicate/unknown/missing fields, malformed axes/cells/errors and
+unpinned or mismatched typed refs. Loading never reconstructs calculators, finds a
+backend, fetches values or changes Runs. `store_name` is an ownership label; pair
+refs with the explicit owning backend to fetch historical payloads.
+
+`errors="raise"` stops on execution failure. `errors="record"` continues only
+RunExecutionError already recorded as failed, or a returned failed RecordedRun.
+RunPersistenceError always stops: **StudyPersistenceError** holds prior completed
+cells in `report`, interrupted `input_id`/`label`, and the exact original `receipt`;
+its run_id/result_ref/result aliases are unchanged. The exception chains from that
+receipt, which retains the original metadata cause. The interrupted cell is absent
+from completed cells; no automatic attach, failure marking, retry or deletion is
+performed. Other exceptions propagate. Resume is an explicit new invocation,
+creating a new Run for every requested cell; reuse may retain existing pinned
+payload refs, and refresh preserves older reports after database reopen. There is
+no exactly-once promise, parallel executor or cross-column DAG optimization
+(ADR-018).
 
 ## Architecture invariants (each one is a test)
 
@@ -561,161 +792,3 @@ object a caller normally holds.
   exposure (bigger = deeper; variance `(data + background) / exposure`). Both are
   seeded (`rng=`), leave non-finite pixels alone, honour a mask, and record what
   they did in `.ops`.
-
-## Newly implemented contracts
-
-- **`ExternalFileRef`** (`store/external.py`, exported by `core.calculate.store`)
-  — frozen descriptor of a caller-owned absolute local path or file URI (empty or
-  localhost authority), nonempty `media_type`, nullable nonnegative integer
-  `size_bytes` and lowercase 64-hex `sha256`. Strict descriptor JSON uses
-  `pynbodyext.result.external-file-ref/v1`; ValueCodec uses `external_file_ref_v1`.
-  Construction/JSON/codec operations never access the file, and ordinary strings
-  remain strings. Explicit `inspect(verify_checksum=False)` returns a frozen
-  `ExternalFileInspection(status, reason, checksum_verified)`; statuses are
-  available/missing/changed, access errors propagate, and SHA256 reads occur only
-  when requested with a supplied digest. Available without a verified checksum
-  does not establish content equality or readability. ResultStore versions pin
-  descriptors only: fetching an old version cannot restore overwritten external
-  bytes. Callers maintain distinct/versioned paths for reproducible history; no
-  automatic copy/delete/externalization is provided. See ADR-013.
-- **`PostprocessorBase`** (`nodes/postprocessors.py`) — a value-consuming property
-  role exported by `pynbodyext.calculate`. Decorated scientific subclasses
-  implement `process(value)`; the adapter owns `calculate(sim, params)` and
-  delivers `params.source` unchanged, including units. Its required keyword-only
-  `source` is one Calculator dependency declared through `Param`; raw `Result`,
-  `RecordRef`, and extra dynamic parameters are rejected. Other dataclass fields
-  are static configuration read through `self`. The existing Calculator DAG,
-  property/runtime lifecycle, signatures, and result-store receipts remain the
-  owning seams; there is no second executor or signature node kind. See ADR-014.
-  On an exception the adapter invokes cleanup for its own applied bound scope,
-  respecting revert policies and nonrevertible handles; it does not invoke an
-  inherited ancestor's cleanup callback. Native compound handles retain their
-  existing cascading revert semantics, and cleanup failures are logged while
-  preserving the original exception. Transform/filter application failures before
-  entering the adapter and generic property success cleanup are outside this path.
-- **Catalogue** — scientific catalogue metadata for a validated snapshot root.
-  Its canonical typed identity includes that root's logical signature plus
-  `catalogue_id`, `finder`, optional `revision` and `loader_id`; None revision is
-  a real identity component, independent of the root data revision. Registration
-  requires no loader binding or location and performs no snapshot/payload IO.
-- **CatalogueObject** — halo/subhalo metadata unique by catalogue, kind and
-  `typed_object_key`. Built-in string/int/bool/finite float keys use
-  `sim_identity_key`: `1`, `"1"`, `True` and `1.0` differ; signed floating zeros
-  agree. Only subhalos may have a host, which must be a halo in the same catalogue;
-  an unknown host can remain None. Physical hosts do not change `DataObject.parent`
-  or existing snapshot-view/provider signatures and do not imply loadable objects.
-- **Selection / SelectionSpec** — a versioned root-relative replay definition
-  (`indices`, named `family`, or stable constructible FilterBase signature), kept
-  separately from its materialized view DataObject. Registration requires a
-  validated untransformed LoadedInput root and materializes once; expected_count
-  records the ROOT particle count. Canonical descriptors distinguish definitions
-  even when they select the same view. Indices are strict built-in integer lists,
-  ordered and duplicate-preserving within root family-block ordering; cross-block
-  reordering/interleaving raises ValueError without sorting. For a dm=2/star=2
-  root, `[1,0,1,3,2,3]` is preserved, while `[3,1,3,0]` is rejected. This approved
-  limit follows pynbody's contiguous-family views. Bounds and family presence are explicit.
-  Filters run through the existing DAG in original coordinates without persistent
-  mask caching; scoped transforms are rejected and root identity is checked again
-  after evaluation. See ADR-016.
-
-### Root-input job manifests
-
-**JobSpec** (`orm/jobs.py`) is a frozen root recipe/address with strict schema
-`pynbodyext.orm.job/v1` and exactly six JSON fields: `schema`,
-`calculator_signature_text`, `input_id`, nullable `location_id`, `store_name`,
-and `reuse`. IDs are positive built-in integers (never bool); store_name is a
-nonempty built-in string and reuse is a built-in bool. IDs belong to the explicitly
-supplied metadata repository; this format does not migrate IDs between databases.
-
-```python
-from pynbodyext.orm import JobSpec
-from pynbodyext.properties import ParamSum  # explicit import registers the type
-
-job = JobSpec.from_calculator(ParamSum("mass"), data.id, store_name="results")
-manifest = job.to_json()
-# In another process, reopen the same metadata repository and bind loaders/stores:
-replayed = JobSpec.from_json(manifest).execute(repo)
-```
-
-Construction/`from_json` rejects unknown/missing/duplicate fields, unsupported
-schemas, invalid built-in types and unstable/nonconstructible recipes. Before any
-calculator constructor, the whole nested signature is checked against explicit
-registered names/aliases; enum parameters require already-loaded Enum classes.
-Recorded calculator versions must match their registered classes before any
-constructor runs. Rebuilt recipe identity must match after normalizing registered
-aliases and numerical equivalence; parameter drift fails before loading a snapshot.
-An explicit alias is sufficient even when its class has no `signature_name`:
-rebuilt canonical names are recognized only through a job-local mapping of the
-already-vetted types, without registering those names globally. Incoming canonical
-class paths still require explicit registration.
-Project code must import/register required calculators first. A class-path-only
-custom calculator is excluded even when importable. General signature decoding's
-import fallback is unchanged; the job boundary never imports a manifest-selected
-application module. General signature version warnings remain unchanged outside
-JobSpec. Registered constructors and `from_signature_payload` are
-trusted project code, so this is not a sandbox for hostile registered plugins.
-
-Only default RunOptions are accepted across the graph, checked before signature
-conversion can discard live options and again after reconstruction. The manifest
-contains no loader/store objects, credentials, backend URL, callable, live snapshot
-or executable pickle; scientific parameter strings are retained without secret
-redaction. `execute(repo)` rechecks type availability and root-only input, then
-delegates to `repo.run_input`. Missing bindings or invalid input/location fail
-before loader IO, calculation or Run creation. Selections/views remain excluded
-from v1, including those supported by the separate `run_selection` API.
-
-The existing runner owns subsequent lifecycle/errors. Each execution creates a
-new Run, even on a cache hit with the same pinned ref; `reuse=False` saves a new
-version while prior references retain historical values. Loader/calculation/store
-and metadata failures retain RunExecutionError/RunPersistenceError receipts and
-explicit recovery. No new executor, automatic binding or migration (ADR-017).
-
-
-### Serial recorded studies
-
-**`run_study`** (`orm/study.py`) executes registered root-input IDs × an ordered
-label-to-Calculator mapping through `repo.run_input`, input-major then mapping
-order. IDs are unique positive built-in integers, never bool. Labels are unique
-nonempty built-in strings; distinct labels can use the same calculator signature.
-Optional `location_ids` maps requested roots to owned positive location IDs.
-The whole request is checked read-only, including bindings, hierarchy, selected
-locations, stable calculator signatures and existing Recipe payload conflicts,
-before any Run, loader call or recipe write. Empty axes are valid after checking
-the supplied request. Views/selections remain excluded, including those replayable
-through `run_selection`. Live calculator options and stable nonconstructible
-calculators are supported; JobSpec's reconstruction restrictions do not apply.
-
-```python
-from pynbodyext.orm import run_study, StudyReport
-
-report = run_study(repo, [first.id, second.id], {"mass": mass_calculator}, "results",
-                   errors="record")
-cell = report.cell(first.id, "mass")
-report.save("study.json")
-restored = StudyReport.load("study.json")  # values/refs only; no backend or execution
-```
-
-**StudyCell / StudyReport** retain full requested input/typed-identity/column-hash
-axes and ordered completed attempts. Each cell has input ID, label, Run ID,
-succeeded/failed status, actual value, structured ErrorInfo diagnostics and the
-actual pinned `Result.store_ref` on success. A successful None remains a success;
-failed cells have errors and no saved-result ref. `cell` raises KeyError for an
-unattempted coordinate. JSON schema `pynbodyext.orm.study/v1` uses ValueCodec for
-values/units/typed identities and RecordRef JSON for versioned references. Strict
-loading rejects duplicate/unknown/missing fields, malformed axes/cells/errors and
-unpinned or mismatched typed refs. Loading never reconstructs calculators, finds a
-backend, fetches values or changes Runs. `store_name` is an ownership label; pair
-refs with the explicit owning backend to fetch historical payloads.
-
-`errors="raise"` stops on execution failure. `errors="record"` continues only
-RunExecutionError already recorded as failed, or a returned failed RecordedRun.
-RunPersistenceError always stops: **StudyPersistenceError** holds prior completed
-cells in `report`, interrupted `input_id`/`label`, and the exact original `receipt`;
-its run_id/result_ref/result aliases are unchanged. The exception chains from that
-receipt, which retains the original metadata cause. The interrupted cell is absent
-from completed cells; no automatic attach, failure marking, retry or deletion is
-performed. Other exceptions propagate. Resume is an explicit new invocation,
-creating a new Run for every requested cell; reuse may retain existing pinned
-payload refs, and refresh preserves older reports after database reopen. There is
-no exactly-once promise, parallel executor or cross-column DAG optimization
-(ADR-018).

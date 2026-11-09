@@ -12,16 +12,37 @@
 需要 Python >=3.11、pynbody >=2.8.0。不再支持 Python 3.10；
 pynbody 版本下限包含非立方 SPH 网格的修复（BUG-0002）。
 
-使用包：
+从源码安装完整版本时，同时提供两个本地项目，确保 pip 使用当前 checkout 的 core。
+完整安装包含 SQLAlchemy 和 ORM：
 
 ```bash
 git clone https://github.com/wx-ys/pynbody-extras.git
 cd pynbody-extras
-python -m pip install -e ".[image,store]"
+python -m pip install -e . -e './packages/pynbodyext[image]'
 ```
 
-`image` extra 增加 adaptive binning（`powerbin`），`store` 增加 SQLAlchemy
-结果存储。C++17 编译器用于构建可选的 native 扩展（`pynbodyext._native`），
+不需要 SQLAlchemy 的纯计算安装应使用新环境，仅安装根 core 项目：
+
+```bash
+python -m pip install -e .
+# 可选 adaptive binning：
+python -m pip install -e '.[image]'
+```
+
+`pynbodyext-core` 独占所有 Python、native、CSS 文件（包括可选的 ORM 代码）。
+`pynbodyext` 是纯元数据完整发行包，强制依赖精确同版本 core 与 SQLAlchemy >=2.0。
+Python 导入路径仍为 `pynbodyext.*`。两者都提供 image、store、dev、bench extras；
+image 增加 powerbin，core 的 store 增加 SQLAlchemy。现有完整环境安装 core 不会自动
+移除 SQLAlchemy；`--no-deps` 不是轻量安装方式。发行名称已批准，但不代表已经发布到
+registry；仅安装 `./packages/pynbodyext` 可能从索引查找 core。
+
+安装本地产物时，在同一条 `python -m pip install` 命令中提供匹配的 core 和 full
+wheel 绝对路径；sdist 也需同时提供匹配产物及本地 `--find-links` 目录。
+旧单发行包 `pynbodyext` 的 RECORD 仍拥有 import 文件，迁移时应**先卸载旧包，再安装
+新的一对发行包**；同版本 `--upgrade` 可能不做任何更改。
+见[安装证据与迁移命令](docs/design/installation-matrix.md)。
+
+C++17 编译器用于构建可选的 native 扩展（`pynbodyext._native`），
 gravity 求解器和 `bins["vcirc"]` 需要它；没有编译器时会跳过这个扩展，这些功能
 不可用。编译器支持 OpenMP 时构建会启用多线程，否则为单线程。在 macOS 上，
 Apple clang 需要 Homebrew 的 OpenMP 运行库才能多线程构建：
@@ -41,7 +62,12 @@ make test-all   # 全量测试；首次运行会下载约 1.1 GB 的 pynbody tes
 ```
 
 如果还没有 [uv](https://docs.astral.sh/uv/)，请先安装。
-如果你更愿意直接用 `uv`，等价的初始化命令是 `uv sync --all-extras`。
+`uv sync --locked --all-packages --all-extras` 安装两个开发成员及所有 extras；
+`make setup` 还会安装固定 Python 与 Git hooks。轻量 uv 源码环境使用
+`uv sync --locked --package pynbodyext-core --no-default-groups`，不请求 store extra。
+修改唯一版本源 `pynbodyext/__init__.py` 后，先运行
+`python scripts/sync_distribution_versions.py`，再运行 `uv lock`，并同时重建两份发行；
+`make check` 检查生成元数据与锁文件是否同步。
 架构词汇和测试所约束的不变量在 [`CONTEXT.md`](CONTEXT.md)。
 工作项和跨设备交接在 [`docs/README.md`](docs/README.md)；
 当前队列在 [`docs/work/INDEX.md`](docs/work/INDEX.md)。

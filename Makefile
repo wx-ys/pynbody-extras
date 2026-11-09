@@ -52,12 +52,12 @@ help:
 	@printf "  $(C_CYAN)bench-continuous$(C_RESET)   Regression gate: BASE..HEAD (FACTOR)$(C_RESET)\n"
 
 
-.PHONY: setup require-dev lint format typecheck test test-all test-data check docs-check docs-index work-item archive-item
+.PHONY: packaging-check setup require-dev lint format typecheck test test-all test-data check docs-check docs-index work-item archive-item
 
 # One-command bootstrap for a fresh clone. `.python-version` pins the interpreter.
 setup:
 	$(UV) python install
-	$(UV) sync --all-extras
+	$(UV) sync --all-packages --all-extras
 	$(VENV)/bin/pre-commit install
 	@printf "Ready. Run 'make check' for the fast loop.\n"
 
@@ -95,7 +95,11 @@ work-item:
 archive-item:
 	$(PY) scripts/archive_work_item.py --id "$(ID)"
 
-check: lint typecheck test docs-check
+packaging-check:
+	$(PY) scripts/sync_distribution_versions.py --check
+	$(UV) lock --check
+
+check: packaging-check lint typecheck test docs-check
 
 # OpenMP flags for cpp-test. Apple clang rejects a bare -fopenmp, so on macOS
 # use Homebrew's keg-only libomp when it is installed (single-threaded

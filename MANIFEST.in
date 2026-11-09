@@ -1,0 +1,2 @@
+# Headers are needed when rebuilding the optional extension from an sdist.
+recursive-include cpp *.cpp *.hpp *.h
