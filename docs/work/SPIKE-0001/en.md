@@ -44,3 +44,7 @@ No incidental DAG rewrite, database migration, automatic GC or release publicati
 Prepared the concrete [packaging proposal](../../design/packaging-decision.md) with unreserved candidate names, complete file ownership, dependency metadata, install/uninstall expectations and actual temporary wheel/sdist experiments. Offline installation could not resolve uncached dependencies. The sdist rebuild exited 0 but omitted native code after missing-header compilation failure; this is an explicit TASK-0002 release-validation requirement. No production packaging changed.
 
 Status: review; human approval pending. Source builds and metadata checks passed, isolated installation and uninstall not certified; TASK-0002 remains blocked. Logs: /tmp/pynbody-packaging-spike/.
+
+## Integration outcome — 2026-11-09
+
+Merged via [SPIKE-0001 PR](https://github.com/wx-ys/pynbody-extras/pull/41), merge commit `674ea4f21b473df282ea2e67f1ec9f8426596eb8`. Current status: done; this supersedes the historical local-only/review notes above. Exact scoped integration checks are recorded in handoff.md and the [integration record](../../design/integration-2026-11-09.md). No release was published.

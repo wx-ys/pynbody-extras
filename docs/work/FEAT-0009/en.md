@@ -41,7 +41,7 @@ The approved two new metadata models intentionally increase the schema table cou
 - [x] Implement the smallest scoped change; record any core contract decision before changing it.
 - [x] Run focused tests, then make check and make test-all; report exact results and limits.
 - [x] Update both locales, meta.json and handoff; retain red/green evidence.
-- [ ] Parent workflow: prepare one scoped PR using the template.
+- [x] Parent workflow: prepare one scoped PR using the template.
 
 ```bash
 .venv/bin/python -m pytest tests/test_orm_catalogues.py tests/test_orm_associations.py tests/test_package_layers_contract.py -q
@@ -92,3 +92,7 @@ approved metadata schema count changed from seven to nine.
 ## Handoff boundary
 
 No incidental DAG rewrite, database migration, automatic GC or release publication. Keep one reviewable increment per item; verify local predecessors before continuing without claiming remote merge. Commit/push permissions follow the active user authorization, not this template.
+
+## Integration outcome — 2026-11-09
+
+Merged via [FEAT-0009 PR](https://github.com/wx-ys/pynbody-extras/pull/49), merge commit `cb333cfacfb343357937378c7441437be649e980`. Current status: done; this supersedes the historical local-only/review notes above. Exact scoped integration checks are recorded in handoff.md and the [integration record](../../design/integration-2026-11-09.md). No release was published.

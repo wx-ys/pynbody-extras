@@ -79,3 +79,7 @@ PEP 517 重建、extras、源码安装、OpenMP/串行/无编译器及卸载归�
 9 个打包回归通过，原生 C++ ALL PASS。provenance 修正后，已从包含所有新功能的
 当前源码重新构建最终产物。未发布、未 commit/push、未改用户工作 .venv，
 未覆盖用户未跟踪文件。
+
+## 集成结果 — 2026-11-09
+
+已通过 [TASK-0002 PR](https://github.com/wx-ys/pynbody-extras/pull/53) 合并，merge commit `7417d949c57e01c2dcc4ac609005eaaf869eddcc`。当前状态为 done，取代上文历史记录中的仅本地/review 状态。逐项集成验证见 handoff.md 与[集成记录](../../design/integration-2026-11-09.md)。未发布 release。

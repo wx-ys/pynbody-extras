@@ -29,7 +29,7 @@ fill_from_store 命中并成功取得值后，设置值并删除对应列错误�
 - [x] 每条验收转为行为测试；先运行，记录预期缺少 API/行为的红灯，不接受导入环境损坏作为红灯。
 - [x] 只在文件范围内实施最小改动；若需变更核心合同，先记录设计决定。
 - [x] 重跑专项，再运行 make check、make test-all；报告准确计数及未验证范围。
-- [ ] 获得发布授权后开独立 PR；双语交接及红绿证据已在本地准备。
+- [x] 获得发布授权后开独立 PR；双语交接及红绿证据已在本地准备。
 
 ```bash
 .venv/bin/python -m pytest tests/test_sample_recovery.py tests/test_sample_table.py -q
@@ -91,3 +91,7 @@ def test_store_fill_clears_only_recovered_error():
 - `make test-all`: 1159 passed, 1 skipped.
 
 状态为 review：已本地实现并验证，尚未提交、发布或合并。不迁移数据库或改变无关架构。验证范围为 Linux/SQLite，不代表其他平台或后端通过。
+
+## 集成结果 — 2026-11-09
+
+已通过 [BUG-0012 PR](https://github.com/wx-ys/pynbody-extras/pull/44) 合并，merge commit `1c35d9892a93f5d175b86cf432065c0f389d4c74`。当前状态为 done，取代上文历史记录中的仅本地/review 状态。逐项集成验证见 handoff.md 与[集成记录](../../design/integration-2026-11-09.md)。未发布 release。

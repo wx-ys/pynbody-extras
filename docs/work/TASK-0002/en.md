@@ -85,3 +85,7 @@ skipped. Nine packaging regressions pass; native C++ ALL PASS. Final artifacts
 were rebuilt from all current feature source after the provenance correction.
 No release upload, commit/push, working .venv mutation or untracked-user-file
 replacement occurred.
+
+## Integration outcome — 2026-11-09
+
+Merged via [TASK-0002 PR](https://github.com/wx-ys/pynbody-extras/pull/53), merge commit `7417d949c57e01c2dcc4ac609005eaaf869eddcc`. Current status: done; this supersedes the historical local-only/review notes above. Exact scoped integration checks are recorded in handoff.md and the [integration record](../../design/integration-2026-11-09.md). No release was published.

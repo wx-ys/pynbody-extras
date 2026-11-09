@@ -1,16 +1,16 @@
 {
   "id": "FEAT-0010",
   "type": "feature",
-  "status": "review",
+  "status": "done",
   "title_en": "Reload explicit root-relative particle selections",
   "title_zh": "重载显式根相对粒子选择",
   "owner": "",
   "issue": 0,
   "created": "2026-11-09",
   "updated": "2026-11-09",
-  "completed": null,
-  "resolution": null,
-  "pr": null,
+  "completed": "2026-11-09",
+  "resolution": "implemented",
+  "pr": 50,
   "related": [
     "FEAT-0006"
   ],

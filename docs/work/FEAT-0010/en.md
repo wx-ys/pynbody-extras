@@ -48,7 +48,7 @@ The approved Selection model intentionally adds one metadata table after FEAT-00
 - [x] Implement the smallest scoped change; record any core contract decision before changing it.
 - [x] Run focused tests, then make check and make test-all; report exact results and limits.
 - [x] Update both locales, meta.json and handoff; retain red/green evidence.
-- [ ] Parent workflow: prepare one scoped PR using the template.
+- [x] Parent workflow: prepare one scoped PR using the template.
 
 ```bash
 .venv/bin/python -m pytest tests/test_orm_selections.py tests/test_orm_loading.py tests/test_logical_snapshot_identity.py tests/test_orm_associations.py -q
@@ -69,3 +69,7 @@ Final-source full suite: **1515 passed, 2 skipped** in 60.06s (/tmp/feat0010-all
 ## Handoff boundary
 
 No incidental DAG rewrite, database migration, automatic GC or release publication. Keep one reviewable increment per item; verify local predecessors before continuing without claiming remote merge. Commit/push permissions follow the active user authorization, not this template.
+
+## Integration outcome — 2026-11-09
+
+Merged via [FEAT-0010 PR](https://github.com/wx-ys/pynbody-extras/pull/50), merge commit `448fe1156f19d32aed42118cd108c1cfe0cb6c74`. Current status: done; this supersedes the historical local-only/review notes above. Exact scoped integration checks are recorded in handoff.md and the [integration record](../../design/integration-2026-11-09.md). No release was published.

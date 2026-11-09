@@ -35,7 +35,7 @@
 - [x] 每条验收转为行为测试；先运行，记录预期缺少 API/行为的红灯，不接受导入环境损坏作为红灯。
 - [x] 只在文件范围内实施最小改动；若需变更核心合同，先记录设计决定。
 - [x] 重跑专项，再运行 make check、make test-all；报告准确计数及未验证范围。
-- [ ] 更新两种语言、meta.json 和 handoff，按模板整理单独 PR，保留红绿证据。
+- [x] 更新两种语言、meta.json 和 handoff，按模板整理单独 PR，保留红绿证据。
 
 ```bash
 .venv/bin/python -m pytest tests/test_orm_environment.py tests/test_orm_associations.py tests/test_orm_loading.py tests/test_package_layers_contract.py -q
@@ -76,3 +76,7 @@ tool_versions 为空映射，random_seed 为空；布尔或浮点种子、非字
 ## 交接边界
 
 不顺带重写 DAG、不新增数据库迁移/自动 GC、不发布 release。一个工作项一个可审阅改动；后续任务先检查前项已合并。具体提交/推送权限沿用届时用户授权，不从此模板推断。
+
+## 集成结果 — 2026-11-09
+
+已通过 [FEAT-0006 PR](https://github.com/wx-ys/pynbody-extras/pull/46) 合并，merge commit `e8bdfcb1adf75987d0e88366f823abb95396eaf4`。当前状态为 done，取代上文历史记录中的仅本地/review 状态。逐项集成验证见 handoff.md 与[集成记录](../../design/integration-2026-11-09.md)。未发布 release。
