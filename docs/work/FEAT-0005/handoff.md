@@ -55,3 +55,9 @@
   historical refs require their explicit owning backend. SQLite/Linux exercised;
   other SQL dialects/platforms unverified. No migration, implicit dereference,
   automatic history GC or external publication added.
+
+## 2026-11-09 — scoped integration verification
+
+- User authorized commit, PR and merge. This increment was reconstructed in isolation after verified predecessors.
+- `make check`: 1170 passed, 2 skipped, 4 deselected in 29.73s; `make test-all`: 1174 passed, 2 skipped in 29.84s. Log: `/tmp/pynbody-publish-test-4.log`.
+- Independent complete-source review found no actionable findings; slice tests protect extraction boundaries. Publication/merge URL and final status are recorded after the remote operation is confirmed.

@@ -110,7 +110,17 @@ Use these terms exactly. Don't drift to synonyms.
   `ValueCodec`, columns via the catalog). Cells are separate runs: shared
   dependencies are not shared between columns. Default labels for configured
   logical snapshots include their logical fields plus any halo/subset suffix;
-  callers can still supply an explicit row name.
+  callers can still supply an explicit row name. `SampleRow.refs` holds each
+  successful cell's actual pinned `Result.store_ref`; retries clear stale refs
+  on failure or success without persistence. Optional `store_name` labels the
+  owning backend; filtering and exports retain it without automatically locating
+  or querying a backend. JSON schema `pynbodyext.sample.table/v2` preserves and
+  validates pinned refs against typed row identity and column signature; v1
+  remains readable with empty refs. DataFrame metadata keys identities and refs
+  by `sim_identity_key`, with ordered `identity_keys` alongside possibly duplicate
+  display names. Loading only restores values/references; explicitly call
+  `store.fetch(row.refs[label])` to read a historical version. Successful `None`
+  still shares the existing missing-cell sentinel. See ADR-011.
 - **Record** (`store/base.py::ResultRecord`) — one self-describing, codec-encoded
   row (value + named + provenance), serializable via `to_json`/`from_json`.
   The current schema is `pynbodyext.result.store/v4`; JSON loading refuses missing

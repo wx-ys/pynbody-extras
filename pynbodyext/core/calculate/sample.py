@@ -39,6 +39,7 @@ import numpy as np
 from pynbodyext.core.calculate.display import InfoView
 from pynbodyext.core.calculate.interfaces import is_calculator_node, is_stable_sim_identity
 from pynbodyext.core.calculate.runtime.sim_identity import SimIdentityProvider, snapshot_identity
+from pynbodyext.core.calculate.store.base import RecordRef
 from pynbodyext.core.calculate.store.catalog import SignatureCatalog
 from pynbodyext.core.calculate.store.codec import ValueCodec
 from pynbodyext.core.calculate.store.identity import sim_identity_key
@@ -49,7 +50,9 @@ if TYPE_CHECKING:
 __all__ = ["SAMPLE_SCHEMA", "SampleRow", "SampleTable"]
 
 #: Discriminator of the sample table's JSON file format.
-SAMPLE_SCHEMA = "pynbodyext.sample.table/v1"
+SAMPLE_SCHEMA = "pynbodyext.sample.table/v2"
+
+_LEGACY_SAMPLE_SCHEMA = "pynbodyext.sample.table/v1"
 
 _ERROR_POLICIES = ("raise", "record")
 
@@ -63,6 +66,8 @@ class SampleRow:
     values: dict[str, Any] = field(default_factory=dict)
     #: ``label -> "ErrorType: message"`` for cells that failed with ``errors="record"``.
     errors: dict[str, str] = field(default_factory=dict)
+    #: Column label -> actual saved version, paired with the table's backend.
+    refs: dict[str, RecordRef] = field(default_factory=dict)
 
     def __getitem__(self, label: str) -> Any:
         return self.values.get(label)
@@ -117,6 +122,9 @@ class SampleTable(InfoView):
     store : ResultStore, optional
         Where cells are looked up before computing and written after.  Without
         one, every :meth:`compute` computes.
+    store_name : str, optional
+        Caller-supplied backend label, retained with exported references. It does
+        not locate or automatically bind a backend when loading a table.
     sim_identity : SimIdentityProvider, optional
         How an object becomes a row identity; defaults to
         :func:`~pynbodyext.core.calculate.runtime.sim_identity.snapshot_identity`.
@@ -129,10 +137,12 @@ class SampleTable(InfoView):
         columns: Mapping[str, Any] | None = None,
         *,
         store: Any = None,
+        store_name: str | None = None,
         sim_identity: SimIdentityProvider | None = None,
         catalog: SignatureCatalog | None = None,
     ) -> None:
         self.store = store
+        self.store_name = store_name
         self.sim_identity: SimIdentityProvider = sim_identity or snapshot_identity
         self.catalog = catalog if catalog is not None else SignatureCatalog()
         #: column label -> signature key
@@ -224,7 +234,12 @@ class SampleTable(InfoView):
         return self.store
 
     def add(self, obj: Any, *, name: str | None = None, reuse: bool = True, errors: str = "raise") -> SampleRow:
-        """Compute every column for one object and add (or update) its row."""
+        """Compute every column for one object and add (or update) its row.
+
+        Each cell keeps the returned result's pinned ``store_ref``, when present.
+        Retrying a cell clears its old reference on failure (including raised
+        errors) or success without persistence.
+        """
         if errors not in _ERROR_POLICIES:
             raise ValueError(f"errors must be one of {_ERROR_POLICIES}, got {errors!r}")
         identity = tuple(self.sim_identity(obj))
@@ -237,6 +252,9 @@ class SampleTable(InfoView):
             row.name = name
         store = self._store_for(identity)
         for label in self._columns:
+            # Retrying a cell invalidates its previous receipt even if the run
+            # raises, or succeeds without writing to a store.
+            row.refs.pop(label, None)
             calculator = self.calculator(label)
             try:
                 result = calculator.run(obj, store=store, sim_identity=self.sim_identity, reuse=reuse)
@@ -248,6 +266,8 @@ class SampleTable(InfoView):
                 continue
             row.values[label] = result.value
             row.errors.pop(label, None)
+            if result.store_ref is not None:
+                row.refs[label] = result.store_ref
         return row
 
     def compute(
@@ -288,10 +308,17 @@ class SampleTable(InfoView):
                 if row.values.get(label) is not None:
                     continue
                 signature = self.catalog[key]
-                hit = self.store.get(sim_signature=row.identity, calculator_signature=signature)
+                try:
+                    hit = self.store.get(sim_signature=row.identity, calculator_signature=signature)
+                except Exception:
+                    row.refs.pop(label, None)
+                    raise
                 if hit is not None:
                     row.values[label] = hit.value
                     row.errors.pop(label, None)
+                    row.refs.pop(label, None)
+                    if hit.store_ref is not None:
+                        row.refs[label] = hit.store_ref
         return self
 
     @classmethod
@@ -300,6 +327,7 @@ class SampleTable(InfoView):
         store: Any,
         columns: Mapping[str, Any],
         *,
+        store_name: str | None = None,
         identities: Iterable[tuple[Any, ...]] | None = None,
         sim_identity: SimIdentityProvider | None = None,
     ) -> SampleTable:
@@ -308,7 +336,7 @@ class SampleTable(InfoView):
         Rows are *identities* (default: every simulation identity the store holds a
         result for); a cell with no stored result is ``None``.
         """
-        table = cls(columns, store=store, sim_identity=sim_identity)
+        table = cls(columns, store=store, store_name=store_name, sim_identity=sim_identity)
         for index, given in enumerate(identities if identities is not None else store.sim_signatures()):
             identity = tuple(given)
             table._rows.setdefault(sim_identity_key(identity), SampleRow(_default_name(identity, index), identity))
@@ -351,7 +379,9 @@ class SampleTable(InfoView):
         ``row["m_star"]`` reads a value (``None`` when missing); the new table
         shares this one's columns, catalog and store.
         """
-        out = SampleTable(store=self.store, sim_identity=self.sim_identity, catalog=self.catalog)
+        out = SampleTable(
+            store=self.store, store_name=self.store_name, sim_identity=self.sim_identity, catalog=self.catalog
+        )
         out._columns = dict(self._columns)
         out._calculators = self._calculators
         out._rows = {identity: row for identity, row in self._rows.items() if predicate(row)}
@@ -383,17 +413,24 @@ class SampleTable(InfoView):
         """The table as a :class:`pandas.DataFrame` indexed by row name.
 
         One-element arrays become numbers (units are in the metadata).  The
-        column metadata and the row identities are kept in ``df.attrs["pynbodyext"]``,
-        so the frame still says what each column computed.  Save it with pandas
+        column metadata, backend label, typed row identities and pinned reference
+        JSON are kept in ``df.attrs["pynbodyext"]``. ``identities`` and ``refs``
+        are keyed by :func:`sim_identity_key`; ``identity_keys`` gives their order
+        in the frame, including rows with duplicate display names. Identities use
+        :class:`ValueCodec` encoding. Save it with pandas
         (``df.to_parquet``, ``df.to_hdf``), which needs ``pyarrow`` or ``tables``.
         """
         import pandas as pd
 
         df = pd.DataFrame.from_records(self.to_records(), columns=["name", *self._columns]).set_index("name")
+        codec = ValueCodec()
         df.attrs["pynbodyext"] = {
             "schema": SAMPLE_SCHEMA,
             "columns": self.column_metadata(),
-            "identities": {row.name: [str(part) for part in row.identity] for row in self._rows.values()},
+            "store_name": self.store_name,
+            "identity_keys": list(self._rows),
+            "identities": {key: codec.encode(row.identity) for key, row in self._rows.items()},
+            "refs": {key: {label: ref.to_json() for label, ref in row.refs.items()} for key, row in self._rows.items()},
         }
         return df
 
@@ -402,6 +439,7 @@ class SampleTable(InfoView):
         codec = codec or ValueCodec()
         return {
             "schema": SAMPLE_SCHEMA,
+            "store_name": self.store_name,
             "catalog": self.catalog.to_dict(),
             "columns": [{"label": label, "key": key} for label, key in self._columns.items()],
             "rows": [
@@ -410,6 +448,7 @@ class SampleTable(InfoView):
                     "identity": codec.encode(row.identity),
                     "values": {label: codec.encode(value) for label, value in row.values.items()},
                     "errors": dict(row.errors),
+                    "refs": {label: ref.to_json() for label, ref in row.refs.items()},
                 }
                 for row in self._rows.values()
             ],
@@ -424,19 +463,42 @@ class SampleTable(InfoView):
         sim_identity: SimIdentityProvider | None = None,
         codec: ValueCodec | None = None,
     ) -> SampleTable:
-        """Rebuild a table from :meth:`to_dict`.  Column calculators are rebuilt on first use."""
-        if data.get("schema") != SAMPLE_SCHEMA:
+        """Rebuild values and validated pinned refs without reading a backend.
+
+        Version 1 tables load with empty refs. The optional store is bound only
+        when explicitly supplied; ``store_name`` is a label, not a resolver.
+        Column calculators are rebuilt on first use.
+        """
+        schema = data.get("schema")
+        if schema not in (SAMPLE_SCHEMA, _LEGACY_SAMPLE_SCHEMA):
             raise ValueError(f"unsupported sample table schema: {data.get('schema')!r}")
         codec = codec or ValueCodec()
-        table = cls(store=store, sim_identity=sim_identity, catalog=SignatureCatalog.from_dict(data["catalog"]))
+        table = cls(
+            store=store,
+            store_name=data.get("store_name") if schema == SAMPLE_SCHEMA else None,
+            sim_identity=sim_identity,
+            catalog=SignatureCatalog.from_dict(data["catalog"]),
+        )
         for column in data["columns"]:
             key = table.catalog.key(column["key"])
             table._columns[column["label"]] = key
             table._calculators.setdefault(key, None)
         for item in data["rows"]:
             identity = tuple(codec.decode(item["identity"]))
+            identity_key = sim_identity_key(identity)
             values = {label: codec.decode(value) for label, value in item["values"].items()}
-            table._rows[sim_identity_key(identity)] = SampleRow(item["name"], identity, values, dict(item.get("errors", {})))
+            refs = {}
+            for label, text in (item.get("refs", {}) if schema == SAMPLE_SCHEMA else {}).items():
+                ref = RecordRef.from_json(text)
+                if (
+                    ref.version_id is None
+                    or sim_identity_key(ref.sim_signature) != identity_key
+                    or label not in table._columns
+                    or ref.calculator_signature_hash != table._columns[label]
+                ):
+                    raise ValueError(f"reference for column {label!r} must pin the row identity and column signature")
+                refs[label] = ref
+            table._rows[identity_key] = SampleRow(item["name"], identity, values, dict(item.get("errors", {})), refs)
         return table
 
     def save(self, path: str | os.PathLike[str]) -> None:
