@@ -1,0 +1,22 @@
+{
+  "id": "FEAT-0004",
+  "type": "feature",
+  "status": "draft",
+  "title_en": "Load registered snapshots through explicit loader bindings",
+  "title_zh": "通过显式加载器绑定加载已登记快照",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-09",
+  "updated": "2026-11-09",
+  "completed": null,
+  "resolution": null,
+  "pr": null,
+  "related": [
+    "FEAT-0002",
+    "FEAT-0003"
+  ],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}
