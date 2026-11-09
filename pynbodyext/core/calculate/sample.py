@@ -76,11 +76,17 @@ def _default_name(identity: tuple[Any, ...], index: int) -> str:
     """A readable row name: ``snap_103``, ``snap_103:halo 7``, ``snap_103:subset 1a2b3c4d``."""
     if not is_stable_sim_identity(identity) or len(identity) < 2:
         return f"object {index}"
-    base = os.path.basename(str(identity[1])) or str(identity[1])
-    if len(identity) >= 4 and identity[2] == "halo":
-        return f"{base}:halo {identity[3]}"
-    if len(identity) >= 4 and identity[2] == "subset":
-        return f"{base}:subset {str(identity[3])[:8]}"
+    if len(identity) >= 7 and identity[1] == "pynbodyext.logical-snapshot/v1":
+        # Escape literal IDs and retain revision/loader distinctions in labels.
+        base = json.dumps(identity[2:7], ensure_ascii=False, separators=(",", ":"))
+        suffix = identity[7:]
+    else:
+        base = os.path.basename(str(identity[1])) or str(identity[1])
+        suffix = identity[2:]
+    if len(suffix) >= 2 and suffix[0] == "halo":
+        return f"{base}:halo {suffix[1]}"
+    if len(suffix) >= 2 and suffix[0] == "subset":
+        return f"{base}:subset {str(suffix[1])[:8]}"
     return base
 
 

@@ -155,7 +155,9 @@ already used in :mod:`pynbodyext.properties`, :mod:`pynbodyext.filters`, and
 from .core.calculate import (
     Bin1D,
     CalculatorBase,
+    ConfiguredSnapshotIdentity,
     FilterBase,
+    LogicalSnapshotIdentity,
     Param,
     Pipeline,
     PropertyBase,
@@ -171,6 +173,8 @@ from .core.calculate import (
 
 __all__ = [
     "CalculatorBase",
+    "ConfiguredSnapshotIdentity",
+    "LogicalSnapshotIdentity",
     "Bin1D",
     "RuntimeCalculatorBase",
     "PropertyBase",
