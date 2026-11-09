@@ -25,8 +25,18 @@ from pynbodyext.core.calculate.runtime.logical_identity import LogicalSnapshotId
 from pynbodyext.core.calculate.store import RESULT_STORE_SCHEMA, RecordRef, ResultStore
 from pynbodyext.core.calculate.store.identity import sim_identity_key
 
+from .environment import execution_context_json, validate_execution_metadata
 from .loading import LoadedInput, SnapshotLoader, load_snapshot, validate_local_location
-from .models import Base, DataLocation, DataObject, Recipe, ResultLink, Run, Simulation, Timestep
+from .models import (
+    Base,
+    DataLocation,
+    DataObject,
+    Recipe,
+    ResultLink,
+    Run,
+    Simulation,
+    Timestep,
+)
 from .records import AssociationIssue, RecordedRun, RunExecutionError, RunPersistenceError
 
 if TYPE_CHECKING:
@@ -81,6 +91,14 @@ def _run_query() -> Any:
         joinedload(Run.recipe),
         joinedload(Run.result_link),
     )
+
+
+
+
+
+
+
+
 
 
 class AnalysisRepository:
@@ -217,6 +235,21 @@ class AnalysisRepository:
                 raise KeyError(f"unknown input {input_id!r}")
             return data
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     def _prepare_load(
         self, input_id: int, location_id: int | None
     ) -> tuple[DataObject, DataLocation, LogicalSnapshotIdentity, SnapshotLoader]:
@@ -257,17 +290,23 @@ class AnalysisRepository:
         location_id: int | None = None,
         reuse: bool = True,
         options: RunOptions | None = None,
+        execution_metadata: Mapping[str, Any] | None = None,
     ) -> RecordedRun:
         """Commit a Run, load a selected registered root, then execute the calculator.
 
         Invalid requests fail preflight. Loading/validation failures after Run
         creation are recorded like calculation errors. Even cache hits load the
         snapshot; result refresh and explicit recovery follow ``run`` semantics.
+        ``execution_metadata`` records tool_versions/random_seed without seeding
+        RNGs or changing keys; context describes this invocation, not its payload.
         """
+        metadata = validate_execution_metadata(execution_metadata)
         backend = self._store(store_name)
         request = self._prepare_load(input_id, location_id)
         recipe = self.register_recipe(calculator.to_signature())
-        run = self.begin_run(input_id, recipe.hash, store_name=store_name, input_location_id=request[1].id)
+        run = self.begin_run(
+            input_id, recipe.hash, store_name=store_name, input_location_id=request[1].id, execution_metadata=metadata
+        )
 
         def execute() -> Result:
             loaded = load_snapshot(*request)
@@ -278,18 +317,39 @@ class AnalysisRepository:
         return self._execute_run(run, execute)
 
     def begin_run(
-        self, input_id: int, recipe_hash: str, *, store_name: str, input_location_id: int | None = None
+        self,
+        input_id: int,
+        recipe_hash: str,
+        *,
+        store_name: str,
+        input_location_id: int | None = None,
+        execution_metadata: Mapping[str, Any] | None = None,
     ) -> Run:
-        """Commit running before work starts. Unknown inputs/recipes/stores fail."""
+        """Commit running and its context before work starts.
+
+        Unknown inputs/recipes/stores and invalid execution_metadata fail before
+        creating a Run. Without an explicit location the context URI is null.
+        """
+        metadata = validate_execution_metadata(execution_metadata)
         self._store(store_name)
         run_id = str(uuid.uuid4())
         with self.session() as session, session.begin():
-            if session.get(DataObject, input_id) is None or session.get(Recipe, recipe_hash) is None:
+            data = session.get(DataObject, input_id)
+            if data is None or session.get(Recipe, recipe_hash) is None:
                 raise KeyError("input and recipe must be registered before beginning a run")
+            location_owner = input_id
+            location = None
             if input_location_id is not None:
                 location = session.get(DataLocation, input_location_id)
-                if location is None or location.data_object_id != input_id:
+                if location is None or location.data_object_id != location_owner:
                     raise ValueError("selected location does not belong to input")
+            _, logical, _ = _logical_input(data.signature)
+            context = execution_context_json(
+                metadata,
+                uri=None if location is None else location.uri,
+                loader_id=logical.loader_id,
+                revision=logical.revision,
+            )
             session.add(
                 Run(
                     id=run_id,
@@ -299,6 +359,7 @@ class AnalysisRepository:
                     store_name=store_name,
                     status="running",
                     started_at=time.time(),
+                    _execution_context_json=context,
                 )
             )
         return self.get_run(run_id)
@@ -357,9 +418,10 @@ class AnalysisRepository:
     @staticmethod
     def _validate_run_metadata(run: Run) -> tuple[Any, ...]:
         signature = AnalysisRepository._validate_input_metadata(run.input)
+        location_owner = run.input_id
         if run.input_location_id is not None:
             location = run.input_location
-            if location is None or location.data_object_id != run.input_id:
+            if location is None or location.data_object_id != location_owner:
                 raise ValueError("stored run location conflicts with its input")
         recipe = CalculatorSignature.from_json(run.recipe.signature_text)
         if not recipe.stable or recipe.hash != run.recipe_hash:
@@ -429,8 +491,14 @@ class AnalysisRepository:
         store_name: str,
         reuse: bool = True,
         options: RunOptions | None = None,
+        execution_metadata: Mapping[str, Any] | None = None,
     ) -> RecordedRun:
-        """Track one invocation around the existing calculator.run entry point."""
+        """Track an invocation with copied tool_versions/random_seed metadata.
+
+        Context records this invocation even on a cache hit. No managed location
+        is selected for a caller-supplied snapshot, so context URI is null.
+        """
+        metadata = validate_execution_metadata(execution_metadata)
         backend = self._store(store_name)
         signature = tuple(sim_identity(sim))
         ancestor = getattr(sim, "ancestor", sim)
@@ -442,7 +510,7 @@ class AnalysisRepository:
                 location = os.path.abspath(path)
         data = self.register_input(signature, location=location)
         recipe = self.register_recipe(calculator.to_signature())
-        run = self.begin_run(data.id, recipe.hash, store_name=store_name)
+        run = self.begin_run(data.id, recipe.hash, store_name=store_name, execution_metadata=metadata)
         return self._execute_run(
             run, lambda: calculator.run(sim, store=backend, sim_identity=sim_identity, reuse=reuse, options=options)
         )
