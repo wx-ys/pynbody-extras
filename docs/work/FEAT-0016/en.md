@@ -24,3 +24,5 @@ Initial Database tests: 10 expected missing-API failures, one existing import-is
 - make test-all: 1738 passed, 2 skipped (81.08 s); includes data-backed and isolated distribution tests. / 完整测试 1738 项通过、2 项跳过，含数据与隔离发行测试。
 
 Logs: /tmp/database-red.log, /tmp/database-review-red.log, /tmp/catalogue-review-red.log, /tmp/database-new-final.log, /tmp/database-compat-green.log, /tmp/database-make-check.log, /tmp/database-quickstart-final.log.
+
+Implementation and independent review complete; published in [PR #55](https://github.com/wx-ys/pynbody-extras/pull/55). / 实施与独立评审完成，变更已提交至 PR #55。
