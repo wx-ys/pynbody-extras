@@ -179,8 +179,14 @@ class SelectionSpec:
         return root[mask]
 
 
-def descriptor_key(root_input_id: int, expected_count: int, spec: SelectionSpec) -> str:
-    """Hash the complete definition address, independently of materialized view."""
+def descriptor_key(
+    root_input_id: int, expected_count: int, spec: SelectionSpec, *, view_signature: tuple[Any, ...] | None = None
+) -> str:
+    """Hash the replay definition, retaining existing subset descriptor addresses.
+
+    A halo view adds its typed full signature to distinguish halo numbers from
+    each other and from an ordinary subset selecting the same particles.
+    """
     if type(expected_count) is not int or expected_count < 0:
         raise ValueError("selection expected_count must be a nonnegative root particle count")
     descriptor = {
@@ -189,4 +195,12 @@ def descriptor_key(root_input_id: int, expected_count: int, spec: SelectionSpec)
         "schema": SELECTION_SCHEMA,
         "definition": json.loads(spec.to_json()),
     }
+    if view_signature is not None:
+        from pynbodyext.core.calculate.store.identity import sim_identity_key
+
+        from .loading import parse_input_identity
+
+        if parse_input_identity(view_signature).kind != "halo":
+            raise ValueError("only halo replay descriptors accept a view signature discriminator")
+        descriptor["halo_identity"] = sim_identity_key(view_signature)
     return hashlib.sha256(_json(descriptor).encode("utf-8")).hexdigest()

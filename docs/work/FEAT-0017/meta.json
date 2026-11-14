@@ -1,0 +1,19 @@
+{
+  "id": "FEAT-0017",
+  "type": "feature",
+  "status": "review",
+  "title_en": "Logical loading, save recovery and database onboarding",
+  "title_zh": "逻辑加载、保存恢复与数据库入门",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-14",
+  "updated": "2026-11-14",
+  "completed": null,
+  "resolution": "implemented",
+  "pr": null,
+  "related": [],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

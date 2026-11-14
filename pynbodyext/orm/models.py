@@ -38,12 +38,12 @@ class DataObject(Base):
     __tablename__ = "pynbodyext_orm_data_objects"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    timestep_id: Mapped[int] = mapped_column(ForeignKey(Timestep.id, ondelete="RESTRICT"), index=True)
+    timestep_id: Mapped[int | None] = mapped_column(ForeignKey(Timestep.id, ondelete="RESTRICT"), index=True)
     identity_key: Mapped[str] = mapped_column(Text, unique=True)
     identity_json: Mapped[str] = mapped_column(Text)
     kind: Mapped[str] = mapped_column(String(16))
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("pynbodyext_orm_data_objects.id", ondelete="RESTRICT"))
-    timestep: Mapped[Timestep] = relationship(back_populates="inputs")
+    timestep: Mapped[Timestep | None] = relationship(back_populates="inputs")
     parent: Mapped[DataObject | None] = relationship(back_populates="children", remote_side=lambda: DataObject.id)
     children: Mapped[list[DataObject]] = relationship(back_populates="parent")
     locations: Mapped[list[DataLocation]] = relationship(back_populates="data_object")
@@ -51,7 +51,7 @@ class DataObject(Base):
 
     @property
     def signature(self) -> tuple[Any, ...]:
-        """The logical snapshot/view signature, independent of ORM primary keys."""
+        """The stable snapshot/view signature, independent of ORM primary keys."""
         return tuple(json.loads(self.identity_json))
 
 

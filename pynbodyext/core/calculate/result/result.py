@@ -298,6 +298,25 @@ class Result(Generic[T]):
     #: Exact saved/reused version, scoped to the run's store; None without persistence.
     store_ref: RecordRef | None = field(default=None, compare=False, repr=False)
 
+    _save_catalogue: Any = field(default=None, compare=False, repr=False)
+    _save_input: Any = field(default=None, compare=False, repr=False)
+    _save_signature: str | None = field(default=None, compare=False, repr=False)
+    _database: Any = field(default=None, compare=False, repr=False)
+
+    def save(self, database: Any = None, *, name: str | None = None) -> RecordRef:
+        """Save this result to an explicit, context-local or bound database.
+
+        Each successful save creates a new immutable version. The return value
+        is its pinned RecordRef; no destination is invented when none is set.
+        """
+        from pynbodyext.core.calculate.interfaces import DATABASE_CONTEXT
+
+        context = DATABASE_CONTEXT.get()
+        target = database if database is not None else (context[0] if context else self._database)
+        if target is None:
+            raise ValueError("specify a database with result.save(db) or db.use()")
+        return target.save_result(self, name=name)
+
     def __post_init__(self) -> None:
         if not isinstance(self.named, NamedView):
             self.named = NamedView(self.named) if self.named else NamedView({})

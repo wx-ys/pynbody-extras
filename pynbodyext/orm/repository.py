@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import time
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -21,13 +20,12 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, joinedload, selectinload, sessionmaker
 
 from pynbodyext.core.calculate.result.signature import CalculatorSignature
-from pynbodyext.core.calculate.runtime.logical_identity import LogicalSnapshotIdentity
 from pynbodyext.core.calculate.store import RESULT_STORE_SCHEMA, RecordRef, ResultStore
 from pynbodyext.core.calculate.store.identity import sim_identity_key
 
 from .catalogues import CatalogueObjectKey, catalogue_identity_key, typed_object_key, validate_kind
 from .environment import execution_context_json, validate_execution_metadata
-from .loading import LoadedInput, SnapshotLoader, load_snapshot, validate_local_location
+from .loading import LoadedInput, SnapshotLoader, load_snapshot, parse_input_identity, validate_local_location
 from .models import (
     Base,
     Catalogue,
@@ -49,30 +47,9 @@ if TYPE_CHECKING:
 
     from pynbodyext.core.calculate.nodes.base import CalculatorBase
     from pynbodyext.core.calculate.result.result import Result
+    from pynbodyext.core.calculate.runtime.logical_identity import LogicalSnapshotIdentity
     from pynbodyext.core.calculate.runtime.options import RunOptions
     from pynbodyext.core.calculate.runtime.sim_identity import SimIdentityProvider
-
-
-def _logical_input(
-    value: LogicalSnapshotIdentity | tuple[Any, ...],
-) -> tuple[tuple[Any, ...], LogicalSnapshotIdentity, str]:
-    signature = value.signature() if isinstance(value, LogicalSnapshotIdentity) else value
-    if type(signature) is not tuple or len(signature) < 7 or signature[:2] != ("sim", "pynbodyext.logical-snapshot/v1"):
-        raise ValueError("ORM inputs require a configured logical snapshot identity")
-    logical = LogicalSnapshotIdentity(*signature[2:7])
-    suffix = signature[7:]
-    kind = "snapshot"
-    if suffix:
-        if len(suffix) == 2 and suffix[0] == "subset":
-            kind = "subset"
-        elif len(suffix) == 3 and suffix[0] == "halo" and type(suffix[1]) in (str, int, float, bool):
-            kind = "halo"
-        else:
-            raise ValueError("unsupported logical snapshot view suffix")
-        if not isinstance(suffix[-1], str) or re.fullmatch(r"[0-9a-f]{16}", suffix[-1]) is None:
-            raise ValueError("logical view requires the existing particle-index digest")
-    sim_identity_key(signature)  # validate scalar types, including finite halo numbers
-    return signature, logical, kind
 
 
 def _nonempty(value: str, name: str) -> None:
@@ -149,7 +126,9 @@ class AnalysisRepository:
         stores: Mapping[str, ResultStore] | None = None,
         loaders: Mapping[str, SnapshotLoader] | None = None,
         create: bool = True,
+        allow_path_inputs: bool = False,
     ) -> None:
+        self.allow_path_inputs = allow_path_inputs
         self.engine = url_or_engine if isinstance(url_or_engine, Engine) else create_engine(url_or_engine)
         if self.engine.dialect.name == "sqlite" and not event.contains(self.engine, "checkout", _foreign_keys):
             event.listen(self.engine, "checkout", _foreign_keys)
@@ -180,30 +159,35 @@ class AnalysisRepository:
     def register_input(
         self, identity: LogicalSnapshotIdentity | tuple[Any, ...], *, location: str | None = None
     ) -> DataObject:
-        """Idempotently register a logical root/view and optional root location."""
-        signature, logical, kind = _logical_input(identity)
+        """Register a root/view; path identities require allow_path_inputs=True."""
+        parsed = parse_input_identity(identity)
+        signature, logical, kind = parsed.signature, parsed.logical, parsed.kind
+        if logical is None and not self.allow_path_inputs:
+            raise ValueError("ORM inputs require a configured logical snapshot identity unless allow_path_inputs=True")
         if location is not None:
             _nonempty(location, "location")
         with self.session() as session, session.begin():
-            simulation = session.scalar(
-                select(Simulation).where(
-                    Simulation.project_id == logical.project_id, Simulation.logical_id == logical.simulation_id
+            timestep = None
+            if logical is not None:
+                simulation = session.scalar(
+                    select(Simulation).where(
+                        Simulation.project_id == logical.project_id, Simulation.logical_id == logical.simulation_id
+                    )
                 )
-            )
-            if simulation is None:
-                simulation = Simulation(project_id=logical.project_id, logical_id=logical.simulation_id)
-                session.add(simulation)
-                session.flush()
-            timestep = session.scalar(
-                select(Timestep).where(
-                    Timestep.simulation_id == simulation.id, Timestep.logical_id == logical.timestep_id
+                if simulation is None:
+                    simulation = Simulation(project_id=logical.project_id, logical_id=logical.simulation_id)
+                    session.add(simulation)
+                    session.flush()
+                timestep = session.scalar(
+                    select(Timestep).where(
+                        Timestep.simulation_id == simulation.id, Timestep.logical_id == logical.timestep_id
+                    )
                 )
-            )
-            if timestep is None:
-                timestep = Timestep(simulation=simulation, logical_id=logical.timestep_id)
-                session.add(timestep)
-                session.flush()
-            root_sig = logical.signature()
+                if timestep is None:
+                    timestep = Timestep(simulation=simulation, logical_id=logical.timestep_id)
+                    session.add(timestep)
+                    session.flush()
+            root_sig = parsed.root_signature
             root = self._input_row(session, timestep, root_sig, "snapshot")
             data = root if kind == "snapshot" else self._input_row(session, timestep, signature, kind, root)
             if (
@@ -218,7 +202,7 @@ class AnalysisRepository:
 
     @staticmethod
     def _input_row(
-        session: Session, timestep: Timestep, signature: tuple[Any, ...], kind: str, parent: DataObject | None = None
+        session: Session, timestep: Timestep | None, signature: tuple[Any, ...], kind: str, parent: DataObject | None = None
     ) -> DataObject:
         key = sim_identity_key(signature)
         data = session.scalar(select(DataObject).where(DataObject.identity_key == key))
@@ -230,7 +214,7 @@ class AnalysisRepository:
             session.flush()
         elif (
             sim_identity_key(data.signature) != key
-            or data.timestep_id != timestep.id
+            or data.timestep_id != (None if timestep is None else timestep.id)
             or data.kind != kind
             or data.parent_id != (None if parent is None else parent.id)
         ):
@@ -442,9 +426,9 @@ class AnalysisRepository:
             root.kind != "snapshot"
             or root.id != selection.root_input_id
             or view.id != selection.view_input_id
-            or view.kind != "subset"
+            or view.kind not in ("subset", "halo")
             or view.parent_id != root.id
-            or sim_identity_key(view_signature[:7]) != sim_identity_key(root_signature)
+            or sim_identity_key(parse_input_identity(view_signature).root_signature) != sim_identity_key(root_signature)
         ):
             raise ValueError("selection root/view metadata is inconsistent")
         if selection.schema != SELECTION_SCHEMA:
@@ -452,7 +436,8 @@ class AnalysisRepository:
         spec = SelectionSpec.from_json(selection.definition_json)
         if (
             spec.to_json() != selection.definition_json
-            or descriptor_key(root.id, selection.expected_count, spec) != selection.descriptor_key
+            or descriptor_key(root.id, selection.expected_count, spec,
+                              view_signature=view_signature if view.kind == "halo" else None) != selection.descriptor_key
         ):
             raise ValueError("selection descriptor conflicts with its definition or root particle count")
         return spec
@@ -470,6 +455,7 @@ class AnalysisRepository:
         from pynbody.snapshot import SimSnap
 
         from pynbodyext.core.calculate.runtime.logical_identity import ConfiguredSnapshotIdentity
+        from pynbodyext.core.calculate.runtime.sim_identity import snapshot_identity
 
         if not isinstance(loaded, LoadedInput):
             raise TypeError("selection registration requires a LoadedInput root")
@@ -487,7 +473,7 @@ class AnalysisRepository:
             raise ValueError("selection registration requires a root snapshot, not a view")
         validate_local_location(os.fspath(sim.filename))
         if (
-            not isinstance(loaded.sim_identity, ConfiguredSnapshotIdentity)
+            not (isinstance(loaded.sim_identity, ConfiguredSnapshotIdentity) or loaded.sim_identity is snapshot_identity)
             or getattr(sim, "_transformations", None)
             or sim_identity_key(loaded.sim_identity(sim)) != sim_identity_key(signature)
         ):
@@ -506,8 +492,9 @@ class AnalysisRepository:
         expected_count = len(loaded_root.sim)
         view_sim = spec.materialize(loaded_root)
         self._validate_loaded_root(loaded_root)
-        signature, _, kind = _logical_input(loaded_root.sim_identity(view_sim))
-        if kind != "subset" or sim_identity_key(signature[:7]) != root.identity_key:
+        parsed = parse_input_identity(loaded_root.sim_identity(view_sim))
+        signature, kind = parsed.signature, parsed.kind
+        if kind != "subset" or sim_identity_key(parsed.root_signature) != root.identity_key:
             raise ValueError("materialized selection has an invalid view identity")
         key = descriptor_key(root.id, expected_count, spec)
         with self.session() as session, session.begin():
@@ -549,6 +536,9 @@ class AnalysisRepository:
         if len(loaded.sim) != selection.expected_count:
             raise ValueError("loaded root particle count differs from selection expected_count")
         view = spec.materialize(loaded)
+        parsed = parse_input_identity(selection.view_input.signature)
+        if parsed.kind == "halo":
+            view._halo_number = parsed.signature[-2]
         if (
             sim_identity_key(loaded.sim_identity(loaded.sim)) != selection.root_input.identity_key
             or sim_identity_key(loaded.sim_identity(view)) != selection.view_input.identity_key
@@ -608,14 +598,14 @@ class AnalysisRepository:
 
     def _prepare_load(
         self, input_id: int, location_id: int | None
-    ) -> tuple[DataObject, DataLocation, LogicalSnapshotIdentity, SnapshotLoader]:
+    ) -> tuple[DataObject, DataLocation, LogicalSnapshotIdentity | None, SnapshotLoader]:
         data = self.get_input(input_id)
         signature = self._validate_input_metadata(data)
-        _, logical, kind = _logical_input(signature)
-        if kind != "snapshot":
+        parsed = parse_input_identity(signature)
+        if parsed.kind != "snapshot":
             raise ValueError("only registered root snapshots can be loaded; view selection is not reconstructible")
-        if logical.loader_id not in self._loaders:
-            raise KeyError(f"snapshot loader {logical.loader_id!r} is not bound")
+        if parsed.loader_id not in self._loaders:
+            raise KeyError(f"snapshot loader {parsed.loader_id!r} is not bound")
         location: DataLocation | None
         if location_id is None:
             if len(data.locations) != 1:
@@ -626,7 +616,7 @@ class AnalysisRepository:
             if location is None:
                 raise ValueError("selected location does not belong to input")
         validate_local_location(location.uri)
-        return data, location, logical, self._loaders[logical.loader_id]
+        return data, location, parsed.logical, self._loaders[parsed.loader_id]
 
     def load_input(self, input_id: int, *, location_id: int | None = None) -> LoadedInput:
         """Load a registered root using its loader_id binding, without creating a Run.
@@ -708,12 +698,12 @@ class AnalysisRepository:
                 location = session.get(DataLocation, input_location_id)
                 if location is None or location.data_object_id != location_owner:
                     raise ValueError("selected location does not belong to input or selection root")
-            _, logical, _ = _logical_input(data.signature)
+            parsed = parse_input_identity(self._validate_input_metadata(data))
             context = execution_context_json(
                 metadata,
                 uri=None if location is None else location.uri,
-                loader_id=logical.loader_id,
-                revision=logical.revision,
+                loader_id=parsed.loader_id,
+                revision=parsed.revision,
             )
             session.add(
                 Run(
@@ -754,17 +744,17 @@ class AnalysisRepository:
 
     @staticmethod
     def _validate_input_metadata(data: DataObject) -> tuple[Any, ...]:
-        signature, logical, kind = _logical_input(data.signature)
+        parsed = parse_input_identity(data.signature)
+        signature, logical, kind = parsed.signature, parsed.logical, parsed.kind
         timestep = data.timestep
-        simulation = timestep.simulation
-        if (
-            sim_identity_key(signature) != data.identity_key
-            or data.kind != kind
+        invalid_hierarchy = timestep is not None if logical is None else (
+            timestep is None
             or timestep.logical_id != logical.timestep_id
-            or simulation.logical_id != logical.simulation_id
-            or simulation.project_id != logical.project_id
-        ):
-            raise ValueError("stored input hierarchy conflicts with its logical identity")
+            or timestep.simulation.logical_id != logical.simulation_id
+            or timestep.simulation.project_id != logical.project_id
+        )
+        if sim_identity_key(signature) != data.identity_key or data.kind != kind or invalid_hierarchy:
+            raise ValueError("stored input hierarchy conflicts with its identity")
         if kind == "snapshot":
             if data.parent_id is not None:
                 raise ValueError("root snapshot cannot have a parent")
@@ -775,10 +765,10 @@ class AnalysisRepository:
                 or parent.parent_id is not None
                 or parent.kind != "snapshot"
                 or parent.timestep_id != data.timestep_id
-                or sim_identity_key(parent.signature) != sim_identity_key(logical.signature())
-                or parent.identity_key != sim_identity_key(logical.signature())
+                or sim_identity_key(parent.signature) != sim_identity_key(parsed.root_signature)
+                or parent.identity_key != sim_identity_key(parsed.root_signature)
             ):
-                raise ValueError("view parent conflicts with its logical root")
+                raise ValueError("view parent conflicts with its root")
         return signature
 
     @staticmethod

@@ -1,5 +1,12 @@
 # Design entry point / 设计入口
 
+**Database UX proposal / 数据库使用体验提案 — 2026-11-14:**
+[中文](database-ux-2026-11-14.zh-CN.md) ·
+[English](database-ux-2026-11-14.md) ·
+[ADR-020 (accepted / 已接受)](../adr/0020-database-user-interface.md).
+Implementation is authorized and tracked in FEAT-0013–0017.
+[User guide / 使用指南](../database.zh-CN.md). / 已授权实施，详见工作项与使用指南。
+
 **Integration update / 集成更新 — 2026-11-09:** All authorized increments are now merged; work items are done. See the [integration record](integration-2026-11-09.md) for actual PRs and verification. Earlier local-only statements below describe the recorded pre-integration checkpoint.
 
 Current review baseline: `5df15dd`, 2026-11-09.

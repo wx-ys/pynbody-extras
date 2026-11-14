@@ -1,0 +1,19 @@
+{
+  "id": "FEAT-0015",
+  "type": "feature",
+  "status": "review",
+  "title_en": "Run database objects without loading on cache hits",
+  "title_zh": "数据库对象命中缓存时免加载运行",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-14",
+  "updated": "2026-11-14",
+  "completed": null,
+  "resolution": "implemented",
+  "pr": null,
+  "related": [],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}
