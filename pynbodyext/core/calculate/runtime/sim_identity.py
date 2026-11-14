@@ -94,8 +94,13 @@ def _has_transformations(obj: Any) -> bool:
 
 def _index_digest(sim: Any, ancestor: Any) -> str:
     """A short hash of the particle indices *sim* selects from *ancestor*."""
-    indices = np.ascontiguousarray(np.asarray(sim.get_index_list(ancestor), dtype=np.int64))
-    return hashlib.sha256(indices.tobytes()).hexdigest()[:16]
+    return particle_index_digest(sim.get_index_list(ancestor))
+
+
+def particle_index_digest(indices: Any) -> str:
+    """Canonical digest shared by live views and captured replay definitions."""
+    array = np.ascontiguousarray(np.asarray(indices, dtype=np.int64))
+    return hashlib.sha256(array.tobytes()).hexdigest()[:16]
 
 
 def snapshot_identity(sim: Any) -> tuple[Any, ...]:

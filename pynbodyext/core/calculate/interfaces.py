@@ -28,6 +28,8 @@ from every layer.  ``tests/test_layering_contract.py`` holds the rule.
 
 from __future__ import annotations
 
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pynbodyext.util._type import class_path, import_object
@@ -259,3 +261,28 @@ def is_stable_sim_identity(identity: tuple[Any, ...]) -> bool:
     persistence), so it lives here, below both.
     """
     return bool(identity) and identity[0] != SESSION_TAG
+
+
+# Persistence is an optional upper-layer capability. These definitions must stay
+# free of runtime/store/ORM imports so Results can delegate saving down this seam.
+
+
+class DatabaseSession(Protocol):
+    def run_calculator(self, calculator: Any, source: Any, *, options: Any, mode: str) -> Any: ...
+
+    def save_result(self, result: Any, *, name: str | None = None) -> Any: ...
+
+
+@dataclass(frozen=True)
+class SavedInput:
+    """Input facts captured before execution, with no live particle references."""
+
+    signature: tuple[Any, ...]
+    root_signature: tuple[Any, ...]
+    location: str | None
+    root_count: int
+    indices: tuple[int, ...] | None = None
+    unit_basis: tuple[str, ...] = ()
+
+
+DATABASE_CONTEXT: ContextVar[tuple[DatabaseSession, str] | None] = ContextVar("pynbodyext_database", default=None)

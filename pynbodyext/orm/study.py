@@ -348,7 +348,7 @@ def _preflight(
         data, location, logical, _ = repo._prepare_load(input_id, selected.get(input_id))
         if data.kind != "snapshot" or data.parent_id is not None:
             raise ValueError("studies require registered root snapshots, not views or selections")
-        identities.append(logical.signature())
+        identities.append(data.signature)
         locations[input_id] = location.id
     return ids, tuple(identities), tuple(columns), locations
 

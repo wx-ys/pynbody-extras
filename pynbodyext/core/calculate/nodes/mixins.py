@@ -500,7 +500,9 @@ class _CalculatorRunMixin(_CalculatorContract, Generic[TRaw, TPublic]):
         *,
         store: ResultStore | None = None,
         sim_identity: SimIdentityProvider | None = None,
-        reuse: bool = True,
+        reuse: bool | None = None,
+        database: Any = None,
+        mode: str | None = None,
         **overrides: Unpack[RunOptionKwargs],
     ) -> TPublic:
         """Evaluate the calculator and return a public value.
@@ -521,6 +523,11 @@ class _CalculatorRunMixin(_CalculatorContract, Generic[TRaw, TPublic]):
             :meth:`run`).
         reuse : bool, default True
             Return a stored result instead of computing (see :meth:`run`).
+        database : Database, optional
+            Save and reuse through a local Database. Cannot combine with store/reuse.
+        mode : {"manual", "auto", "refresh"}, optional
+            Compute only, reuse-or-save, or recompute-and-save. Defaults to the
+            applicable db.use context, otherwise auto with a database and manual without.
         **overrides
             Any :class:`RunOptions` field, by name — ``cache``, ``progress``,
             ``perf_time``, ``perf_memory``, ``observe``, ``backend``,
@@ -533,7 +540,8 @@ class _CalculatorRunMixin(_CalculatorContract, Generic[TRaw, TPublic]):
         TPublic
             Public value returned by this calculator after execution and materialization.
         """
-        return self.run(sim, options=options, store=store, sim_identity=sim_identity, reuse=reuse, **overrides).value
+        return self.run(sim, options=options, store=store, sim_identity=sim_identity, reuse=reuse,
+                        database=database, mode=mode, **overrides).value
 
     def _resolve_run_options(
         self,
@@ -563,7 +571,9 @@ class _CalculatorRunMixin(_CalculatorContract, Generic[TRaw, TPublic]):
         *,
         sim_identity: SimIdentityProvider | None = None,
         store: ResultStore | None = None,
-        reuse: bool = True,
+        reuse: bool | None = None,
+        database: Any = None,
+        mode: str | None = None,
         **overrides: Unpack[RunOptionKwargs],
     ) -> Result[TPublic]:
         """Run the calculator and return a Result.
@@ -577,11 +587,10 @@ class _CalculatorRunMixin(_CalculatorContract, Generic[TRaw, TPublic]):
         sim_identity : SimIdentityProvider, optional
             Identity provider mapping the simulation object to an address tuple
             (``("sim", "/data/snap_103", "halo", 0, ...)``).  When given, the engine
-            keys provenance and the store on this identity.  Defaults to the
-            session-only id-based identity, except with a persistent *store*, where
-            it defaults to :func:`~pynbodyext.core.calculate.runtime.sim_identity.snapshot_identity`
-            (file path plus halo / particle subset), so stored results are found
-            again after a restart.
+            keys provenance and the store on this identity. High-level runs default
+            to snapshot_identity (file path plus halo/particle selection); explicit
+            transient stores retain session-only defaults. Database identities are
+            configured through Database.register instead of this argument.
         store : ResultStore, optional
             A result store keyed by ``(sim_identity(sim), root CalculatorSignature)``.
             A stored result is returned instead of computing (``result.from_store``);
@@ -589,6 +598,11 @@ class _CalculatorRunMixin(_CalculatorContract, Generic[TRaw, TPublic]):
         reuse : bool, default True
             Look the result up in *store* first.  ``False`` always computes and
             replaces the stored result.
+        database : Database, optional
+            Save and reuse through a local Database. Cannot combine with store/reuse.
+        mode : {"manual", "auto", "refresh"}, optional
+            Compute only, reuse-or-save, or recompute-and-save. Defaults to the
+            applicable db.use context, otherwise auto with a database and manual without.
         **overrides
             Any :class:`RunOptions` field, by name; each option is documented on
             :class:`RunOptions`.  A name passed as ``None`` keeps the value the
@@ -599,14 +613,38 @@ class _CalculatorRunMixin(_CalculatorContract, Generic[TRaw, TPublic]):
         Result[TPublic]
             Result object containing the public value and diagnostics from this run.
         """
-        from pynbodyext.core.calculate.runtime.engine import EvalEngine
+        from pynbodyext.core.calculate.interfaces import DATABASE_CONTEXT
+        from pynbodyext.core.calculate.runtime.persistence import execute
         from pynbodyext.core.calculate.runtime.sim_identity import snapshot_identity
 
-        if sim_identity is None and store is not None and getattr(store, "persistent", True):
-            sim_identity = snapshot_identity
-        engine = EvalEngine(sim_identity=sim_identity) if sim_identity is not None else EvalEngine()
+        owner = getattr(sim, "_database", None)
+        ambient = DATABASE_CONTEXT.get()
+        legacy = store is not None or reuse is not None
+        if legacy and (database is not None or mode is not None or owner is not None):
+            raise ValueError("store/reuse cannot be combined with database/mode or database inputs")
+        if owner is not None and database is not None and owner is not database:
+            raise ValueError("input belongs to another database")
+        selected = None if legacy else (database if database is not None else owner)
+        if selected is None and not legacy and ambient is not None:
+            selected = ambient[0]
+        resolved_mode = mode
+        if resolved_mode is None:
+            resolved_mode = ambient[1] if ambient is not None and selected is ambient[0] else (
+                "auto" if selected is not None else "manual"
+            )
+        if resolved_mode not in ("manual", "auto", "refresh"):
+            raise ValueError("mode must be manual, auto or refresh")
         merged = self._resolve_run_options(options=options, **overrides)
-        return engine.run(cast("CalculatorBase[Any, TPublic]", self), sim, merged, store=store, reuse=reuse)
+        if selected is not None:
+            if sim_identity is not None:
+                raise ValueError("register the input identity with Database instead of passing sim_identity")
+            return selected.run_calculator(self, sim, options=merged, mode=resolved_mode)
+        if not legacy and resolved_mode != "manual":
+            raise ValueError("auto/refresh requires a database")
+        if sim_identity is None and (store is None or getattr(store, "persistent", True)):
+            sim_identity = snapshot_identity
+        return execute(cast("CalculatorBase[Any, TPublic]", self), sim, merged, provider=sim_identity, store=store,
+                       reuse=True if reuse is None else reuse)
 
     def value(self, sim: Any, options: RunOptions | None = None, **overrides: Unpack[RunOptionKwargs]) -> TPublic:
         """Evaluate the calculator and return only the public value.

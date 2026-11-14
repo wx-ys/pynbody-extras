@@ -52,6 +52,7 @@ _ORDER = (
     "filters",
     "properties",
     "transforms",
+    "database",  # ADR-020: user interface above ORM and calculators
 )
 
 #: ``(importer layer, imported layer)`` pairs that break the order and are known.
@@ -72,6 +73,7 @@ _LAYERS: dict[str, str] = {
     "pynbodyext.core.calculate": "core",
     "pynbodyext.calculate": "calculate",
     "pynbodyext.orm": "orm",
+    "pynbodyext.database": "database",
     "pynbodyext.filters": "filters",
     "pynbodyext.properties": "properties",
     "pynbodyext.transforms": "transforms",
@@ -111,6 +113,9 @@ def test_every_import_in_the_package_points_downwards() -> None:
                 continue  # outside the package, or inside this layer
             if source == "core" and target == "core":
                 continue  # the core's own order is test_layering_contract.py's job
+            # ADR-020 permits exactly this lazy public export, not general upward imports.
+            if importer == "pynbodyext" and module == "pynbodyext.database":
+                continue
             if _ORDER.index(target) > _ORDER.index(source):
                 if (source, target) in _ALLOWED_UPWARD:
                     continue

@@ -8,6 +8,54 @@ to remaining V1 requirements and sequential work items. Proposed APIs there are
 not current contracts; this glossary and accepted ADRs describe implemented
 behavior. The older Workspace/Artifact rebuild notes are historical alternatives.
 
+## Database interface (ADR-020)
+
+`pynbodyext.Database(path)` is the lazy, optional SQLAlchemy entry point above ORM.
+The user interface is `cc.run(sim)`, `res.save(db, name=...)`,
+`db.snapshots[key].results[cc | alias]`, and database-object `.load()`.
+`manual` computes only, `auto` reuses or computes/saves, and `refresh` always
+computes a new immutable version. No database means manual; explicit Database or
+its object handles default to auto. `db.use()` uses a ContextVar, restores outer
+state on exit, and never holds a write transaction across particle IO/execution.
+Explicit legacy store/reuse calls bypass ambient Database settings; mixing old
+and new explicit policies fails before execution. Cross-database object ownership
+is checked, while explicit result copies preserve the captured input identity.
+
+High-level `.run()` now captures immutable SavedInput facts and CalculatorSignature
+before execution, with snapshot_identity as its default for file-backed inputs.
+Direct EvalEngine defaults remain session-only. Capture retains root-relative
+indices and physical unit basis, not a strong sim reference. Known partial file
+loads require a logical identity with a custom loader; default persistence refuses
+to identify them as complete files. In-place particle edits still require refresh
+or a new revision. No content fingerprint or particle archive is introduced.
+
+Database opts into `AnalysisRepository(..., allow_path_inputs=True)`. Path inputs
+have no invented Simulation/Timestep; direct repositories remain logical-only by
+default. Typed identities, ResultStore, ValueCodec and EvalEngine retain ownership.
+`database` is above ORM; core only knows dependency-free interfaces. The sole
+upward package export is the lazy root `Database` attribute (tested explicitly).
+
+InputInfo captures reload facts, aliases bind full calculator hashes per input,
+and SaveOperation records exact receipts before payload writes for explicit
+`db.recover(ref)`. Auto/refresh calls have Runs, including cache hits and loader
+failures. Deferred manual save does not fabricate an earlier Run. Immutable
+ResultSummary rows support bounded listings joined to current store metadata;
+legacy writes with no summary remain visible as summary-unavailable, without
+reading their payload. Independent metadata/payload transactions retain explicit
+recovery, not a distributed-transaction guarantee.
+
+Catalogues use scientific namespaces and original typed IDs. The qualified
+HaloNumberCatalogue adapter copies its integer membership vector and uses the
+shared particle_index_digest, so first execution loads particles once and hits
+load none. Unknown adapters leave exact saved views in selections with a notice.
+Registered subhalos can browse/load explicitly linked selections; the number-array
+adapter does not infer their host relationships. Halo Selection descriptors add
+an exact view-identity discriminator; existing subset descriptors are unchanged.
+Reload and recovery validate root/count/indices/digest and the owning Selection.
+
+User documentation: [English](docs/database.md), [中文](docs/database.zh-CN.md),
+[executable real-file example](docs/database_quickstart.py).
+
 ## Distribution ownership (ADR-019)
 
 `pynbodyext-core` is the root distribution and sole owner of all `pynbodyext/**`
@@ -93,7 +141,8 @@ Use these terms exactly. Don't drift to synonyms.
   <digest>)` or `("subset", <digest>)` for a sub-snapshot, the digest hashing the
   particle indices it selects. It falls back to a session identity for a
   snapshot without a file or with a transformation applied outside the
-  calculator. `calc.run(sim, store=<persistent store>)` uses it by default.
+  calculator. `calc.run(sim)` and persistent-store runs use it by default (ADR-020);
+  explicit transient stores retain their session-default behavior.
 - **`LogicalSnapshotIdentity`** (`runtime/logical_identity.py`) — explicit
   project/simulation/timestep string IDs, optional data `revision` (default None),
   and user-managed `loader_id` (default "default"). None revision means data edits
@@ -303,7 +352,9 @@ full/lightweight distribution split is a separate packaging decision (ADR-005).
   `Timestep.logical_id` is its timestep_id. Database PKs do not replace these IDs.
 - **DataObject** — exact configured logical root/view identity, including optional
   revision, loader and any halo/subset suffix. Views link to their root input.
-  Only logical identities are accepted; path/session fallback is not promoted.
+  Direct repositories accept only logical identities by default; the Database
+  opts into stable path identities with nullable timestep membership (ADR-020).
+  Session identities are never promoted.
 - **DataLocation** — root input URI metadata. Aliases and historical reuse of a
   location by different revisions are allowed. Explicit loader bindings can load
   local absolute paths/prefixes for registered roots (ADR-010); no fingerprinting.

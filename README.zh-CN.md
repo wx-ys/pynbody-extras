@@ -7,6 +7,23 @@
 
 **注意：项目仍在积极开发中，欢迎反馈和贡献！**
 
+## 保存与复用结果
+
+已有加载的 `sim` 和构建好的 `calculator` 时：
+
+```python
+import pynbodyext as pe
+
+with pe.Database("analysis.sqlite") as db:
+    with db.use(mode="auto"):
+        result = calculator.run(sim)
+```
+
+也可以先计算，再调用 `result.save(db)`。通过 `db.snapshots`、`.results`、
+`.halos` 浏览已保存对象，用 `.load()` 重载粒子。
+[使用指南](docs/database.zh-CN.md) · [可运行示例](docs/database_quickstart.py)。
+
+
 ## 安装
 
 需要 Python >=3.11、pynbody >=2.8.0。不再支持 Python 3.10；

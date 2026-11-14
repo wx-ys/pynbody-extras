@@ -8,6 +8,23 @@ calculators, binned profiles and ready-to-publish 2-D maps.
 **Note: This project is under active development. Feedback and contributions are welcome!**
 
 
+## Save and reuse results
+
+Given a loaded `sim` and a `calculator`:
+
+```python
+import pynbodyext as pe
+
+with pe.Database("analysis.sqlite") as db:
+    with db.use(mode="auto"):
+        result = calculator.run(sim)
+```
+
+Or calculate first and call `result.save(db)`. Browse saved objects through
+`db.snapshots`, `.results` and `.halos`; `.load()` restores their particles.
+[Usage guide](docs/database.md) · [Runnable example](docs/database_quickstart.py).
+
+
 ## Installation
 
 Requires Python >=3.11 and pynbody >=2.8.0. Python 3.10 is no longer supported;

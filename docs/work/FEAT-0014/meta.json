@@ -1,0 +1,19 @@
+{
+  "id": "FEAT-0014",
+  "type": "feature",
+  "status": "done",
+  "title_en": "Database cache modes and scoped defaults",
+  "title_zh": "数据库缓存模式与局部默认配置",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-14",
+  "updated": "2026-11-14",
+  "completed": "2026-11-14",
+  "resolution": "implemented",
+  "pr": 55,
+  "related": [],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

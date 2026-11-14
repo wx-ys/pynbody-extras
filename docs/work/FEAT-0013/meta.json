@@ -1,0 +1,19 @@
+{
+  "id": "FEAT-0013",
+  "type": "feature",
+  "status": "done",
+  "title_en": "Root result saving and database browsing",
+  "title_zh": "根结果保存与数据库浏览",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-14",
+  "updated": "2026-11-14",
+  "completed": "2026-11-14",
+  "resolution": "implemented",
+  "pr": 55,
+  "related": [],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}
