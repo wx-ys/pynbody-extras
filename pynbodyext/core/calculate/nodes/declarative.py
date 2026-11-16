@@ -24,6 +24,7 @@ from pynbodyext.core.calculate.params.fields import (
 from pynbodyext.util._type import dataclass_transform
 
 from .base import CalculatorBase
+from .parameter_state import remember_parameters
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -93,6 +94,7 @@ def dataclass_calc(
             self._init_dataclass_base()
             if callable(original_post_init):
                 original_post_init(self)
+            remember_parameters(self)
 
         raw_cls.__post_init__ = __post_init__  # type: ignore[attr-defined]
         dataclass_kwargs.setdefault("repr", False)

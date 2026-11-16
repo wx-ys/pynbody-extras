@@ -269,12 +269,12 @@ class ResultRecord:
             created_at=created_at if created_at is not None else time.time(),
         )
 
-    def to_result(self, codec: ValueCodec, *, calculator: Any = None) -> Result:
+    def to_result(self, codec: ValueCodec, *, calculator: Any = None, rebuild_calculator: bool = True) -> Result:
         """Reconstruct a :class:`Result` from a stored record.
 
         *calculator* is attached as ``result.calculator`` when the caller already
         holds the live node (a cache hit during a run); otherwise it is rebuilt
-        from the stored signature text when possible.
+        from the stored signature text when possible, unless rebuild_calculator is false.
         """
         from pynbodyext.core.calculate.result.enums import BuiltinKinds, NodeStatus
         from pynbodyext.core.calculate.result.result import NodeRecord, PerfSummary, ProvenanceInfo, Result, ResultNode
@@ -320,7 +320,7 @@ class ResultRecord:
                 calculator_signature_hash=self.calculator_signature_hash,
             )
 
-        if calculator is None and self.calculator_signature_text:
+        if rebuild_calculator and calculator is None and self.calculator_signature_text:
             try:
                 calculator = calculator_from_signature(self.calculator_signature_text)
             except Exception:

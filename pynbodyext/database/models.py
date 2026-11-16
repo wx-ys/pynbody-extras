@@ -58,3 +58,22 @@ class ResultSummary(Base):
     calculator_hash: Mapped[str] = mapped_column(String(64))
     ref_json: Mapped[str] = mapped_column(Text)
     summary_json: Mapped[str] = mapped_column(Text)
+
+
+class DatabaseNamespace(Base):
+    __tablename__ = "pynbodyext_database_namespace"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    uuid: Mapped[str] = mapped_column(String(36))
+
+
+class StudyDefinitionRow(Base):
+    __tablename__ = "pynbodyext_database_study_definitions"
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    definition_json: Mapped[str] = mapped_column(Text)
+
+
+class StudyName(Base):
+    __tablename__ = "pynbodyext_database_study_names"
+    name: Mapped[str] = mapped_column(Text, primary_key=True)
+    digest: Mapped[str] = mapped_column(ForeignKey(StudyDefinitionRow.digest))
+    created_at: Mapped[float] = mapped_column()

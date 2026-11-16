@@ -36,6 +36,7 @@ from pynbodyext.core.calculate.display import (
     display_value,
 )
 from pynbodyext.core.calculate.nodes._tree import render_tree
+from pynbodyext.core.calculate.nodes.parameter_state import update_parameter
 from pynbodyext.core.calculate.params import (
     DynamicParamSpec,
     RuntimeValueResolver,
@@ -907,6 +908,7 @@ class _CalculatorComposeMixin(_CalculatorContract, Generic[TRaw, TPublic]):
             # The clone changed this field after construction, so the recorded
             # constructor value (used to decide explicit-vs-default) follows.
             record_init_value(clone, key, value)
+            update_parameter(clone, key, value)
         return clone
 
     @overload

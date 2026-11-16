@@ -249,3 +249,47 @@ refreshes results, reloads an exact selection and a halo, then reopens SQLite
 with a loader that raises. Its final cache-hit assertions prove that root,
 selection and halo results can be reused without loading particles. It prints
 the temporary output directory and keeps the files for inspection.
+
+## Run a fixed study
+
+```python
+from pynbodyext import Database, StudyTable
+from pynbodyext.properties import ParamSum
+
+with Database("analysis.sqlite") as db:
+    snapshot = db.snapshots["snapshot_099"]
+    sample = db.study(objects=[snapshot], calculations={"mass": ParamSum("mass")})
+    sample.save(name="sample-v1")
+    plan = sample.plan()
+    attempt = sample.run(errors="collect")
+    failed = attempt.cells(status="failed")
+    attempt.save("sample-attempt.json")
+
+frozen = StudyTable.load("sample-attempt.json")
+row = frozen[frozen.objects[0]]
+if row.cell("mass").status == "succeeded":
+    print(row["mass"])
+
+with Database("analysis.sqlite", read_only=True) as db:
+    current = db.studies["sample-v1"].collect(missing="keep")
+```
+
+`run()` records the invocation. `collect()` captures the current pinned versions
+and needs neither loaders nor calculator bindings. In auto mode a repeat uses
+the same result versions as single-object runs. Use `mode="refresh"` to retry
+a failed refresh, passing `cells=failed` to target the exact coordinates.
+
+Reopening a definition requires its owning database. A computation on a cache
+miss needs its registered calculator implementation or an exact live binding
+through `bind_calculators`. Study verifies the live state of signed constructor
+parameters, including normalized values, before using that signature. Bind any
+custom particle loaders again after reopening.
+A table file embeds values and units and can reopen with `StudyTable.load` alone.
+For a successful cell, `cell.ref.record_ref` is the underlying pinned ResultStore
+receipt. Pass `cell.ref` to `db.fetch` to check the database namespace as well as
+the exact version.
+
+A failed cell carries its diagnostic. An incomplete cell can carry a separate
+`recovery_ref`; use `db.recover` to finish a recoverable save and collect again
+to observe the cache. Portable table export rejects opaque values and requires
+`overwrite=True` to replace an existing file. See [ADR-021](adr/0021-database-studies-and-detached-tables.md).

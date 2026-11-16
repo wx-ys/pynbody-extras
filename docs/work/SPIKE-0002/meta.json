@@ -1,0 +1,26 @@
+{
+  "id": "SPIKE-0002",
+  "type": "spike",
+  "status": "done",
+  "title_en": "Review unified Database studies and detached result tables",
+  "title_zh": "评审统一数据库研究与独立结果表设计",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-16",
+  "updated": "2026-11-16",
+  "completed": "2026-11-16",
+  "resolution": "implemented",
+  "pr": null,
+  "related": [
+    "FEAT-0012",
+    "FEAT-0013",
+    "FEAT-0014",
+    "FEAT-0015",
+    "FEAT-0016",
+    "FEAT-0017"
+  ],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

@@ -21,6 +21,7 @@ from pynbody.halo.number_array import HaloNumberCatalogue
 
 from pynbodyext.core.calculate.runtime.logical_identity import ConfiguredSnapshotIdentity
 from pynbodyext.core.calculate.runtime.sim_identity import particle_index_digest, snapshot_identity
+from pynbodyext.core.calculate.store.identity import sim_identity_key
 from pynbodyext.orm.catalogues import typed_object_key
 from pynbodyext.orm.loading import parse_input_identity
 
@@ -247,10 +248,25 @@ class _HaloResults:
         self._halo = halo
 
     def __getitem__(self, key: Any) -> Any:
-        source = self._halo._bound()
-        if source is None:
+        result = self.get(key)
+        if result is None:
             raise KeyError(key)
-        return Results(source)[key]
+        return result
+
+    def get(self, key: Any) -> Any:
+        """Read an exact saved result without materializing this object."""
+        source = self._halo._bound()
+        if source is not None:
+            return Results(source).get(key)
+        if self._halo.kind != "halo":
+            return None
+        try:
+            desc = self._halo._exact_description()
+        except NotImplementedError:
+            return None
+        db = self._halo._database
+        source = db._registered_input(desc.signature)
+        return None if source is None else Results(source).get(key)
 
     def __len__(self) -> int:
         source = self._halo._bound()
@@ -274,6 +290,14 @@ class Halo(Input):
     @property
     def key(self) -> str:
         return f"{self.catalogue.key}/{self.kind}/{typed_object_key(self.number)}"
+
+    def _study_address(self) -> tuple[str, str, tuple[str, ...]]:
+        key = sim_identity_key(self._exact_description().signature)
+        return (
+            self._database.database_id,
+            key,
+            ("catalogue", self.catalogue.key, self.kind, typed_object_key(self.number)),
+        )
 
     @property
     def name(self) -> str:
@@ -316,10 +340,11 @@ class Halo(Input):
             raise ValueError("catalogue object binding conflicts with its exact input")
         return Input(db, input_id)
 
-    def _materialized(self) -> Input:
+    def _exact_description(self) -> Any:
+        """Resolve captured membership without loading or registering particles."""
         bound = self._bound()
         if bound is not None:
-            return bound
+            return self._database._description(bound.input_id)
         if self.kind != "halo":
             raise NotImplementedError(
                 "subhalo has no explicit particle selection; number-array adapters do not infer one"
@@ -336,7 +361,14 @@ class Halo(Input):
         if not indices:
             raise ValueError("registered halo is missing from captured membership")
         signature = root_desc.root_signature + ("halo", self.number, particle_index_digest(indices))
-        data = db._record_input(replace(root_desc, signature=signature, indices=indices))
+        return replace(root_desc, signature=signature, indices=indices)
+
+    def _materialized(self) -> Input:
+        bound = self._bound()
+        if bound is not None:
+            return bound
+        db = self._database
+        data = db._record_input(self._exact_description())
         _bind_object(db, self.object_id, data.id)
         return Input(db, data.id)
 

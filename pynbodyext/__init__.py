@@ -14,4 +14,7 @@ def __getattr__(name: str) -> Any:
     if name == "Database":
         from .database import Database
         return Database
+    if name == "StudyTable":
+        from .core.calculate.study.table import StudyTable
+        return StudyTable
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
