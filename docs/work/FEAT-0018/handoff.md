@@ -43,3 +43,8 @@ were isolated from the original checkout's unrelated changes.
 `make check` 的快速套件 1,770 项通过，7 项未选中。锁文件、lint、类型和
 文档检查通过。`make test-all` 共 1,777 项通过，无跳过，含模拟数据与两个
 发行包构建。检查了双语验收编号、示例语法与本地链接。
+
+## 2026-11-16 — Pull request / 拉取请求
+
+Implementation and review evidence are in [PR #56](https://github.com/wx-ys/pynbody-extras/pull/56).
+实施与评审证据见 [PR #56](https://github.com/wx-ys/pynbody-extras/pull/56)。

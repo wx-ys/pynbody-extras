@@ -1,16 +1,16 @@
 {
   "id": "FEAT-0018",
   "type": "feature",
-  "status": "review",
+  "status": "done",
   "title_en": "Implement Database studies and detached tables",
   "title_zh": "实现数据库研究和独立结果表",
   "owner": "",
   "issue": 0,
   "created": "2026-11-16",
   "updated": "2026-11-16",
-  "completed": null,
-  "resolution": null,
-  "pr": null,
+  "completed": "2026-11-16",
+  "resolution": "implemented",
+  "pr": 56,
   "related": [
     "SPIKE-0002"
   ],
