@@ -56,6 +56,29 @@ Reload and recovery validate root/count/indices/digest and the owning Selection.
 User documentation: [English](docs/database.md), [中文](docs/database.zh-CN.md),
 [executable real-file example](docs/database_quickstart.py).
 
+## Database studies (ADR-021)
+
+A **Study** freezes exact registered **ObjectRef** rows and ordered labels with
+full CalculatorSignature values. Its digest identifies the definition and a
+saved name binds immutably to that digest. Explicit live bindings are
+process-local and must still match before work starts. Study storage is additive
+and shares a persistent Database UUID with exported references.
+
+A **StudyTable** is a detached invocation or cache observation. It retains
+the source definition, explicit cell states, protected values and pinned
+**SavedResultRef** receipts scoped to the source UUID. Collect pins all selected
+versions in a local read snapshot. Run and individual calls share Database
+coordination with the existing ResultStore key and EvalEngine. Failed or
+incomplete cells never carry a successful ref. A separate recovery receipt can
+identify a save to finish explicitly. Exact selectors identify individual
+coordinates in the same definition. The table's portable schema carries no
+calculator instances and admits no opaque ValueCodec payloads.
+
+Read-only Database opening uses SQLite read-only connections without schema
+initialization. Metadata browsing and planning load no particle data. Manual
+Study computation creates no Run or stored value. Legacy SampleTable and
+ORM StudyReport keep their own contracts and schemas.
+
 ## Distribution ownership (ADR-019)
 
 `pynbodyext-core` is the root distribution and sole owner of all `pynbodyext/**`

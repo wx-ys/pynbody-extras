@@ -1,5 +1,13 @@
 # Design entry point / 设计入口
 
+**Database studies design review / 数据库研究设计评审 — 2026-11-16:**
+[中文](database-study-2026-11-16.zh-CN.md) ·
+[English](database-study-2026-11-16.md) ·
+[ADR-021 (accepted / 已批准)](../adr/0021-database-studies-and-detached-tables.md) ·
+[SPIKE-0002](../work/SPIKE-0002/en.md).
+Reviews single/batch reuse, failure versus old values, and independent reopening.
+Implementation and verification / 实施与验证：[FEAT-0018](../work/FEAT-0018/en.md).
+
 **Database UX proposal / 数据库使用体验提案 — 2026-11-14:**
 [中文](database-ux-2026-11-14.zh-CN.md) ·
 [English](database-ux-2026-11-14.md) ·

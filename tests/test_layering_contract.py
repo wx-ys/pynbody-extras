@@ -37,6 +37,7 @@ _ORDER = (
     "bins",
     # many objects x many calculators: runs nodes, reads and writes the store
     "sample",
+    "study",  # ADR-021: detached definitions and observations
     # the package facade wires everything together, so it sits at the top
     "",
 )

@@ -113,8 +113,8 @@ def test_every_import_in_the_package_points_downwards() -> None:
                 continue  # outside the package, or inside this layer
             if source == "core" and target == "core":
                 continue  # the core's own order is test_layering_contract.py's job
-            # ADR-020 permits exactly this lazy public export, not general upward imports.
-            if importer == "pynbodyext" and module == "pynbodyext.database":
+            # ADR-020 and ADR-021 permit these lazy public exports.
+            if importer == "pynbodyext" and module in {"pynbodyext.database", "pynbodyext.core.calculate.study.table"}:
                 continue
             if _ORDER.index(target) > _ORDER.index(source):
                 if (source, target) in _ALLOWED_UPWARD:

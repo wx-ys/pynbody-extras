@@ -104,6 +104,10 @@ class ValueCodec:
         pickle-able raise :class:`TypeError`.  When False, such values are
         encoded as a non-portable marker instead of failing.
 
+    portable_only : bool, default: False
+        Reject opaque values and keys that cannot round-trip portably. This
+        also disallows decoding opaque pickle payloads.
+
     Notes
     -----
     Round-tripping through the codec is stable: ``decode(encode(x))`` returns a
@@ -117,8 +121,9 @@ class ValueCodec:
     during decoding rather than silently changing the key's identity.
     """
 
-    def __init__(self, *, raise_on_opaque: bool = True) -> None:
+    def __init__(self, *, raise_on_opaque: bool = True, portable_only: bool = False) -> None:
         self.raise_on_opaque = raise_on_opaque
+        self._portable_only = portable_only
 
     # ------------------------------------------------------------------
     # Public API
@@ -177,9 +182,13 @@ class ValueCodec:
             return self._encode_float(value)
 
         if isinstance(value, (list, tuple)):
+            if self._portable_only and type(value) not in (list, tuple):
+                raise ValueError("custom sequence types are not portable")
             return {"__kind": "seq", "seq_kind": type(value).__name__, "items": [self._encode(v) for v in value]}
 
         if isinstance(value, dict):
+            if self._portable_only and type(value) is not dict:
+                raise ValueError("custom mapping types are not portable")
             return {"__kind": "dict", "items": self._encode_dict(value)}
 
         if isinstance(value, ExternalFileRef):
@@ -234,6 +243,8 @@ class ValueCodec:
         return {"__kind": "float", "value": value}
 
     def _encode_opaque(self, value: Any) -> dict[str, Any]:
+        if self._portable_only:
+            raise ValueError(f"value of type {type(value).__name__} is not portable")
         try:
             payload = pickle.dumps(value)
         except Exception as exc:  # noqa: BLE001
@@ -258,7 +269,15 @@ class ValueCodec:
         return items
 
     def _encode_dict_key(self, key: Any) -> dict[str, Any]:
-        return {"kind": type(key).__name__, "text": str(key)}
+        data = {"kind": type(key).__name__, "text": str(key)}
+        if self._portable_only:
+            try:
+                restored = self._decode_dict_key(data)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("dictionary key is not portable") from exc
+            if type(key) is not type(restored) or key != restored:
+                raise ValueError("dictionary key is not portable")
+        return data
 
     def _decode_dict_key(self, data: dict[str, Any]) -> Any:  # noqa: PLR0911
         kind = data.get("kind", "str")
@@ -282,7 +301,9 @@ class ValueCodec:
             except (SyntaxError, ValueError, TypeError) as exc:
                 raise ValueError("cannot decode tuple key: expected a hashable Python literal tuple") from exc
             return key
-        # unknown key type: fall back to the string form (keeps data lossless-ish)
+        if self._portable_only:
+            raise ValueError(f"dictionary key type {kind!r} is not portable")
+        # Legacy files support unknown key types as strings.
         return text
 
     # ------------------------------------------------------------------
@@ -320,9 +341,12 @@ class ValueCodec:
             if dtype.kind == "S":
                 return np.bytes_(value.ljust(dtype.itemsize, b"\0"))
             return np.asarray(value, dtype=dtype)[()]
-        if kind in ("seq",):
+        if kind == "seq":
+            sequence = data.get("seq_kind")
+            if self._portable_only and sequence not in ("list", "tuple"):
+                raise ValueError("unsupported portable sequence type")
             items = [self._decode(v) for v in data["items"]]
-            return tuple(items) if data.get("seq_kind") == "tuple" else items
+            return tuple(items) if sequence == "tuple" else items
         if kind == "dict":
             return {self._decode_dict_key(k): self._decode(v) for k, v in data["items"]}
         if kind in ("array", "sim_array"):
@@ -338,6 +362,8 @@ class ValueCodec:
                 raise ValueError("invalid external-file reference envelope fields")
             return ExternalFileRef._from_payload(data["descriptor"])
         if kind == "opaque":
+            if self._portable_only:
+                raise ValueError("opaque values are not portable")
             return pickle.loads(_unb64(data["pickle_b64"]))
         if kind == "unencoded":
             raise ValueError(f"value was stored unencoded ({data.get('type')}); cannot decode")

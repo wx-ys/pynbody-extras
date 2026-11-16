@@ -7,12 +7,13 @@ import os
 import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
 import pynbody
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, inspect, select
+from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.engine import URL
 
 from pynbodyext.core.calculate.interfaces import DATABASE_CONTEXT, SavedInput, is_stable_sim_identity
@@ -21,13 +22,25 @@ from pynbodyext.core.calculate.runtime.logical_identity import ConfiguredSnapsho
 from pynbodyext.core.calculate.runtime.persistence import capture_input, execute
 from pynbodyext.core.calculate.runtime.sim_identity import particle_index_digest, snapshot_identity
 from pynbodyext.core.calculate.store import RecordRef, SQLAlchemyResultStore
+from pynbodyext.core.calculate.store.base import ResultRecord, SignatureMismatchError, _check_record
 from pynbodyext.core.calculate.store.identity import sim_identity_key
+from pynbodyext.core.calculate.study.table import SavedResultRef
 from pynbodyext.orm import AnalysisRepository
 from pynbodyext.orm.loading import parse_input_identity
 from pynbodyext.orm.models import DataLocation, DataObject, Recipe, Selection
 from pynbodyext.orm.selections import SELECTION_SCHEMA, SelectionSpec, descriptor_key
 
-from .models import Base, InputInfo, ObjectSelection, ResultAlias, ResultSummary, SaveOperation
+from .models import (
+    Base,
+    DatabaseNamespace,
+    InputInfo,
+    ObjectSelection,
+    ResultAlias,
+    ResultSummary,
+    SaveOperation,
+    StudyDefinitionRow,
+    StudyName,
+)
 
 
 def encode_input(value: SavedInput) -> str:
@@ -52,11 +65,22 @@ class DatabasePersistenceError(RuntimeError):
         super().__init__(f"could not finish save {operation}; use database.recover(result_ref) when a receipt exists")
 
 
+@dataclass(frozen=True)
+class _CurrentResult:
+    ref: RecordRef
+    pending_operation: str | None
+
+    def confirmed_ref(self) -> RecordRef:
+        if self.pending_operation is not None:
+            raise DatabasePersistenceError(self.ref, self.pending_operation)
+        return self.ref
+
+
 class _TrackedStore(SQLAlchemyResultStore):
     """Record the already-encoded receipt before the owning store commits bytes."""
 
-    def __init__(self, engine: Any, repo_session: Any) -> None:
-        super().__init__(engine)
+    def __init__(self, engine: Any, repo_session: Any, *, create: bool) -> None:
+        super().__init__(engine, create=create)
         self._session = repo_session
         self.pending: ContextVar[str | None] = ContextVar(f"save_{id(self)}", default=None)
 
@@ -71,7 +95,23 @@ class _TrackedStore(SQLAlchemyResultStore):
                 summary = json.loads(op.summary_json)
                 summary.update(saved_at=record.created_at, calculator=record.pretty_key)
                 op.summary_json = json.dumps(summary)
-        return super()._put(record)
+        try:
+            return super()._put(record)
+        except Exception as exc:
+            if operation_id is not None:
+                # The receipt was recorded before the payload transaction. A
+                # failed commit acknowledgment leaves its durability unknown.
+                raise DatabasePersistenceError(record.ref, operation_id) from exc
+            raise
+
+
+@dataclass
+class _Invocation:
+    """Tracks actual progress for a Study report independently of cache state."""
+
+    started: bool = False
+    run_id: str | None = None
+    failed: bool = False
 
 
 class Database:
@@ -83,24 +123,86 @@ class Database:
         SQLite file; initialized automatically. No particle files are copied.
     project : str
         Namespace for explicitly registered logical simulations.
+    read_only : bool
+        Open an existing SQLite file without creating tables or metadata.
     """
 
-    def __init__(self, path: str | os.PathLike[str], *, project: str = "default") -> None:
+    def __init__(self, path: str | os.PathLike[str], *, project: str = "default", read_only: bool = False) -> None:
         if not isinstance(project, str) or not project.strip():
             raise ValueError("project must be a nonempty string")
         self.project = project
         self.path = Path(path).absolute()
         self._closed = False
-        self._engine = create_engine(URL.create("sqlite", database=str(self.path)))
-        self._repo = AnalysisRepository(self._engine, allow_path_inputs=True, loaders={"default": pynbody.load})
-        Base.metadata.create_all(self._engine)
-        self._store = _TrackedStore(self._engine, self._repo.session)
+        self._read_only = read_only
+        if read_only and not self.path.is_file():
+            raise FileNotFoundError(self.path)
+        url = (
+            URL.create("sqlite", database=self.path.as_uri(), query={"mode": "ro", "uri": "true"})
+            if read_only
+            else URL.create("sqlite", database=str(self.path))
+        )
+        self._engine = create_engine(url)
+        try:
+            self._repo = AnalysisRepository(
+                self._engine, allow_path_inputs=True, loaders={"default": pynbody.load}, create=not read_only
+            )
+            if not read_only:
+                Base.metadata.create_all(self._engine)
+                with self._engine.begin() as connection:
+                    connection.execute(
+                        insert(DatabaseNamespace).values(id=1, uuid=str(uuid.uuid4())).on_conflict_do_nothing()
+                    )
+            self._store = _TrackedStore(self._engine, self._repo.session, create=not read_only)
+        except BaseException:
+            self._engine.dispose()
+            raise
         self._repo._stores["default"] = self._store
         self._catalogue_live: dict[int, Any] = {}
 
     def _check(self) -> None:
         if self._closed:
             raise RuntimeError("database is closed")
+
+    @property
+    def read_only(self) -> bool:
+        return self._read_only
+
+    def _check_write(self) -> None:
+        self._check()
+        if self.read_only:
+            raise PermissionError("database is read-only")
+
+    @property
+    def database_id(self) -> str:
+        """Persistent namespace shared by byte-for-byte copies of this database."""
+        self._check()
+        if not inspect(self._engine).has_table(DatabaseNamespace.__tablename__):
+            raise RuntimeError("database schema lacks Study metadata; initialize with a writable Database")
+        with self._repo.session() as session:
+            namespace = session.get(DatabaseNamespace, 1)
+            if namespace is None:
+                raise RuntimeError("database schema lacks a Study namespace")
+            return namespace.uuid
+
+    @property
+    def studies(self) -> Any:
+        """Browse saved Study definitions."""
+        from .study import Studies
+
+        return Studies(self, self._study_namespace())
+
+    def _study_namespace(self) -> str:
+        namespace = self.database_id
+        schema = inspect(self._engine)
+        if not all(schema.has_table(model.__tablename__) for model in (StudyDefinitionRow, StudyName)):
+            raise RuntimeError("database schema lacks Study definitions; initialize with a writable Database")
+        return namespace
+
+    def study(self, *, objects: Any, calculations: Any) -> Any:
+        """Freeze an ordered grid of exact registered inputs and calculators."""
+        from .study import Study
+
+        return Study.create(self, objects, calculations)
 
     def __enter__(self) -> Database:
         self._check()
@@ -165,6 +267,7 @@ class Database:
         return snapshot_identity
 
     def _record_input(self, desc: SavedInput) -> Any:
+        self._check_write()
         if not is_stable_sim_identity(desc.signature) or desc.location is None:
             raise ValueError("persistent results require a file-backed stable input identity")
         parse_input_identity(desc.signature)
@@ -277,7 +380,7 @@ class Database:
 
     def save_result(self, result: Any, *, name: str | None = None, _run_id: str | None = None) -> RecordRef:
         """Append an immutable result version using facts captured at run time."""
-        self._check()
+        self._check_write()
         desc = result._save_input
         if desc is None or result._save_signature is None:
             raise ValueError("result has no captured input identity; run the calculator before saving")
@@ -391,9 +494,10 @@ class Database:
                 raise ValueError("save operation disappeared")
             stored.completed = True
 
-    def recover(self, ref: RecordRef) -> None:
+    def recover(self, ref: RecordRef | SavedResultRef) -> None:
         """Finish only operations already associated with this exact saved receipt."""
-        self._check()
+        self._check_write()
+        ref = self._owned_ref(ref)
         if ref.version_id is None:
             raise ValueError("recovery requires a pinned receipt")
         with self._repo.session() as session:
@@ -403,10 +507,25 @@ class Database:
         for op in ops:
             self._finish_save(op.id)
 
-    def fetch(self, ref: RecordRef) -> Any:
+    def _owned_ref(self, ref: RecordRef | SavedResultRef) -> RecordRef:
+        if isinstance(ref, SavedResultRef):
+            if ref.database_id != self.database_id:
+                raise ValueError("result reference belongs to another database")
+            return ref.record_ref
+        return ref
+
+    def fetch(self, ref: RecordRef | SavedResultRef) -> Any:
         """Read a pinned historical version without loading particles."""
         self._check()
-        result = self._store.fetch(ref)
+        scoped = isinstance(ref, SavedResultRef)
+        ref = self._owned_ref(ref)
+        if scoped:
+            record = self._store._read_ref(ref)
+            if record is None:
+                raise KeyError(f"no stored result for {ref.key!r}")
+            result = record.to_result(self._store.codec, rebuild_calculator=False)
+        else:
+            result = self._store.fetch(ref)
         with self._repo.session() as session:
             data = session.scalar(
                 select(DataObject).where(DataObject.identity_key == sim_identity_key(ref.sim_signature))
@@ -418,15 +537,74 @@ class Database:
             raise ValueError("stored result has no calculator description")
         return self._attach(result, self._description(data.id), CalculatorSignature.from_json(signature_text))
 
-    def versions(self, ref: RecordRef) -> list[RecordRef]:
+    def versions(self, ref: RecordRef | SavedResultRef) -> list[RecordRef]:
         self._check()
-        return self._store.list_versions(ref)
+        return self._store.list_versions(self._owned_ref(ref))
+
+    def _registered_input(self, signature: tuple[Any, ...]) -> Any:
+        from .objects import Input
+
+        with self._repo.session() as session:
+            pk = session.scalar(select(DataObject.id).where(DataObject.identity_key == sim_identity_key(signature)))
+        return None if pk is None else Input(self, pk)
+
+    def _current_refs(self, addresses: Any) -> dict[str, _CurrentResult]:
+        """Select current pinned addresses in one SQLite read snapshot, without decoding."""
+        pending = {ref.cache_key: ref for ref in addresses}
+        if not pending:
+            return {}
+        keys = tuple(pending)
+        current, versions = self._store._table, self._store._versions
+        found = {}
+        with self._engine.connect() as connection:
+            # sqlite3 legacy transaction mode does not begin for SELECT.
+            connection.exec_driver_sql("BEGIN")
+            for start in range(0, len(keys), 500):
+                rows = connection.execute(
+                    select(current.c.record_key, current.c.version_id, versions.c.record_key.label("version_key"))
+                    .select_from(current.outerjoin(versions, current.c.version_id == versions.c.version_id))
+                    .where(current.c.record_key.in_(keys[start : start + 500]))
+                )
+                refs = {}
+                for row in rows:
+                    if row.record_key != row.version_key:
+                        raise SignatureMismatchError("current cache pointer conflicts with its saved version")
+                    refs[row.record_key] = replace(pending[row.record_key], version_id=row.version_id)
+                if refs:
+                    receipts = {ref.to_json(): key for key, ref in refs.items()}
+                    operations = connection.execute(
+                        select(SaveOperation.ref_json, SaveOperation.id).where(
+                            SaveOperation.completed.is_(False),
+                            SaveOperation.reused.is_(False),
+                            SaveOperation.ref_json.in_(receipts),
+                        )
+                    )
+                    unfinished = {receipts[row.ref_json]: row.id for row in operations}
+                    found.update({key: _CurrentResult(ref, unfinished.get(key)) for key, ref in refs.items()})
+        return found
+
+    def _read_version(self, ref: RecordRef, signature: CalculatorSignature) -> ResultRecord:
+        record = _check_record(self._store._read_ref(ref), signature)
+        if record is None:
+            raise KeyError(f"no stored result for {ref.key!r}")
+        if not record.calculator_signature_text:
+            raise SignatureMismatchError("stored result has no calculator signature")
+        return record
+
+    def _read_current(self, desc: SavedInput, signature: CalculatorSignature) -> ResultRecord | None:
+        address = RecordRef(desc.signature, signature.hash)
+        current = self._current_refs([address]).get(address.cache_key)
+        return None if current is None else self._read_version(current.confirmed_ref(), signature)
 
     def _load(self, input_id: int, *, location_id: int | None = None) -> Any:
         desc = self._description(input_id)
-        data = self._repo.get_input(input_id)
-        root_id = data.id if data.parent_id is None else data.parent_id
-        loaded = self._repo.load_input(root_id, location_id=location_id)
+        return self._load_description(desc, location_id=location_id)
+
+    def _load_description(self, desc: SavedInput, *, location_id: int | None = None) -> Any:
+        root = self._registered_input(desc.root_signature)
+        if root is None:
+            raise ValueError("input root is not registered")
+        loaded = self._repo.load_input(root.input_id, location_id=location_id)
         if len(loaded.sim) != desc.root_count:
             raise ValueError("loaded root particle count changed; use a new revision")
         if desc.unit_basis:
@@ -469,87 +647,136 @@ class Database:
     def run_calculator(self, calculator: Any, source: Any, *, options: Any, mode: str) -> Any:
         """Coordinate lookup before IO, then delegate calculation to EvalEngine."""
         self._check()
+        if mode != "manual":
+            self._check_write()
+        from .catalogues import Halo
         from .objects import Input
 
-        is_handle = isinstance(source, Input)
-        if is_handle:
-            source = source._materialized()
-            desc = self._description(source.input_id)
-            provider = None
+        if isinstance(source, Input):
+            if source._database is not self:
+                raise ValueError("input belongs to another database")
+            desc = source._exact_description() if isinstance(source, Halo) else self._description(source.input_id)
+
+            def compute() -> Any:
+                return self._load_description(desc), calculator, options
         else:
             provider = self._provider(source)
             desc = capture_input(source, provider)
+
+            def compute() -> Any:
+                return (source, provider), calculator, options
+
+        signature = calculator.to_signature()
+        return self._coordinate(desc, signature, mode, compute, source=source)
+
+    def _coordinate(
+        self,
+        desc: SavedInput,
+        signature: CalculatorSignature,
+        mode: str,
+        compute: Any,
+        *,
+        source: Any,
+        invocation: _Invocation | None = None,
+        prepare: Any = None,
+    ) -> Any:
+        """Share the exact same lookup, EvalEngine, ResultStore and Run lifecycle."""
+        if mode != "manual" and not signature.stable:
+            raise ValueError("persistent results require a stable calculator signature")
+        record = self._read_current(desc, signature) if mode == "auto" else None
+        if record is not None:
+            hit = record.to_result(self._store.codec, rebuild_calculator=invocation is None)
+        elif prepare is not None:
+            # A cache entry may have disappeared after whole-grid preflight.
+            prepare()
+
         if mode == "manual":
-            sim, provider = self._load(source.input_id) if is_handle else (source, provider)
+            if invocation is not None:
+                invocation.started = True
+            (sim, provider), calculator, options = compute()
             manual_result = execute(calculator, sim, options, provider=provider)
             manual_result._database = self
             return manual_result
-        signature = calculator.to_signature()
-        if not signature.stable:
-            raise ValueError("persistent results require a stable calculator signature")
+
+        from .catalogues import Halo, _bind_object
+
         data = self._record_input(desc)
+        if isinstance(source, Halo):
+            _bind_object(self, source.object_id, data.id)
         self._repo.register_recipe(signature)
         run = self._begin_invocation(data, desc, signature)
+        if invocation is not None:
+            invocation.started, invocation.run_id = True, run.id
+        if record is not None:
+            self._attach(hit, desc, signature)
+            self._record_reuse(data.id, run.id, record, hit, signature)
+            return hit
+
         try:
-            result = (
-                None
-                if mode == "refresh"
-                else self._store.load(sim_signature=desc.signature, calculator_signature_text=signature.to_json())
-            )
-            if result is not None:
-                self._attach(result, desc, signature)
-                assert result.store_ref is not None
-                record = self._store._read_ref(result.store_ref)
-                if record is None:
-                    raise KeyError("saved version disappeared")
-                op_id = str(uuid.uuid4())
-                with self._repo.session() as session, session.begin():
-                    session.add(
-                        SaveOperation(
-                            id=op_id,
-                            input_id=data.id,
-                            signature_text=signature.to_json(),
-                            ref_json=result.store_ref.to_json(),
-                            run_id=run.id,
-                            reused=True,
-                            completed=False,
-                            summary_json=json.dumps(
-                                {
-                                    "type": type(result.value).__name__,
-                                    "shape": list(getattr(result.value, "shape", ())),
-                                    "units": str(getattr(result.value, "units", "")),
-                                    "calculator": signature.pretty(),
-                                    "saved_at": record.created_at,
-                                }
-                            ),
-                        )
-                    )
-                try:
-                    self._finish_save(op_id)
-                except Exception as exc:
-                    raise DatabasePersistenceError(result.store_ref, op_id) from exc
-                return result
-            sim, provider = self._load(data.id) if is_handle else (source, provider)
+            (sim, provider), calculator, options = compute()
             result = execute(calculator, sim, options, provider=provider)
-            self._attach(result, desc, signature)
-            if result.errors:
-                self._repo.fail_run(run.id, RuntimeError(str(result.errors)))
-                return result
-            self.save_result(result, _run_id=run.id)
+        except Exception as exc:
+            self._repo.fail_run(run.id, exc)
+            if invocation is not None:
+                invocation.failed = True
+            raise
+        self._attach(result, desc, signature)
+        if result.errors:
+            self._repo.fail_run(run.id, RuntimeError(str(result.errors)))
+            if invocation is not None:
+                invocation.failed = True
             return result
+        try:
+            self.save_result(result, _run_id=run.id)
         except DatabasePersistenceError:
             raise
         except Exception as exc:
-            self._repo.fail_run(run.id, exc)
+            # Preserve the direct API's existing failure recording. Study
+            # distinguishes a persistence failure from a scientific failure.
+            if invocation is None:
+                self._repo.fail_run(run.id, exc)
             raise
+        return result
+
+    def _record_reuse(
+        self, input_id: int, run_id: str, record: ResultRecord, result: Any, signature: CalculatorSignature
+    ) -> None:
+        op_id = str(uuid.uuid4())
+        with self._repo.session() as session, session.begin():
+            session.add(
+                SaveOperation(
+                    id=op_id,
+                    input_id=input_id,
+                    signature_text=signature.to_json(),
+                    ref_json=record.ref.to_json(),
+                    run_id=run_id,
+                    reused=True,
+                    completed=False,
+                    summary_json=json.dumps(
+                        {
+                            "type": type(result.value).__name__,
+                            "shape": list(getattr(result.value, "shape", ())),
+                            "units": str(getattr(result.value, "units", "")),
+                            "calculator": signature.pretty(),
+                            "saved_at": record.created_at,
+                        }
+                    ),
+                )
+            )
+        try:
+            self._finish_save(op_id)
+        except Exception as exc:
+            raise DatabasePersistenceError(record.ref, op_id) from exc
 
     def register_catalogue(self, snap: Any, catalogue: Any, *, name: str, revision: str | None = None) -> Any:
         from .catalogues import register_catalogue
 
+        self._check_write()
+
         return register_catalogue(self, snap, catalogue, name=name, revision=revision)
 
     def set_default_catalogue(self, snap: Any, name: str) -> None:
-        self._check()
+        self._check_write()
         if snap._database is not self:
             raise ValueError("snapshot belongs to another database")
         catalogue = snap.catalogues[name]

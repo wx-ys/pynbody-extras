@@ -35,6 +35,9 @@ class Input:
     def key(self) -> str:
         return self._key
 
+    def _study_address(self) -> tuple[str, str, tuple[str, ...]]:
+        return self._database.database_id, self.key, ("input", self.key)
+
     @property
     def name(self) -> str:
         row = self._row
@@ -141,24 +144,38 @@ class Results:
         self._source = source
 
     def __getitem__(self, calculator_or_name: Any) -> Any:
-        source = self._source._materialized()
+        result = self.get(calculator_or_name)
+        if result is None:
+            raise KeyError(calculator_or_name)
+        return result
+
+    def get(self, calculator_or_name: Any) -> Any:
+        """Return the saved Result, or None if the exact result is absent."""
+        source = self._source
         db = source._database
         db._check()
         if isinstance(calculator_or_name, str):
             with db._repo.session() as session:
                 alias = session.get(ResultAlias, (source.input_id, calculator_or_name))
                 if alias is None:
-                    raise KeyError(calculator_or_name)
+                    return None
                 from pynbodyext.orm.models import Recipe
 
                 recipe = session.get(Recipe, alias.calculator_hash)
+                if recipe is None:
+                    raise ValueError("result alias has no registered recipe")
                 signature = CalculatorSignature.from_json(recipe.signature_text)
+                if signature.hash != alias.calculator_hash:
+                    raise ValueError("result alias has a mismatched recipe")
         else:
-            signature = calculator_or_name.to_signature()
-        result = db._store.load(sim_signature=source._row.signature, calculator_signature_text=signature.to_json())
-        if result is None:
-            raise KeyError(calculator_or_name)
-        return db._attach(result, db._description(source.input_id), signature)
+            signature = (
+                calculator_or_name
+                if isinstance(calculator_or_name, CalculatorSignature)
+                else calculator_or_name.to_signature()
+            )
+        desc = db._description(source.input_id)
+        record = db._read_current(desc, signature)
+        return None if record is None else db._attach(record.to_result(db._store.codec), desc, signature)
 
     def _current(self) -> Any:
         db = self._source._database

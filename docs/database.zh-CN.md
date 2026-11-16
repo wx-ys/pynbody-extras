@@ -226,3 +226,42 @@ PYTHONPATH=. .venv/bin/python docs/database_quickstart.py
 halo，然后重开 SQLite 并绑定一个必定报错的加载器。最后的命中断言证明根快照、
 选择和 halo 结果都能在不加载粒子的情况下复用。脚本打印临时输出目录，并保留
 文件供检查。
+
+## 执行固定样本研究
+
+```python
+from pynbodyext import Database, StudyTable
+from pynbodyext.properties import ParamSum
+
+with Database("analysis.sqlite") as db:
+    snapshot = db.snapshots["snapshot_099"]
+    sample = db.study(objects=[snapshot], calculations={"mass": ParamSum("mass")})
+    sample.save(name="sample-v1")
+    plan = sample.plan()
+    attempt = sample.run(errors="collect")
+    failed = attempt.cells(status="failed")
+    attempt.save("sample-attempt.json")
+
+frozen = StudyTable.load("sample-attempt.json")
+row = frozen[frozen.objects[0]]
+if row.cell("mass").status == "succeeded":
+    print(row["mass"])
+
+with Database("analysis.sqlite", read_only=True) as db:
+    current = db.studies["sample-v1"].collect(missing="keep")
+```
+
+`run()` 记录本次执行，`collect()` 固定当前缓存版本，后者无需加载器或
+Calculator 绑定。auto 模式与单对象运行复用相同的结果版本。重试失败的
+refresh 时指定 `mode="refresh"`，用 `cells=failed` 精确选择失败格。
+
+从所属数据库重开 Study 定义。缓存未命中时，计算需要已登记的 Calculator
+实现，也可通过 `bind_calculators` 绑定签名精确相符的实例。Study 在使用签名前
+核对参与签名的构造参数当前值，包括构造函数规范化后的值。重开数据库后需
+重新绑定自定义粒子加载器。表文件内嵌值和单位，可仅用 `StudyTable.load`
+重开。成功格的 `cell.ref.record_ref` 是底层固定版本回执。向 `db.fetch`
+传入 `cell.ref` 时，数据库同时核对命名空间和精确版本。
+
+失败格保存诊断。未确认完成的格可单独保存 `recovery_ref`。用 `db.recover`
+完成可恢复的保存，再调用 `collect` 观察缓存。可移植表拒绝不透明值，
+覆盖文件需显式指定 `overwrite=True`。参见 [ADR-021](adr/0021-database-studies-and-detached-tables.md)。
