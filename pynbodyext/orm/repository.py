@@ -13,6 +13,7 @@ import json
 import os
 import time
 import uuid
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import and_, create_engine, event, or_, select, update
@@ -43,7 +44,7 @@ from .records import AssociationIssue, RecordedRun, RunExecutionError, RunPersis
 from .selections import SELECTION_SCHEMA, SelectionSpec, descriptor_key
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Iterator, Mapping
 
     from pynbodyext.core.calculate.nodes.base import CalculatorBase
     from pynbodyext.core.calculate.result.result import Result
@@ -150,6 +151,14 @@ class AnalysisRepository:
         """Open a caller-owned session; use a context manager and explicit commit."""
         return self._sessions()
 
+    @contextmanager
+    def _registration(self) -> Iterator[Session]:
+        """Make a first registration and verification of existing keys one atomic decision."""
+        with self.session() as session, session.begin():
+            if self.engine.dialect.name == "sqlite":
+                session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            yield session
+
     def _store(self, name: str) -> ResultStore:
         _nonempty(name, "store_name")
         if name not in self._stores:
@@ -166,7 +175,7 @@ class AnalysisRepository:
             raise ValueError("ORM inputs require a configured logical snapshot identity unless allow_path_inputs=True")
         if location is not None:
             _nonempty(location, "location")
-        with self.session() as session, session.begin():
+        with self._registration() as session:
             timestep = None
             if logical is not None:
                 simulation = session.scalar(
@@ -225,7 +234,7 @@ class AnalysisRepository:
         """Register the existing stable DAG signature, not an alternative executor."""
         if not signature.stable:
             raise ValueError("ORM recipes must have a stable CalculatorSignature")
-        with self.session() as session, session.begin():
+        with self._registration() as session:
             recipe = session.get(Recipe, signature.hash)
             if recipe is None:
                 recipe = Recipe(hash=signature.hash, signature_text=signature.to_json())
@@ -356,7 +365,7 @@ class AnalysisRepository:
         """
         validate_kind(kind)
         key = typed_object_key(object_key)
-        with self.session() as session, session.begin():
+        with self._registration() as session:
             catalogue = session.scalar(_catalogue_query().where(Catalogue.id == catalogue_pk))
             if catalogue is None:
                 raise KeyError(f"unknown catalogue {catalogue_pk!r}")
@@ -395,7 +404,8 @@ class AnalysisRepository:
             return data
 
     def catalogue_objects(
-        self, catalogue_pk: int, *, kind: str | None = None, host_id: int | None = None
+        self, catalogue_pk: int, *, kind: str | None = None, host_id: int | None = None,
+        object_key: CatalogueObjectKey | None = None,
     ) -> list[CatalogueObject]:
         """List objects by primary key; None omits a kind/host filter.
 
@@ -410,6 +420,8 @@ class AnalysisRepository:
             stmt = stmt.where(CatalogueObject.kind == kind)
         if host_id is not None:
             stmt = stmt.where(CatalogueObject.host_id == host_id)
+        if object_key is not None:
+            stmt = stmt.where(CatalogueObject.typed_object_key == typed_object_key(object_key))
         with self.session() as session:
             rows = list(session.scalars(stmt))
             for data in rows:

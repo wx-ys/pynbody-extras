@@ -2,6 +2,8 @@
 
 Draft, 2026-11-19. Source baseline `c56120f` includes the ADR-021 implementation. [中文](database-member-queries-2026-11-19.zh-CN.md)
 
+Implementation completed on 2026-11-20. The [Database guide](../database.md) documents the shipped API. [ADR-023](../adr/0023-selection-observations.md) and [ADR-024](../adr/0024-saved-members-and-output-discovery.md) record the runtime and storage contracts.
+
 An analyst might start at a galaxy and look for its stars inside an aperture, or start at a published value and ask which particles, coordinate frame and calculation produced it. Use `obj.members[selector]` to browse registered members, `obj.results.where(...)` to discover saved outputs, and a pinned result reference to trace a particular measurement. Catalogues, single runs and Study already have public interfaces. The member collections, reverse uses, result query predicates and selection-frame reload below are proposals.
 
 ## From a subhalo to stars inside a disk

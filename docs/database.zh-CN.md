@@ -265,3 +265,69 @@ refresh 时指定 `mode="refresh"`，用 `cells=failed` 精确选择失败格。
 失败格保存诊断。未确认完成的格可单独保存 `recovery_ref`。用 `db.recover`
 完成可恢复的保存，再调用 `collect` 观察缓存。可移植表拒绝不透明值，
 覆盖文件需显式指定 `overwrite=True`。参见 [ADR-021](adr/0021-database-studies-and-detached-tables.md)。
+
+## 从一次测量找回用过的粒子
+
+计算成功保存后，可以从其输入对象找到实际消费过的 Filter 视图。重新打开数据库，仍可按原顺序取回包括重复索引在内的粒子。以下示例从已知精确成员的子晕开始。导入自己的目录时，可用 `host.subhalos.register(7, particles=view)` 将快照视图绑定到目录原始编号。省略 `particles` 就只登记目录对象，成员状态为未知。
+
+```python
+from pynbodyext.filters import Disc, FamilyFilter
+from pynbodyext.properties import AngMomVec, KappaRot
+from pynbodyext.transforms import AlignVec
+
+host = snap.catalogues["groups"].halos[42]
+sub = host.subhalos[7]
+stars = sub.members.register("star")
+face_on = AlignVec(AngMomVec())
+disc = Disc("10 kpc", "1 kpc")
+calc = KappaRot().transform(face_on).filter(disc)
+result = calc.run(stars)
+
+disk = stars.members[disc]
+particles = disk.load()
+origin = stars.members.where(filter=Disc, transform=face_on).one()
+face_on_particles = origin.load(frame="selection")
+measurements = disk.used_by
+```
+
+`members[selector]` 读取已登记成员。`"star"`、`"dm"` 分别是对应 `FamilyFilter` 的简写。已确认的空选集粒子数为零，缺少登记时抛出 `KeyError`。多个来源筛出完全相同的索引序列时，`.load()` 可以直接取粒子，`.origins` 列出各次来源。如果索引序列不同，则用 `.where(...).one()` 指定来源。
+
+`frame="selection"` 在独立视图上按记录的顺序重放旋转、位置平移和速度平移。周期回卷或未报告的自定义变换可能使坐标证据不完整，仍可用默认 `.load()` 取快照原坐标中的粒子。两种加载都依赖当时的快照版本仍可访问。
+
+## 查找输出并连接子晕和宿主
+
+`results.where` 返回已存输出的元数据。`filter=` 传类时按类型查询，传实例时按完整签名匹配。`transform=` 匹配声明的有序变换链，`uses=` 也查找测量定轴方向等依赖中的用途，`context=` 匹配实际见证的坐标。一次查询中的多个条件须命中同一个输出。
+
+```python
+hits = stars.results.where(transform=face_on, filter=Disc)
+hit = hits.one()
+value = db.fetch(hit.ref).value
+uses = hit.members.where(role="output_filter", filter=disc)
+original_particles = uses.one().load()
+```
+
+独立结果的输出路径为 `()`，具名 Pipeline 每个叶子占一行，例如 `("kinematics", "krot")`。这些输出共用根结果的固定版本引用。刷新后要重画旧图，可把 Study 单元格的 `ref` 和所需的 `output` 路径传给 `db.results.where`。早于成员记录功能的历史结果以 `hit.members.recorded == False` 表示当时未记录。
+
+完整样本要从目录清单出发做左连接，才能保住缺测子晕。对象与宿主定位键都包含数据库、快照、目录版本和保留类型的原始编号。`to_dataframe(limit=100, offset=0)` 按稳定的目录行顺序分页。元数据查询无需加载粒子。
+
+```python
+from pynbodyext.properties import ParamSum
+
+cat = snap.catalogues["groups"]
+mass = ParamSum("mass")
+sub_measure = mass.filter(FamilyFilter("star"))
+inventory = cat.subhalos.to_dataframe()
+child = db.results.where(objects=cat.subhalos, calculator=sub_measure).to_dataframe()
+hosts = db.results.where(objects=cat.halos, calculator=mass).to_dataframe()
+comparison = inventory.merge(
+    child[["object_locator", "ref"]], on="object_locator", how="left", validate="one_to_one"
+)
+host_mass = hosts[["object_locator", "ref"]].rename(
+    columns={"object_locator": "host_locator", "ref": "host_mass_ref"}
+)
+comparison = comparison.merge(host_mass, on="host_locator", how="left", validate="many_to_one")
+```
+
+成功测得零质量仍有结果引用，缺测格的引用为空。`membership_known` 独立描述目录是否有精确成员信息。关库后，已导出的 Study 表仍可独立打开并读取当时的数值。
+
+宿主与子晕的测量需要取自同一读时刻时，将它们的精确句柄和两个计算一起放入同一个 Study，调用 `collect(missing="keep")`。其他连接随后刷新数据库时，已成功的格子仍指向各自的固定版本。

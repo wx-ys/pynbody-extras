@@ -1,0 +1,21 @@
+{
+  "id": "FEAT-0020",
+  "type": "feature",
+  "status": "done",
+  "title_en": "Publish exact particle member origins with confirmed saves",
+  "title_zh": "随结果确认事务发布精确成员来源",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-20",
+  "updated": "2026-11-20",
+  "completed": "2026-11-20",
+  "resolution": "implemented",
+  "pr": 59,
+  "related": [
+    "FEAT-0019"
+  ],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

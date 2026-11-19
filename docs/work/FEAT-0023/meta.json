@@ -1,0 +1,21 @@
+{
+  "id": "FEAT-0023",
+  "type": "feature",
+  "status": "done",
+  "title_en": "Join subhalo, host and Study measurements by scientific locator",
+  "title_zh": "按科学定位键连接子晕、宿主与 Study 测量",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-20",
+  "updated": "2026-11-20",
+  "completed": "2026-11-20",
+  "resolution": "implemented",
+  "pr": 59,
+  "related": [
+    "FEAT-0022"
+  ],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

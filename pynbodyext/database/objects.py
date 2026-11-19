@@ -5,13 +5,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, inspect, select
 
 from pynbodyext.core.calculate.result.signature import CalculatorSignature
 from pynbodyext.orm.loading import parse_input_identity
 from pynbodyext.orm.models import DataObject, Simulation as SimulationRow, Timestep
 
+from .member_models import StagedMemberInput
 from .models import InputInfo, ResultAlias, ResultSummary
+
+
+def input_locator(database_id: str, input_key: str) -> tuple[str, ...]:
+    """The database namespace and exact input address for joining metadata."""
+    return (database_id, "input", input_key)
 
 
 class Input:
@@ -35,6 +41,11 @@ class Input:
     def key(self) -> str:
         return self._key
 
+    @property
+    def object_locator(self) -> tuple[str, ...]:
+        """A hashable, database-qualified key for joining result metadata."""
+        return input_locator(self._database.database_id, self.key)
+
     def _study_address(self) -> tuple[str, str, tuple[str, ...]]:
         return self._database.database_id, self.key, ("input", self.key)
 
@@ -49,6 +60,13 @@ class Input:
     @property
     def results(self) -> Any:
         return Results(self)
+
+    @property
+    def members(self) -> Any:
+        """Browse or explicitly register selections directly under this input."""
+        from .members import Members
+
+        return Members(self)
 
     @property
     def selections(self) -> Any:
@@ -116,6 +134,8 @@ class InputCollection:
         if self._simulation_id is not None:
             stmt = stmt.join(Timestep).where(Timestep.simulation_id == self._simulation_id)
         with db._repo.session() as session:
+            if not self._roots and inspect(session.connection()).has_table(StagedMemberInput.__tablename__):
+                stmt = stmt.where(~select(StagedMemberInput.input_id).where(StagedMemberInput.input_id == DataObject.id).exists())
             return list(session.scalars(stmt))
 
     def __iter__(self) -> Any:
@@ -142,6 +162,10 @@ class InputCollection:
 class Results:
     def __init__(self, source: Input) -> None:
         self._source = source
+
+    def where(self, **predicates: Any) -> Any:
+        """Discover outputs saved directly on this exact input."""
+        return self._source._database.results.where(objects=[self._source], **predicates)
 
     def __getitem__(self, calculator_or_name: Any) -> Any:
         result = self.get(calculator_or_name)

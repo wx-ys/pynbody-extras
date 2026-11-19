@@ -12,23 +12,30 @@ import hashlib
 import json
 import os
 import weakref
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from pynbody.halo import HaloCatalogue
 from pynbody.halo.number_array import HaloNumberCatalogue
+from sqlalchemy import func, select, tuple_
+from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.orm import aliased
 
 from pynbodyext.core.calculate.runtime.logical_identity import ConfiguredSnapshotIdentity
+from pynbodyext.core.calculate.runtime.persistence import capture_input
 from pynbodyext.core.calculate.runtime.sim_identity import particle_index_digest, snapshot_identity
 from pynbodyext.core.calculate.store.identity import sim_identity_key
 from pynbodyext.orm.catalogues import typed_object_key
 from pynbodyext.orm.loading import parse_input_identity
+from pynbodyext.orm.models import Catalogue as CatalogueRow, CatalogueObject, DataObject
 
 from .models import CatalogueBinding, ObjectSelection
 from .objects import Input, Results
 
 if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
     from .database import Database
 
 _SCHEMA = "pynbodyext.database.halo-number/v1"
@@ -206,6 +213,42 @@ class Catalogue:
         return f"<catalogue {row.catalogue_id!r} revision={row.revision!r} key={row.identity_key!r}>"
 
 
+def catalogue_locator(database_id: str, catalogue_key: str, kind: str, typed_key: str) -> tuple[str, ...]:
+    """Address an original object ID within the exact snapshot and catalogue revision."""
+    return (database_id, "catalogue", catalogue_key, kind, typed_key)
+
+
+def host_locators(
+    session: Session, database_id: str, locators: set[tuple[str, ...]]
+) -> dict[tuple[str, ...], tuple[str, ...]]:
+    """Resolve known subhalo hosts in the same read transaction as the result versions."""
+    from ._query_batch import matching_rows
+
+    keys = [(loc[2], loc[4]) for loc in locators if len(loc) == 5 and loc[1] == "catalogue" and loc[3] == "subhalo"]
+    host = aliased(CatalogueObject)
+    address = tuple_(CatalogueRow.identity_key, CatalogueObject.typed_object_key)
+    query = (
+        select(CatalogueRow.identity_key, CatalogueObject.typed_object_key, host.typed_object_key)
+        .select_from(CatalogueObject)
+        .join(CatalogueRow, CatalogueRow.id == CatalogueObject.catalogue_fk)
+        .join(host, host.id == CatalogueObject.host_id)
+        .where(CatalogueObject.kind == "subhalo")
+    )
+    return {
+        catalogue_locator(database_id, cat, "subhalo", sub): catalogue_locator(database_id, cat, "halo", parent)
+        for cat, sub, parent in matching_rows(session, query, address, keys, width=2)
+    }
+
+
+@dataclass(frozen=True)
+class CatalogueEntry:
+    number: Any
+    object_locator: tuple[str, ...]
+    host_locator: tuple[str, ...] | None
+    membership_known: bool
+    input_key: str | None
+
+
 class Halos:
     """Lookup by original typed halo ID, never by catalogue row position."""
 
@@ -214,31 +257,169 @@ class Halos:
         self._kind = kind
         self._host_id = host_id
 
-    def _rows(self) -> list[Any]:
-        db = self._catalogue._database
-        db._check()
-        return db._repo.catalogue_objects(self._catalogue.catalogue_id, kind=self._kind, host_id=self._host_id)
+    def _conditions(self) -> list[Any]:
+        conditions = [CatalogueObject.catalogue_fk == self._catalogue.catalogue_id, CatalogueObject.kind == self._kind]
+        if self._host_id is not None:
+            conditions.append(CatalogueObject.host_id == self._host_id)
+        return conditions
 
     def __len__(self) -> int:
-        return len(self._rows())
+        db = self._catalogue._database
+        db._check()
+        with db._repo.session() as session:
+            return int(session.scalar(select(func.count()).select_from(CatalogueObject).where(*self._conditions())))
 
     def __iter__(self) -> Any:
-        return iter(
-            [Halo(self._catalogue, row.id, _number(row.typed_object_key), kind=self._kind) for row in self._rows()]
-        )
+        db = self._catalogue._database
+        db._check()
+        rows = db._repo.catalogue_objects(self._catalogue.catalogue_id, kind=self._kind, host_id=self._host_id)
+        return (Halo(self._catalogue, row.id, _number(row.typed_object_key), kind=self._kind) for row in rows)
 
     def __getitem__(self, number: Any) -> Halo:
-        key = typed_object_key(number)
-        for row in self._rows():
-            if row.typed_object_key == key:
-                return Halo(self._catalogue, row.id, _number(row.typed_object_key), kind=self._kind)
-        raise KeyError(number)
+        typed_object_key(number)
+        db = self._catalogue._database
+        db._check()
+        rows = db._repo.catalogue_objects(
+            self._catalogue.catalogue_id, kind=self._kind, host_id=self._host_id, object_key=number
+        )
+        if not rows:
+            raise KeyError(number)
+        return Halo(self._catalogue, rows[0].id, number, kind=self._kind)
+
+    def register(self, number: Any, *, particles: Any = None) -> Halo:
+        """Declare a catalogue object and optionally bind its exact particle view.
+
+        Use `halo.subhalos.register(number, particles=view)` for a known host.
+        Omitting particles registers the catalogue entry with unknown membership.
+        """
+        db = self._catalogue._database
+        db._check_write()
+        typed_object_key(number)
+        root = self._catalogue._row.root_input
+        desc = None
+        if particles is not None:
+            if isinstance(particles, Input):
+                if particles._database is not db:
+                    raise ValueError("particle input belongs to another database")
+                desc = (
+                    particles._exact_description()
+                    if isinstance(particles, Halo)
+                    else db._description(particles.input_id)
+                )
+            else:
+                logical = parse_input_identity(root.signature).logical
+                root_locations = db._repo.get_input(root.id).locations
+                provider = (
+                    ConfiguredSnapshotIdentity({loc.uri: logical for loc in root_locations})
+                    if logical
+                    else snapshot_identity
+                )
+                desc = capture_input(particles, provider)
+            if desc.indices is None or desc.root_signature != root.signature:
+                raise ValueError("particles must be an exact selection of this catalogue's root snapshot")
+            if self._kind == "halo" and parse_input_identity(desc.signature).kind == "halo":
+                if typed_object_key(desc.signature[-2]) != typed_object_key(number):
+                    raise ValueError("particle halo number differs from the catalogue number")
+        if self._kind == "halo":
+            with db._repo.session() as session:
+                has_adapter = session.get(CatalogueBinding, self._catalogue.catalogue_id) is not None
+            if has_adapter:
+                adapter = _adapter(db, self._catalogue.catalogue_id)
+                if type(number) is not int or number not in adapter["keys"]:
+                    raise ValueError("halo number is absent from the registered catalogue revision")
+                if desc is not None:
+                    expected = tuple(i for i, value in enumerate(adapter["memberships"]) if value == number)
+                    if desc.indices != expected:
+                        raise ValueError("particle indices conflict with the registered catalogue revision")
+                    # Preserve the adapter's existing calculation address when binding a plain particle slice.
+                    signature = root.signature + ("halo", number, particle_index_digest(expected))
+                    desc = replace(desc, signature=signature)
+        row = db._repo.register_catalogue_object(
+            self._catalogue.catalogue_id, number, kind=self._kind, host_id=self._host_id
+        )
+        if desc is not None:
+            _bind_object(db, row.id, db._record_input(desc).id)
+        return Halo(self._catalogue, row.id, number, kind=self._kind)
+
+    def _inventory(
+        self, *, limit: int | None = None, offset: int = 0, resolve_inputs: bool = False
+    ) -> list[CatalogueEntry]:
+        if type(offset) is not int or offset < 0 or (limit is not None and (type(limit) is not int or limit < 0)):
+            raise ValueError("limit and offset must be nonnegative integers")
+        cat = self._catalogue
+        db = cat._database
+        namespace, catalogue = db.database_id, cat._row
+        host = aliased(CatalogueObject)
+        query = (
+            select(
+                CatalogueObject.typed_object_key,
+                host.typed_object_key,
+                DataObject.identity_key,
+                CatalogueBinding.catalogue_id,
+            )
+            .select_from(CatalogueObject)
+            .outerjoin(host, host.id == CatalogueObject.host_id)
+            .outerjoin(ObjectSelection, ObjectSelection.object_id == CatalogueObject.id)
+            .outerjoin(DataObject, DataObject.id == ObjectSelection.input_id)
+            .outerjoin(CatalogueBinding, CatalogueBinding.catalogue_id == CatalogueObject.catalogue_fk)
+            .where(*self._conditions())
+            .order_by(CatalogueObject.id)
+            .limit(limit)
+            .offset(offset)
+        )
+        with db._repo.session() as session:
+            rows = session.execute(query).all()
+        adapter_keys: dict[Any, str] = {}
+        if resolve_inputs and self._kind == "halo":
+            missing: dict[int, list[int]] = {
+                _number(key): [] for key, _, exact, adapter_id in rows if exact is None and adapter_id is not None
+            }
+            if missing:
+                for i, number in enumerate(_adapter(db, cat.catalogue_id)["memberships"]):
+                    if number in missing:
+                        missing[number].append(i)
+                for number, indices in missing.items():
+                    if indices:
+                        signature = catalogue.root_input.signature + ("halo", number, particle_index_digest(indices))
+                        adapter_keys[number] = sim_identity_key(signature)
+        result = []
+        for key, host_key, exact, adapter_id in rows:
+            number = _number(key)
+            result.append(
+                CatalogueEntry(
+                    number,
+                    catalogue_locator(namespace, catalogue.identity_key, self._kind, key),
+                    catalogue_locator(namespace, catalogue.identity_key, "halo", host_key) if host_key else None,
+                    exact is not None or (self._kind == "halo" and adapter_id is not None),
+                    exact or adapter_keys.get(number),
+                )
+            )
+        return result
+
+    def to_dataframe(self, *, limit: int | None = None, offset: int = 0) -> Any:
+        """Read one stable page of catalogue metadata, including objects with unknown particles."""
+        import pandas as pd
+
+        rows = self._inventory(limit=limit, offset=offset)
+        return pd.DataFrame(
+            {
+                "number": pd.Series([row.number for row in rows], dtype=object),
+                "object_locator": [row.object_locator for row in rows],
+                "host_locator": [row.host_locator for row in rows],
+                "membership_known": [row.membership_known for row in rows],
+                "input_key": [row.input_key for row in rows],
+            }
+        )
 
     def __repr__(self) -> str:
-        rows = self._rows()
-        return f"<{len(rows)} registered {self._kind}s>\n" + "\n".join(
-            f"{self._kind} {_number(row.typed_object_key)!r}" for row in rows[:20]
+        db = self._catalogue._database
+        db._check()
+        query = (
+            select(CatalogueObject.typed_object_key).where(*self._conditions()).order_by(CatalogueObject.id).limit(20)
         )
+        with db._repo.session() as session:
+            labels = [f"{self._kind} {_number(key)!r}" for key in session.scalars(query)]
+        return f"<{len(self)} registered {self._kind}s>\n" + "\n".join(labels)
 
 
 class _HaloResults:
@@ -246,6 +427,10 @@ class _HaloResults:
 
     def __init__(self, halo: Halo) -> None:
         self._halo = halo
+
+    def where(self, **predicates: Any) -> Any:
+        """Discover saved outputs for this scientific object without a particle load."""
+        return self._halo._database.results.where(objects=[self._halo], **predicates)
 
     def __getitem__(self, key: Any) -> Any:
         result = self.get(key)
@@ -290,6 +475,24 @@ class Halo(Input):
     @property
     def key(self) -> str:
         return f"{self.catalogue.key}/{self.kind}/{typed_object_key(self.number)}"
+
+    @property
+    def object_locator(self) -> tuple[str, ...]:
+        return catalogue_locator(
+            self._database.database_id, self.catalogue.key, self.kind, typed_object_key(self.number)
+        )
+
+    @property
+    def host(self) -> Halo | None:
+        """The parent recorded for this subhalo in this exact catalogue revision."""
+        self._database._check()
+        host = self._database._repo.get_catalogue_object(self.object_id).host
+        return None if host is None else Halo(self.catalogue, host.id, _number(host.typed_object_key))
+
+    @property
+    def host_locator(self) -> tuple[str, ...] | None:
+        host = self.host
+        return None if host is None else host.object_locator
 
     def _study_address(self) -> tuple[str, str, tuple[str, ...]]:
         key = sim_identity_key(self._exact_description().signature)
@@ -382,10 +585,9 @@ class Halo(Input):
 
 def _bind_object(database: Database, object_id: int, input_id: int) -> None:
     with database._repo.session() as session, session.begin():
+        session.execute(insert(ObjectSelection).values(object_id=object_id, input_id=input_id).on_conflict_do_nothing())
         binding = session.get(ObjectSelection, object_id)
-        if binding is None:
-            session.add(ObjectSelection(object_id=object_id, input_id=input_id))
-        elif binding.input_id != input_id:
+        if binding is None or binding.input_id != input_id:
             raise ValueError("catalogue membership changed; register a new revision")
 
 

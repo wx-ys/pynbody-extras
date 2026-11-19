@@ -90,6 +90,17 @@ SelectionContext describes the root revision, particle targets, units and ordere
 observed operations. Pure calculations can operate without a persistent root.
 The value-only batch path omits collection. [ADR-023](docs/adr/0023-selection-observations.md)
 
+## Database members and output discovery (ADR-024)
+
+`Input.members[selector]` browses registered exact particle sets. Multiple
+origins can point to one set. `Member.origin` selects its unique source,
+`Member.used_by` identifies actual uses in saved versions, and
+`Member.load(frame="selection")` replays a supported witnessed frame.
+`db.results.where(...)` returns hits for individual named outputs and
+database-qualified pinned receipts. Catalogue inventories and result hits share
+`object_locator` and `host_locator` for joins across scientific objects.
+[ADR-024](docs/adr/0024-saved-members-and-output-discovery.md)
+
 ## Distribution ownership (ADR-019)
 
 `pynbodyext-core` is the root distribution and sole owner of all `pynbodyext/**`
