@@ -13,3 +13,7 @@ Verified rotations, ordered position and velocity shifts, partial targets and re
 Integrated verification passed `make check` (1,920 fast tests) and `make test-all` (1,928 tests) with pandas and real data. The complementary empty selection produced its expected warning.
 
 集成验证已通过 `make check`（1,920 项快速测试）和 `make test-all`（1,928 项完整测试），含 pandas 和真实快照。取补集后为空的选集触发了预期提示。
+
+After integrating the final runtime review in #58, `make check` passed 1,925 fast tests and `make test-all` passed all 1,933 tests. [PR #59](https://github.com/wx-ys/pynbody-extras/pull/59)
+
+接入 #58 的最终运行时修复后，快速测试通过 1,925 项，完整测试通过全部 1,933 项。
