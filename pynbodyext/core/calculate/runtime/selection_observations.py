@@ -372,11 +372,12 @@ class SelectionRecorder:
         self._view_indices[id(sim)] = (ref(sim), indices)
         return indices
 
-    def native_application(self, target: Any, handle: Any) -> None:
-        if not self.stack or getattr(target, "ancestor", None) is not self.root:
+    def native_application(self, target: Any, handle: Any, *, own_run: bool) -> None:
+        node = next(reversed(self.stack), None)
+        if node is None or getattr(target, "ancestor", None) is not self.root:
             return
-        node_id = self.stack[-1].node_id
-        if node_id in self.transform_nodes:
+        node_id = node.node_id
+        if own_run and node_id in self.transform_nodes:
             # The transform lifecycle will inspect the returned native receipt.
             return
         step = FrameStep(

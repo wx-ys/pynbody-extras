@@ -463,7 +463,7 @@ class EvalEngine:
         return state
 
     @staticmethod
-    def _check_node_input(node: CalculatorBase[Any, Any], work: NodeInput) -> None:
+    def _check_node_input(node: CalculatorBase[Any, Any], work: NodeInput) -> Any:
         """Let a node look over the particles it is about to be computed from.
 
         This lives here, where every node's ``execute`` is called, rather than on a
@@ -474,7 +474,9 @@ class EvalEngine:
         tree instead of all of it.  See :meth:`CalculatorBase.check_input` for what
         the default does.
         """
-        node.check_input(work.active_sim)
+        sim = work.active_sim
+        node.check_input(sim)
+        return sim
 
     def _apply_node_scope(
         self, node: CalculatorBase[Any, Any], ctx: ExecutionContext, work: NodeInput, lifetime: ExitStack
@@ -521,14 +523,14 @@ class EvalEngine:
             work = replace(work, pipeline_managed=True)
         with ExitStack() as lifetime:
             work = self._apply_node_scope(node, ctx, work, lifetime)
-            self._check_node_input(node, work)
+            checked_sim = self._check_node_input(node, work)
             if ctx.selection_recorder is not None and ctx.current_node is not None:
-                ctx.selection_recorder.measurements[ctx.current_node.node_id] = ctx.selection_recorder.context(work.active_sim)
+                ctx.selection_recorder.measurements[ctx.current_node.node_id] = ctx.selection_recorder.context(checked_sim)
             state.raw_value = node._execute_in_scope(ctx, work)
             if ctx.selection_recorder is not None and ctx.current_node is not None:
                 from .input import FilterResult
 
-                ctx.selection_recorder.measured_units(ctx.current_node.node_id, work.active_sim)
+                ctx.selection_recorder.measured_units(ctx.current_node.node_id, checked_sim)
                 if isinstance(state.raw_value, FilterResult):
                     ctx.selection_recorder.register_filter(ctx.current_node.node_id, work.selection_binding, state.raw_value)
             with observation_phase("materialize"):
