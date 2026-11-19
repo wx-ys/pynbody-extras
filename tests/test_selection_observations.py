@@ -550,3 +550,107 @@ def test_preexisting_external_step_keeps_its_subset_target():
         assert step.target_indices == tuple(target.get_index_list(sim))
     finally:
         handle.revert()
+
+
+def test_joined_worker_transformation_marks_only_the_measurement_on_its_root():
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    ready = Barrier(2)
+    finished = Barrier(2)
+
+    @PropertyBase.dataclass
+    class WorkerMeasurement(PropertyBase):
+        translate: bool
+
+        def calculate(self, sim, params=None):
+            def measure():
+                with sim.star.translate([10.0, 0.0, 0.0]):
+                    return float(sim["x"].sum())
+
+            ready.wait(timeout=5)
+            if self.translate:
+                with ThreadPoolExecutor(max_workers=1) as worker:
+                    value = worker.submit(measure).result(timeout=5)
+            else:
+                value = float(sim["x"].sum())
+            finished.wait(timeout=5)
+            return value
+
+    def run(translate):
+        sim = snapshot()
+        root = weakref.ref(sim)
+        result = Pipeline({"science": WorkerMeasurement(translate), "after": CountMembers()}).run(sim)
+        assert sim.current_transformation() is None
+        return result, root
+
+    with ThreadPoolExecutor(max_workers=2) as runners:
+        (shifted, sroot), (unchanged, uroot) = list(runners.map(run, (True, False)))
+    assert shifted.value["science"] == unchanged.value["science"] + 30
+    measured, after = observations(shifted).outputs
+    assert not measured.context.complete
+    (step,) = measured.context.steps
+    assert (step.kind, step.target_indices) == ("external", (3, 4, 5))
+    assert after.context.complete and not after.context.steps
+    assert all(output.context.complete for output in observations(unchanged).outputs)
+    gc.collect()
+    assert sroot() is None and uroot() is None
+
+
+def test_measurement_observation_never_opens_a_filter_left_lazy_by_custom_execution():
+    @PropertyBase.dataclass
+    class MaskOnly(PropertyBase):
+        selector = FamilyFilter("star")
+
+        def declared_dependencies(self):
+            return [self.selector]
+
+        def execute(self, ctx, input):
+            # The hook leaves the raw mask on its input and never requests a view.
+            input.selection = ctx.raw_value(self.selector, input)
+            return int(np.count_nonzero(input.selection.mask))
+
+    result = MaskOnly().run(snapshot())
+    assert result.value == 3
+    facts = observations(result)
+    assert facts.origins == facts.uses == ()
+    assert facts.outputs[0].context.complete
+
+
+@pytest.mark.parametrize("same_root", [False, True])
+def test_nested_run_owns_its_declared_step_and_notifies_overlapping_root(same_root):
+    inner = []
+
+    @PropertyBase.dataclass
+    class NestedRun(PropertyBase):
+        def calculate(self, sim, params=None):
+            target = sim if same_root else snapshot()
+            result = Pipeline({
+                "shift": CountMembers().transform(ShiftPosTo(np.array([1.0, 0.0, 0.0]))),
+                "after": CountMembers(),
+            }).run(target)
+            inner.extend(observations(result).outputs)
+            return result.value["shift"]
+
+    outer = NestedRun().run(snapshot())
+    assert outer.value == 6
+    shifted, after = inner
+    assert shifted.context.complete and [s.kind for s in shifted.context.steps] == ["shift_pos"]
+    assert after.context.complete and not after.context.steps
+    (measurement,) = observations(outer).outputs
+    assert measurement.context.complete is not same_root
+    assert [s.kind for s in measurement.context.steps] == (["external"] if same_root else [])
+
+
+def test_standalone_store_hit_reports_unavailable_selection_observations():
+    from pynbodyext.core.calculate.store import InMemoryResultStore
+
+    sim = snapshot()
+    store = InMemoryResultStore()
+    CountedAperture.calls = 0
+    count = CountMembers().filter(CountedAperture(5.0))
+    original = count.run(sim, store=store)
+    hit = count.run(sim, store=store)
+    assert CountedAperture.calls == 1 and original.value == hit.value == 2
+    assert not original.from_store and observations(original).origins[0].indices == (3, 4)
+    assert hit.from_store and hit.selection_observations is None

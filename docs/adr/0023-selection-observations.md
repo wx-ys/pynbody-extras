@@ -16,6 +16,10 @@ Selection origin on first consumption. This includes scoped inputs, a
 Transform’s measurement Filter, and a DAG node reading the raw
 `FilterResult.filtered_sim`. A standalone mask, Boolean operand mask or
 custom calculator’s private particle slice produces zero inferred origins.
+A scoped node receives its selected view in `check_input` before execution.
+The recorder uses that same view for coordinate units after the node returns.
+A raw Filter mask left on a custom node’s input stays lazy until a consumer
+requests the view.
 A shared filtered view supplies its ordered root indices once. Duplicate
 particle indices keep their positions in the sequence.
 
@@ -48,8 +52,11 @@ and its complete method signature. Reversion removes the step from later
 frames. An independently applied transform, an opaque custom step and a
 periodic wrap carry an incomplete-frame reason. A run-scoped native
 registration hook also detects temporary transforms applied and reverted
-inside a science hook. Concurrent runs route notifications by execution
-context and root. pynbody exposes a pre-existing native handle on its
+inside a science hook or a worker it joins. Each run listens only for
+operations on its physical root, for the lifetime of execution. A nested
+run owns its declared Transform receipts. Overlapping measurements on the
+same root conservatively record those registrations as external. pynbody
+exposes a pre-existing native handle on its
 target. An earlier mutation on an unrelated view that pynbody does not
 expose on the input or its ancestors cannot be recovered from particle
 arrays. Actual-frame comparison uses
@@ -67,7 +74,11 @@ use the existing recording policy.
 
 The versioned JSON representation supports detached Database staging and
 recovery. A missing observation on a historical value differs from a
-recorded output with an empty list of uses. Exact membership size determines
+recorded output with an empty list of uses. A standalone ResultStore
+serves value-only cache hits. On a hit, `result.from_store` is true and
+`result.selection_observations is None` means selection history is unknown.
+Database-coordinated results can retrieve observations archived with the
+specific confirmed result version. Exact membership size determines
 the storage cost. An observation records root indices and operations, without
 copying the particle fields. Replay requires access to the captured input
 version and unit convention. [ADR-016](0016-replayable-particle-selections.md)
