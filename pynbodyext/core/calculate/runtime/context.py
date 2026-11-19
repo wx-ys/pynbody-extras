@@ -130,6 +130,7 @@ class _MutationState:
 
     generation: int = 0
     unknown_generation: int = 0
+    pipeline_generation: int = 0
     field_generations: dict[str, int] = field(default_factory=dict)
 
 
@@ -160,6 +161,7 @@ class ExecutionContext:
     nodes: _NodeBookkeeping = field(default_factory=_NodeBookkeeping)
     mutation: _MutationState = field(default_factory=_MutationState)
     records: _RunRecords = field(default_factory=_RunRecords)
+    pipeline_frame_failed: bool = False
 
     _node_stack: list[ResultNode] = field(default_factory=list)
     _evaluation_stack: list[tuple[int, tuple[Any, ...]]] = field(default_factory=list)

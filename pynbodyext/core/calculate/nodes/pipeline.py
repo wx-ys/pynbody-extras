@@ -91,10 +91,12 @@ graph through the trace and cache reports.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from pynbodyext.core.calculate.interfaces import register_node_factory
 from pynbodyext.core.calculate.result.enums import BuiltinKinds, ErrorPolicy
+from pynbodyext.core.calculate.runtime.transform_scope import PipelineTransformScope
 
 from .base import CalculatorBase
 
@@ -119,6 +121,7 @@ class Pipeline(CalculatorBase[dict[str, Any], dict[str, Any]]):
     signature_name = "pynbodyext.core.calculate.Pipeline"
 
     node_kind = BuiltinKinds.COMBINED
+    _manages_output_scopes = True
 
     def __init__(self, outputs: Mapping[str, CalculatorBase[Any, Any]], *, name: str | None = None) -> None:
         super().__init__(name=name)
@@ -158,9 +161,13 @@ class Pipeline(CalculatorBase[dict[str, Any], dict[str, Any]]):
         with ctx.phase(self, "calculate"):
             for key, child in self.outputs.items():
                 try:
-                    node_result = ctx.evaluate(child, input)
+                    # Also own transforms returned directly or evaluated as
+                    # dependencies without an intervening bound scope.
+                    branch = PipelineTransformScope(restore=True)
+                    with branch.lifetime(ctx, self):
+                        node_result = ctx.evaluate(child, replace(input, transform_owner=branch))
                 except Exception:
-                    if ctx.options.errors != ErrorPolicy.COLLECT_PARTIAL:
+                    if ctx.options.errors != ErrorPolicy.COLLECT_PARTIAL or ctx.pipeline_frame_failed:
                         raise
                     if ctx.nodes.last_error_id is None:
                         raise

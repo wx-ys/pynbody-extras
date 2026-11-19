@@ -76,7 +76,8 @@ class PostprocessorBase(PropertyBase[T], Generic[T], ABC):
         except Exception:
             transform = self.scope.as_transform()
             if (
-                self.scope.should_revert
+                not input.pipeline_managed
+                and self.scope.should_revert
                 and transform is not None
                 and transform.revert_policy == RevertPolicy.ALWAYS
                 and input.transform is not None

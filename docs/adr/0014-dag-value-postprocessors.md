@@ -20,6 +20,8 @@ The initial processor supports one dynamic field, source; other processor config
 
 ### Scoped exception cleanup implementation boundary
 
+This section governs standalone Postprocessor execution. Within a Pipeline, each named output owns its transform scope under [ADR-022](0022-pipeline-transform-scopes.md).
+
 Implementation tests found that the existing engine applies a node's bound
 scope but does not clean that scope after a property exception. Implement the
 approved process-exception cleanup requirement locally in

@@ -12,6 +12,7 @@ from pynbody.snapshot import SimSnap
 
 from pynbodyext.core.calculate.nodes.filters import FilterBase
 
+from ._query_engines import scoped_bin_calculator
 from .selectors import is_bool_array
 
 if TYPE_CHECKING:
@@ -77,10 +78,19 @@ class BinSubresultStore:
         owner = self._owner
 
         if isinstance(key, FilterBase):
-            sub = owner.sim[key]
+            cache_key = ("filter", id(owner.sim), key.signature())
+            cached = owner.root._subresults._cache.get(cache_key)
+            if cached is not None:
+                return cached
+            context = owner.root._eager_context
+            if context is None:
+                sub = owner.sim[key]
+            else:
+                mask = scoped_bin_calculator(key, context)(owner.sim)
+                sub = owner.sim[np.where(mask)[0]]
             if not _is_sim_like(sub):
                 raise TypeError("FilterBase selector did not produce a SimSnap subset.")
-            return self.get(sub, cache_key=("filter", key.to_signature().pretty()))
+            return self.get(sub, cache_key=cache_key)
 
         if isinstance(key, Filter):
             sub = owner.sim[key]

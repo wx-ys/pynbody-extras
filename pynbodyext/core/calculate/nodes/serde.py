@@ -291,6 +291,12 @@ def encode_calculator(
         else:
             encoded = _encode_generic(calculator, path, inline_array_bytes)
 
+    # The output-scope lifetime changes what descendants measure. Version it
+    # independently of the recipe class's own signature_version, including
+    # Pipeline subclasses encoded through custom constructors or payload hooks.
+    if calculator._manages_output_scopes:
+        encoded.value["branch_scope_version"] = 1
+
     # A non-empty scope on a calculator must be part of its identity so a scoped
     # clone gets a different cache key than the unscoped one.
     scope_spec = getattr(calculator, "scope", None)

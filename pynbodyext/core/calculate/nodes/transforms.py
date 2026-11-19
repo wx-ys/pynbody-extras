@@ -100,7 +100,7 @@ filter and the resulting scope composition.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Generic, TypeAlias, TypeVar, cast
 
 from pynbody.snapshot import SimSnap
@@ -118,6 +118,7 @@ from pynbodyext.core.calculate.result.enums import (
 )
 from pynbodyext.core.calculate.runtime import CalcRuntime, TransformRuntime
 from pynbodyext.core.calculate.runtime.input import FilterResult, NodeInput, TransformResult
+from pynbodyext.core.calculate.runtime.transform_scope import PipelineTransformScope
 
 from .runtime_base import RuntimeCalculatorBase
 
@@ -238,8 +239,9 @@ class TransformBase(RuntimeCalculatorBase[TransformResult[HandleT], HandleT], Ge
 
     def resolve_target(self, input: NodeInput) -> Transformation | SimSnap:
         """Return the object that should be mutated by this transform."""
-        if input.transform is not None:
+        if input.transform is not None and not input.pipeline_managed:
             return input.transform.handle
+        # A native handle chained to its parent's handle would revert them both.
         sim = input.active_sim
         return sim.ancestor if self.move_all and hasattr(sim, "ancestor") else sim
 
@@ -302,6 +304,23 @@ class TransformBase(RuntimeCalculatorBase[TransformResult[HandleT], HandleT], Ge
             transform_runtime.measure_input,
         )
 
+    def _execute_in_scope(self, ctx: ExecutionContext, input: NodeInput) -> TransformResult[HandleT]:
+        owner = input.transform_owner
+        if owner is None or type(self).execute is TransformChain.execute:
+            return self.execute(ctx, input)
+        start = len(owner.steps)
+        try:
+            result = self.execute(ctx, input)
+        except Exception:
+            # Low-level execute overrides may apply a mutation without ever
+            # delivering a handle to the standard compute/wrap lifecycle.
+            if type(self).execute is not RuntimeCalculatorBase.execute:
+                ctx.pipeline_frame_failed = True
+            raise
+        if not isinstance(self, TransformChain):
+            owner.confirm(ctx, self, result, start)
+        return result
+
     def sim_after_transform(self, sim: SimSnap, target: TransformTarget, handle: HandleT) -> SimSnap:
         """Return the active simulation view after applying the transform."""
         return sim
@@ -320,9 +339,11 @@ class TransformBase(RuntimeCalculatorBase[TransformResult[HandleT], HandleT], Ge
             transform_runtime.ctx,
             transform_runtime.measure_input,
         )
-        mutation_generation = transform_runtime.ctx.advance_mutation_generation(
-            f"apply {self.log_label}", observed_phase="calculate"
-        )
+        mutation_generation = transform_runtime.ctx.mutation.generation
+        if transform_runtime.input.transform_owner is None:
+            mutation_generation = transform_runtime.ctx.advance_mutation_generation(
+                f"apply {self.log_label}", observed_phase="calculate"
+            )
         return TransformResult(
             handle=computed,
             target=transform_runtime.target,
@@ -387,6 +408,8 @@ class TransformChain(TransformBase[tuple[TransformStep, ...]]):
 
     def execute(self, ctx: ExecutionContext, input: NodeInput) -> TransformResult[tuple[TransformStep, ...]]:
         work = input
+        if input.transform_owner is not None and self.revert_policy == RevertPolicy.NEVER:
+            work = replace(input, transform_owner=PipelineTransformScope(restore=False))
         steps: list[TransformStep] = []
         try:
             with ctx.phase(self, "calculate"):
@@ -406,7 +429,7 @@ class TransformChain(TransformBase[tuple[TransformStep, ...]]):
                 artifacts={"step_count": len(steps), "mutation_generation": ctx.mutation.generation},
             )
         except Exception:
-            if steps:
+            if steps and input.transform_owner is None:
                 try:
                     with ctx.phase(self, "revert"):
                         self.cleanup(ctx, tuple(steps))

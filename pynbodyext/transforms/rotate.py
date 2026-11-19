@@ -28,6 +28,19 @@ class AlignVec(TransformBase[Rotation]):
     vector: Param[np.ndarray]
     up: np.ndarray | None = None
 
+    def prepare_params(self, sim, values):
+        # A missing direction is a measurement failure before any native rotation.
+        self._unit_direction(values["vector"])
+        return super().prepare_params(sim, values)
+
+    @staticmethod
+    def _unit_direction(vector: np.ndarray) -> np.ndarray:
+        ang = np.asarray(vector, dtype=float)
+        norm = np.linalg.norm(ang)
+        if np.isnan(ang).any() or norm == 0:
+            raise ValueError(f"Angular momentum vector is zero or NaN {ang}")
+        return ang / norm
+
     def build_handle(self, sim, target, params=None):
         """Apply the transform and return a handle."""
         vec = params.vector
@@ -56,11 +69,7 @@ class AlignVec(TransformBase[Rotation]):
         numpy.ndarray
             A unit vector usable as `up` that is not (nearly) parallel to `ang`.
         """
-        ang = np.asarray(ang, dtype=float)
-        if np.isnan(ang).any() or np.linalg.norm(ang) == 0:
-            raise ValueError(f"Angular momentum vector is zero or NaN {ang}")
-
-        angn = ang / np.linalg.norm(ang)
+        angn = AlignVec._unit_direction(ang)
 
         if up is None:
             up_arr = np.array([0.0, 1.0, 0.0], dtype=float)

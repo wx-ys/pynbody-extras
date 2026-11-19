@@ -10,6 +10,8 @@ import numpy as np
 if TYPE_CHECKING:
     from pynbodyext.core.calculate.result.result import ResultNode, ValueSummary
 
+    from .transform_scope import PipelineTransformScope
+
 HandleT = TypeVar("HandleT")
 
 
@@ -81,6 +83,8 @@ class NodeInput:
     transform: TransformResult[Any] | None = None
     mutation_generation: int = 0
     upstream: dict[str, ResultNode] = field(default_factory=dict)
+    pipeline_managed: bool = False
+    transform_owner: PipelineTransformScope | None = None
 
     @property
     def active_sim(self) -> Any:

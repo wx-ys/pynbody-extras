@@ -90,16 +90,18 @@ layer, not the default first choice.
 from __future__ import annotations
 
 from abc import ABC
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
 from pynbodyext.core.calculate.params.fields import ParamView
-from pynbodyext.core.calculate.runtime import CalcRuntime, bind_runtime
+from pynbodyext.core.calculate.runtime import CalcRuntime, TransformRuntime, bind_runtime
 
 from .base import CalculatorBase
 
 if TYPE_CHECKING:
     from pynbodyext.core.calculate.runtime.context import ExecutionContext
     from pynbodyext.core.calculate.runtime.input import NodeInput
+
+    from .transforms import TransformBase
 
 
 TRaw = TypeVar("TRaw")
@@ -155,6 +157,9 @@ class RuntimeCalculatorBase(CalculatorBase[TRaw, TPublic], Generic[TRaw, TPublic
                 params = self.prepare_resolved_params(runtime, values)
 
             with ctx.phase(self, "calculate"):
-                computed = self.compute(runtime, params)
+                if input.transform_owner is not None and isinstance(runtime, TransformRuntime):
+                    computed = input.transform_owner.compute(runtime, cast("TransformBase[Any]", self), params)
+                else:
+                    computed = self.compute(runtime, params)
 
             return self.wrap_raw(runtime, computed)
