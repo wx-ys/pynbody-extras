@@ -19,7 +19,8 @@ import pathlib
 import subprocess
 import sys
 import textwrap
-import pytest
+
+from native_helpers import require_native
 
 from pynbodyext.util import deps
 
@@ -28,6 +29,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 _PROBE = textwrap.dedent(
     """
     import importlib.abc, importlib.util, json, sys, warnings
+    import pytest
 
     MODE = {mode!r}
 
@@ -71,6 +73,17 @@ _PROBE = textwrap.dedent(
         vcirc_error = None
     except ImportError as exc:
         vcirc_error = [type(exc).__name__, exc.name, str(exc)]
+        assert exc.__cause__ is deps.native_import_error()
+
+    sys.path.insert(0, "tests")
+    from native_helpers import require_native
+    try:
+        require_native()
+        native_test_gate = "passed"
+    except pytest.skip.Exception:
+        native_test_gate = "skipped"
+    except ImportError as exc:
+        native_test_gate = str(exc)
 
     print(json.dumps({{
         "available": deps.GRAVITY_NATIVE_AVAILABLE,
@@ -78,6 +91,7 @@ _PROBE = textwrap.dedent(
         "reason": deps.native_unavailable_reason(),
         "warnings": [[w.category.__name__, str(w.message)] for w in caught],
         "vcirc_error": vcirc_error,
+        "native_test_gate": native_test_gate,
     }}))
 
     # Default filters: the warning must be visible without opting in.
@@ -129,6 +143,7 @@ def test_present_but_unloadable_extension_degrades_with_a_visible_warning():
     name, module, message = result["vcirc_error"]
     assert (name, module) == ("ImportError", "pynbodyext._native")
     assert "failed to load" in message and "libomp.dylib" in message
+    assert "libomp.dylib" in result["native_test_gate"]
 
 
 def test_missing_extension_says_it_is_not_built():
@@ -138,6 +153,7 @@ def test_missing_extension_says_it_is_not_built():
     assert "is not built" in result["reason"]
     assert [category for category, _ in result["warnings"]] == ["NativeExtensionWarning"]
     assert "NativeExtensionWarning" in stderr
+    assert result["native_test_gate"] == "skipped"
 
 
 def test_availability_matches_a_real_import():
@@ -153,7 +169,7 @@ def test_availability_matches_a_real_import():
 
 
 def test_gravity_imports_without_warning_when_the_extension_works():
-    pytest.importorskip("pynbodyext._native", reason="needs the compiled extension")
+    require_native()
     result, stderr = run_probe("real")
 
     assert result["available"] is True

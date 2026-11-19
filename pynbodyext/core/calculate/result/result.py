@@ -300,6 +300,9 @@ class Result(Generic[T]):
     store_ref: RecordRef | None = field(default=None, compare=False, repr=False)
 
     _save_catalogue: Any = field(default=None, compare=False, repr=False)
+    #: Filter memberships and measurement frames captured by this execution.
+    #: A value loaded from a ResultStore carries ``None``. A Database archives
+    #: confirmed observations by version for lookup through ``db.results.where(...)``.
     selection_observations: SelectionObservations | None = field(default=None, compare=False, repr=False)
     _save_input: Any = field(default=None, compare=False, repr=False)
     _save_source: Any = field(default=None, compare=False, repr=False)

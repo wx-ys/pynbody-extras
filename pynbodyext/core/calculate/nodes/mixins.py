@@ -468,7 +468,7 @@ class _CalculatorDisplayMixin(_CalculatorContract):
         blocks: list[Block] = [
             *self._repr_parameter_blocks(),
             *self._repr_signature_blocks(),
-            Section("Dependency tree", [Pre(self.dependency_tree)], attr="dependency_tree"),
+            Section.drilldown("Dependency tree", "dependency_tree", lambda: Pre(self.dependency_tree)),
         ]
         return Card(self.__class__.__name__, rows, blocks)
 
@@ -600,7 +600,8 @@ class _CalculatorRunMixin(_CalculatorContract, Generic[TRaw, TPublic]):
             otherwise the result is stored on a clean run (see :meth:`EvalEngine.run`).
         reuse : bool, default True
             Look the result up in *store* first.  ``False`` always computes and
-            replaces the stored result.
+            appends a new version and updates the current cache. Pinned references
+            continue to return their original versions.
         database : Database, optional
             Save and reuse through a local Database. Cannot combine with store/reuse.
         mode : {"manual", "auto", "refresh"}, optional

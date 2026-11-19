@@ -302,6 +302,16 @@ def parse_pipeline_key(key: str) -> tuple[str, list[str], BinStatisticBase, str 
     return PIPELINE_PARSER.parse(key)
 
 
+def parse_stat_key(key: str) -> tuple[str, str] | None:
+    """Return the legacy unweighted ``(field, statistic)`` pair, if the query has one."""
+    warnings.warn("parse_stat_key is deprecated; use parse_pipeline_key instead", DeprecationWarning, stacklevel=2)
+    parsed = parse_pipeline_key(key)
+    if parsed is None:
+        return None
+    field, transforms, statistic, weight = parsed
+    return None if transforms or weight is not None else (field, statistic.key)
+
+
 def apply_pipeline(arr: np.ndarray, transforms: list[str]) -> np.ndarray:
     """Apply named element-wise transforms to *arr*."""
     return PIPELINE_PARSER.apply(arr, transforms)

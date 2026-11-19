@@ -141,7 +141,7 @@ def test_every_node_kind_has_both_renderers() -> None:
 
 
 def _value_kind_samples() -> list[Any]:
-    """One calculator carrying one value of every kind the encoder can emit.
+    """Calculators carrying every value kind the encoder can emit.
 
     The kinds are read off the payload, so this stays honest if the encoder grows
     a kind: a value type with no renderer would print as a raw ``repr`` in the
@@ -153,10 +153,14 @@ def _value_kind_samples() -> list[Any]:
     from pynbody.array import SimArray
     from pynbody.family import get_family
 
-    from pynbodyext.core.calculate import Param, PropertyBase
+    from pynbodyext.core.calculate import Param, Pipeline, PropertyBase
 
     class _Choice(Enum):
         FIRST = "first"
+
+    class _OutputRecipe(Pipeline):
+        def signature_payload(self):
+            return {"selected": self.outputs["sum"]}
 
     @PropertyBase.dataclass
     class _Carrier(PropertyBase[str]):
@@ -191,7 +195,8 @@ def _value_kind_samples() -> list[Any]:
             listing=[1, 2],
             mapping={"a": 1},
             callable_=_Choice,
-        )
+        ),
+        _OutputRecipe({"sum": _Sum()}),
     ]
 
 

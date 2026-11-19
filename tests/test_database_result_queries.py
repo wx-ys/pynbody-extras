@@ -25,6 +25,36 @@ def forbidden(*args, **kwargs):
     pytest.fail("metadata discovery attempted to read particles, decode a payload, or reconstruct a calculator")
 
 
+def test_registered_pipeline_subclass_alias_outputs_remain_individually_discoverable(tmp_path):
+    from pynbodyext.orm import JobSpec
+
+    class Summary(Pipeline):
+        signature_name = "test_database_result_queries.NamedSummary"
+
+        def signature_payload(self):
+            return {"pairs": list(self.outputs.items())}
+
+        @classmethod
+        def from_signature_payload(cls, identity):
+            return cls(dict(identity["pairs"]))
+
+    mass = ParamSum("mass").filter(Sphere(30))
+    summary = Summary({"z": mass, "a": mass})
+    independent = Summary({"z": mass, "a": ParamSum("mass").filter(Sphere(30))})
+    assert summary.to_signature().hash == independent.to_signature().hash
+    recipe = Pipeline({"summary": summary})
+    job = JobSpec.from_calculator(recipe, 1, store_name="results")
+    assert JobSpec.from_json(job.to_json()) == job
+
+    sim = write_snapshot(tmp_path / "sim")
+    with pe.Database(tmp_path / "db") as db:
+        source = db.register(sim, snapshot="099", simulation="s")
+        result = recipe.run(source)
+        hits = source.results.where(filter=Sphere)
+        assert paths(hits) == [("summary", "z"), ("summary", "a")]
+        assert all(hit.ref.record_ref == result.store_ref for hit in hits)
+
+
 @PropertyBase.dataclass
 class ProjectedHalfLight(PropertyBase):
     def calculate(self, sim, params=None):

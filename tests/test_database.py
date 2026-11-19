@@ -101,6 +101,21 @@ def test_modes_and_immutable_versions(sim, tmp_path):
         assert cc.run(sim).store_ref is None
 
 
+def test_nan_recipe_can_be_reused_and_refreshed_after_reopen(sim, tmp_path):
+    from pynbodyext.core.calculate import ConstantProperty
+
+    path = tmp_path / "nan.sqlite"
+    with pe.Database(path) as db:
+        original = ConstantProperty(float("nan")).run(sim, database=db).store_ref
+    with pe.Database(path) as db:
+        cc = ConstantProperty(float("nan"))
+        hit = cc.run(sim, database=db)
+        assert hit.from_store and hit.store_ref == original
+        refreshed = cc.run(sim, database=db, mode="refresh")
+        assert db.versions(original) == [original, refreshed.store_ref]
+        assert np.isnan(db.fetch(original).value)
+
+
 def test_handle_hit_does_not_load_and_missing_data_refresh_fails(sim, tmp_path):
     with pe.Database(tmp_path/'db') as db:
         cc = CountMass()

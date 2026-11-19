@@ -36,7 +36,7 @@ class RBelow(FilterBase):
 
     radius: Param[float] = Param(field_name="r")
 
-    def calculate(self, sim, params=None) -> bool:
+    def calculate(self, sim, params=None) -> np.typing.NDArray[np.bool_]:
         return sim["r"] < self.radius
 
 

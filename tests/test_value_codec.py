@@ -260,6 +260,23 @@ def test_large_structured_header_roundtrips_with_pickle_disabled():
     np.testing.assert_array_equal(restored, value)
 
 
+def test_structured_header_budget_applies_on_both_write_and_read(monkeypatch):
+    from pynbodyext.core.calculate.store import codec as codec_module
+
+    codec = ValueCodec()
+    wide = np.zeros(1, dtype=[(f"field_{i}", "i4") for i in range(32)])
+    previously_encoded = codec.encode(wide)
+    # Exercise the boundary with a small scientific record.
+    monkeypatch.setattr(codec_module, "_MAX_NPY_HEADER_SIZE", 256, raising=False)
+    with pytest.raises(TypeError, match="header"):
+        codec.encode(wide)
+    with pytest.raises(ValueError, match="header|Header"):
+        codec.decode(previously_encoded)
+
+    narrow = np.ones(2048, dtype=[("mass", "f8")])
+    np.testing.assert_array_equal(codec.decode(codec.encode(narrow)), narrow)
+
+
 def test_literal_field_titles_survive_structured_encoding():
     value = np.ones(1, dtype=[(("mass label", "mass"), "f8"), (((1, "id"), "id"), "i4")])
     codec = ValueCodec()

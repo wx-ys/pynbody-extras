@@ -9,7 +9,7 @@
 18 个位置分量中有 6 个在运行后发生了变化。
 
 ```bash
-.venv/bin/python -m pytest -q tests/test_pipeline_branch_scopes.py::test_branch_order_restores_entry_frame
+.venv/bin/python -m pytest -q tests/test_pipeline_branch_scopes.py::test_named_output_order_restores_entry_frame
 ```
 
 ## 第一阶段验收标准

@@ -22,7 +22,7 @@ Handler dispatch dicts are populated after each class definition.
 from __future__ import annotations
 
 import json
-from dataclasses import fields as dataclass_fields
+from dataclasses import MISSING, fields as dataclass_fields
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from pynbodyext.core.calculate.interfaces import resolve_signature_type
@@ -58,9 +58,7 @@ def default_init_payload(
     "r", "mass")`` rather than as a bare, uninformative class name.
     """
     try:
-        from dataclasses import fields as dataclass_fields
-
-        from .signature import DEFAULT_INLINE_ARRAY_BYTES, _Encoder, _field_default
+        from .signature import DEFAULT_INLINE_ARRAY_BYTES, _Encoder
 
         inline_bytes = DEFAULT_INLINE_ARRAY_BYTES if inline_array_bytes is None else inline_array_bytes
         cls = (
@@ -74,10 +72,9 @@ def default_init_payload(
             item = field_map.get(spec.name)
             if item is None or not item.init or not spec.signature:
                 continue
-            has_default, default = _field_default(item)
-            if not has_default:
+            if item.default is MISSING:
                 continue
-            encoded = _Encoder.encode_value(default, f"init.{spec.name}", inline_bytes)
+            encoded = _Encoder.encode_value(item.default, f"init.{spec.name}", inline_bytes)
             defaults[spec.name] = encoded.value
         return defaults
     except Exception:
@@ -268,6 +265,10 @@ class _ValuePrinter:
         """Render one calculator payload; each printer answers this its own way."""
         raise NotImplementedError
 
+    @staticmethod
+    def pipeline_output(payload: dict[str, Any]) -> str:
+        return f"outputs[{_quote_string(payload['key'])}]"
+
     @classmethod
     def tuple_(cls, payload: dict[str, Any]) -> str:
         items = [cls.value(i) for i in payload.get("items", ())]
@@ -339,6 +340,7 @@ class SignaturePrinter(_ValuePrinter):
         "list": "list_",
         "dict": "dict_",
         "unsupported": "unsupported",
+        "pipeline_output": "pipeline_output",
     }
     #: Dispatch table for calculator payloads (keyed by ``payload["node"]``).
     _CALCULATOR_HANDLERS: ClassVar[dict[str, Callable[[dict[str, Any]], str]]] = {}

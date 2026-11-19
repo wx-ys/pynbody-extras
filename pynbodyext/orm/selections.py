@@ -70,7 +70,7 @@ def _filter(signature_data: Any) -> FilterBase:
     if not isinstance(calculator, FilterBase):
         raise TypeError("selection filter requires a FilterBase calculator")
     rebuilt = calculator.to_signature()
-    if not rebuilt.stable or not rebuilt.constructible or rebuilt.identity() != signature.identity():
+    if not rebuilt.stable or not rebuilt.constructible or not rebuilt.same_identity(signature):
         raise ValueError("selection filter signature cannot be stably reconstructed")
     return calculator
 

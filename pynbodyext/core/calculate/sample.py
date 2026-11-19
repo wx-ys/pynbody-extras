@@ -31,7 +31,9 @@ from __future__ import annotations
 import json
 import os
 import warnings
+from collections.abc import Sized
 from dataclasses import dataclass, field
+from itertools import islice
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -216,10 +218,12 @@ class SampleTable(InfoView):
         return iter(self._rows.values())
 
     def row(self, name: str) -> SampleRow:
-        """The row called *name*."""
-        for row in self._rows.values():
-            if row.name == name:
-                return row
+        """The row called *name*. Duplicate display names make this lookup ambiguous."""
+        matches = [row for row in self._rows.values() if row.name == name]
+        if len(matches) > 1:
+            raise ValueError(f"ambiguous row name {name!r}; select a row by its identity from table.rows")
+        if matches:
+            return matches[0]
         raise KeyError(f"no row named {name!r}")
 
     def _persistent(self) -> bool:
@@ -277,11 +281,17 @@ class SampleTable(InfoView):
 
         With a persistent store, objects whose identity is session-only (no file,
         or transformed outside the calculator) are computed but not stored; one
-        warning counts them.
+        warning counts them. Supplied names must match the number of objects.
+        An unsized object iterable is buffered to check this before computing.
         """
         if errors not in _ERROR_POLICIES:
             raise ValueError(f"errors must be one of {_ERROR_POLICIES}, got {errors!r}")
         name_list = list(names) if names is not None else None
+        if name_list is not None:
+            if not isinstance(objects, Sized):
+                objects = list(islice(objects, len(name_list) + 1))
+            if len(objects) != len(name_list):
+                raise ValueError("names and objects must have the same length")
         session_only = 0
         for index, obj in enumerate(objects):
             name = name_list[index] if name_list is not None else None
@@ -349,14 +359,17 @@ class SampleTable(InfoView):
     def column(self, label: str) -> Any:
         """The values of column *label*, one per row.
 
-        A float array (``nan`` for a missing value) when every value is a number
-        or a one-element array; otherwise a list.
+        Numeric scalars and one-element numeric arrays produce a float or complex
+        array with ``nan`` for missing values. Other value types produce a list.
         """
         if label not in self._columns:
             raise KeyError(f"no column {label!r}")
         values = [_scalar(row.values.get(label)) for row in self._rows.values()]
-        if all(v is None or (isinstance(v, (int, float, np.number)) and not isinstance(v, bool)) for v in values):
-            return np.array([np.nan if v is None else float(v) for v in values])
+        if all(
+            v is None or (isinstance(v, (int, float, complex, np.number)) and not isinstance(v, bool)) for v in values
+        ):
+            inexact_types = {np.asarray(v).dtype for v in values if isinstance(v, (complex, np.inexact))}
+            return np.array([np.nan if v is None else v for v in values], dtype=np.result_type(float, *inexact_types))
         return values
 
     def units(self, label: str) -> str | None:

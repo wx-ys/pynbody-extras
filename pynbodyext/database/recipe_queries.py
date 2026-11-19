@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from pynbodyext.core.calculate.interfaces import signature_type_name
-from pynbodyext.core.calculate.result.signature import CalculatorSignature
+from pynbodyext.core.calculate.result.signature import CalculatorSignature, _pipeline_output_values
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -99,9 +99,9 @@ def _occurrences(value: Any, path: Path, role: str, operator: str | None = None)
         value = value["base"]
         kind = value.get("node")
     for key, child in value.items():
-        if key == "outputs" and kind == "pipeline":
-            for item in child:
-                yield from _occurrences(item["value"], (*path, "outputs", item["key"]), "dependency")
+        if key == "outputs" and kind in ("pipeline", "generic"):
+            for name, recipe in _pipeline_output_values(value).items():
+                yield from _occurrences(recipe, (*path, "outputs", name), "dependency")
         elif key == "transform" and isinstance(child, dict):
             if "measure_filter" in child:
                 yield from _occurrences(child["measure_filter"], (*path, "measure_filter"), "transform_measure")
@@ -129,12 +129,11 @@ def output_declarations(signature: CalculatorSignature) -> Iterator[tuple[Path, 
             scopes = [*scopes, scope]
             uses = [*uses, *_scope_occurrences(scope, path)]
             node = node["base"]
-        pipeline = node.get("node") == "pipeline"
+        pipeline = node.get("node") == "pipeline" or (node.get("node") == "generic" and "outputs" in node)
         occurrences = uses if pipeline else [*uses, *_occurrences(node, path, "output")]
         yield output, not pipeline, {"scopes": scopes, "occurrences": occurrences}
         if pipeline:
-            for item in node["outputs"]:
-                key = item["key"]
-                yield from visit(item["value"], (*output, key), (*path, "outputs", key), scopes, uses)
+            for key, recipe in _pipeline_output_values(node).items():
+                yield from visit(recipe, (*output, key), (*path, "outputs", key), scopes, uses)
 
     yield from visit(signature.payload, (), (), [], [])

@@ -67,6 +67,40 @@ def test_identical_saves_have_distinct_receipts(store):
     assert float(store.fetch(first).value) == float(store.fetch(second).value) == 6
 
 
+@pytest.mark.parametrize("missing_text", [None, ""])
+def test_store_rejects_records_without_signature_text(missing_text):
+    store = InMemoryResultStore()
+    ref = save(store, 6)
+    record = json.loads(store._versions[ref.version_id])
+    if missing_text is None:
+        del record["calculator_signature_text"]
+    else:
+        record["calculator_signature_text"] = missing_text
+    store._versions[ref.version_id] = json.dumps(record)
+    signature = ParamSum("mass").to_signature()
+    reads = (
+        lambda: store.fetch(ref),
+        lambda: store.get(sim_signature=IDENTITY, calculator_signature=signature),
+        lambda: store.has(sim_signature=IDENTITY, calculator_signature=signature),
+        lambda: store.load(sim_signature=IDENTITY, calculator_signature_text=signature.to_json()),
+    )
+    for read in reads:
+        with pytest.raises(SignatureMismatchError, match="signature text"):
+            read()
+
+
+def test_nan_signature_can_read_its_own_saved_result(store):
+    from pynbodyext.core.calculate.nodes.expr import ConstantProperty
+
+    calc = ConstantProperty(float("nan"))
+    signature = calc.to_signature()
+    ref = save(store, 6, calc)
+    assert store.has(sim_signature=IDENTITY, calculator_signature=signature)
+    assert np.isnan(store.get(sim_signature=IDENTITY, calculator_signature=signature).value)
+    assert np.isnan(store.load(sim_signature=IDENTITY, calculator_signature_text=signature.to_json()).value)
+    assert np.isnan(store.fetch(ref).value)
+
+
 def test_invalidation_preserves_history_and_never_promotes_old_results(store):
     first, second = save(store, 6), save(store, 12)
     calc = ParamSum("mass")

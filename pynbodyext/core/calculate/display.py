@@ -29,16 +29,17 @@ which is what lets the simple style guarantee sanitizer-safe output.
 from __future__ import annotations
 
 import warnings
+from collections.abc import Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from functools import lru_cache
+from functools import cached_property, lru_cache
 from html import escape
 from importlib import resources
-from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, TypeVar, overload
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Callable, Iterator
 
 T = TypeVar("T")
 
@@ -137,6 +138,10 @@ def reset_repr_style() -> None:
 @contextmanager
 def repr_style(style: str) -> Iterator[str]:
     """Render with *style* inside a ``with`` block, then restore the previous style.
+
+    An asyncio task inherits the style active when it is created. The task keeps
+    that override after its parent exits the block. Use ``repr_style`` inside the
+    task to select another style there.
 
     >>> with repr_style("simple"):
     ...     get_repr_style()
@@ -245,6 +250,30 @@ class Pre:
     text: str
 
 
+_ContentBlock: TypeAlias = Fields | Table | Metrics | Pre
+
+
+class _DrilldownBody(Sequence[_ContentBlock]):
+    """A single content block, built when a renderer first reads it."""
+
+    def __init__(self, build: Callable[[], _ContentBlock]) -> None:
+        self._build = build
+
+    @cached_property
+    def _blocks(self) -> tuple[_ContentBlock]:
+        return (self._build(),)
+
+    def __len__(self) -> int:
+        return 1
+
+    @overload
+    def __getitem__(self, index: int) -> _ContentBlock: ...
+    @overload
+    def __getitem__(self, index: slice) -> tuple[_ContentBlock, ...]: ...
+    def __getitem__(self, index: int | slice) -> _ContentBlock | tuple[_ContentBlock, ...]:
+        return self._blocks[index]
+
+
 @dataclass(frozen=True, slots=True)
 class Section:
     """A titled group of blocks.
@@ -263,6 +292,19 @@ class Section:
     attr: str | None = None
     collapsible: bool = True
     open: bool = False
+
+    @classmethod
+    def drilldown(
+        cls,
+        title: str,
+        attr: str,
+        build: Callable[[], _ContentBlock],
+        *,
+        collapsible: bool = True,
+        open: bool = False,
+    ) -> Section:
+        """Describe an attribute whose table or report is built only when displayed."""
+        return cls(title, _DrilldownBody(build), attr=attr, collapsible=collapsible, open=open)
 
 
 Block: TypeAlias = Fields | Table | Metrics | Pre | Section
@@ -284,7 +326,8 @@ class Card:
             for block in blocks:
                 if isinstance(block, Section):
                     out.append(block)
-                    walk(block.blocks)
+                    if not isinstance(block.blocks, _DrilldownBody):
+                        walk(block.blocks)
 
         walk(self.blocks)
         return out
@@ -581,6 +624,12 @@ class InfoView:
     ``_display_blocks`` have defaults.  Dataclasses must pass ``repr=False`` so
     the generated ``__repr__`` does not shadow this mixin's summary.
 
+    The 0.0.1 card-model change (PR #17, revision ``458e808``) replaced the
+    ``_display_body()`` HTML hook with ``_display_blocks()``. Subclasses that
+    supplied a preformatted message can return ``[Pre(self.message)]`` from the
+    new hook. Use ``Fields`` or ``Table`` for tabular data. Each renderer formats
+    the blocks for its own style and escapes their values.
+
     >>> class Point(InfoView):
     ...     def __init__(self, x, y):
     ...         self.x, self.y = x, y
@@ -770,7 +819,7 @@ def tree_lines(
     validate_tree_limits(max_depth, max_children)
     lines: list[str] = [label(root)]
 
-    def walk(node_children: list[T], prefix: str, depth: int) -> None:
+    def siblings(node_children: list[T], prefix: str, depth: int) -> Iterator[tuple[list[T], str, int]]:
         if not node_children:
             return
         if max_depth is not None and depth >= max_depth:
@@ -783,17 +832,18 @@ def tree_lines(
             is_last = index == len(visible) - 1 and not omitted
             branch = "└─" if is_last else "├─"
             lines.append(f"{prefix}{branch} {label(child)}")
-            walk(list(children(child)), prefix + ("   " if is_last else "│  "), depth + 1)
+            yield list(children(child)), prefix + ("   " if is_last else "│  "), depth + 1
         if omitted:
             lines.append(f"{prefix}└─ {hidden(omitted)}")
 
-    # ``children(root)`` is evaluated exactly once and handed to the walk: a
-    # second call would see whatever state the first one left behind (BUG-0001).
-    root_children = list(children(root))
-    if max_depth == 0 and root_children:
-        lines.append(f"└─ {hidden(root_children)}")
-    else:
-        walk(root_children, "", 1)
+    # Each iterator resumes the remaining siblings after a child's subtree.
+    stack = [siblings(list(children(root)), "", 1)]
+    while stack:
+        branch = next(stack[-1], None)
+        if branch is None:
+            stack.pop()
+        else:
+            stack.append(siblings(*branch))
     return lines
 
 

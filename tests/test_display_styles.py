@@ -8,6 +8,7 @@ the two renderers rather than each object's markup.
 
 from __future__ import annotations
 
+import asyncio
 import warnings
 from html.parser import HTMLParser
 
@@ -108,6 +109,14 @@ def test_simple_html_escapes_values() -> None:
     assert "<warning>" not in html
 
 
+def test_simple_html_preserves_literal_text_in_visible_names() -> None:
+    pipeline = make_pipeline("r < 3 & blue")
+    result = pipeline.run(make_sim())
+    with repr_style("simple"):
+        for obj in (result, result.root):
+            assert "r &lt; 3 &amp; blue" in obj._repr_html_()
+
+
 def test_both_styles_render_every_object() -> None:
     for obj in _renderables():
         for style in ("rich", "simple"):
@@ -143,6 +152,18 @@ def test_repr_style_context_manager_restores_the_previous_style() -> None:
             assert get_repr_style() == "rich"
         assert get_repr_style() == "simple"
     assert get_repr_style() == "rich"
+
+
+def test_task_created_inside_repr_style_keeps_its_own_override() -> None:
+    async def read_style():
+        return get_repr_style()
+
+    async def inherited_style():
+        with repr_style("simple"):
+            task = asyncio.create_task(read_style())
+        return get_repr_style(), await task
+
+    assert asyncio.run(inherited_style()) == ("rich", "simple")
 
 
 def test_set_repr_style_is_session_wide() -> None:

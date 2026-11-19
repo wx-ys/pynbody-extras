@@ -21,9 +21,21 @@ Example
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import numpy as np
 
 __all__ = ["get_array", "has_array"]
+
+
+def dtype_has_metadata(dtype: np.dtype[Any]) -> bool:
+    """Whether any field or subarray dtype carries user-defined metadata."""
+    return (
+        dtype.metadata is not None
+        or (dtype.subdtype is not None and dtype_has_metadata(dtype.subdtype[0]))
+        or (dtype.fields is not None and any(dtype_has_metadata(dtype.fields[name][0]) for name in dtype.names or ()))
+    )
 
 
 def get_array(sim: Any, name: str, default: Any = None) -> Any:

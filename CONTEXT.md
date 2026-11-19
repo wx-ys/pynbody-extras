@@ -157,9 +157,9 @@ Use these terms exactly. Don't drift to synonyms.
   hash (sha256 of schema + payload) and a JSON text. *Not* a display name.
   Two independent flags: **constructible** (the payload can rebuild the
   calculator) and **stable** (the hash is the same in every session, so it can
-  key data that outlives the process; false when a part is identified by `id()`
-  or a function repr — `LambdaProperty`, a node without `signature_payload`).
-  A standard `Pipeline` records its ordered output names and children. Its
+  key data that outlives the process). Opaque nodes and `LambdaProperty` callables
+  receive process-local tokens that stay unique after the objects are collected.
+  A standard `Pipeline` fixes its ordered output names and children at construction. Its
   transform-scope version contributes to the hash of any containing recipe,
   including recipes using Pipeline subclasses. Historical receipts retain
   their original keys. A node's `name` is a label.
@@ -263,8 +263,10 @@ Use these terms exactly. Don't drift to synonyms.
   validates pinned refs against typed row identity and column signature; v1
   remains readable with empty refs. DataFrame metadata keys identities and refs
   by `sim_identity_key`, with ordered `identity_keys` alongside possibly duplicate
-  display names. Loading only restores values/references; explicitly call
-  `store.fetch(row.refs[label])` to read a historical version. Successful `None`
+  display names. Name-only lookup requires one matching row. Supplied names and
+  objects must have equal counts before computation. Numeric columns retain
+  complex values and use NaN for missing cells. Loading restores values and references.
+  Call `store.fetch(row.refs[label])` to read a historical version. Successful `None`
   still shares the existing missing-cell sentinel. See ADR-011.
 - **Record** (`store/base.py::ResultRecord`) — one self-describing, codec-encoded
   row (value + named + provenance), serializable via `to_json`/`from_json`.
@@ -275,7 +277,8 @@ Use these terms exactly. Don't drift to synonyms.
   Object arrays retain shape, C-order element boundaries and units via a
   versioned tag. Structured arrays use NPY with pickle disabled; object fields,
   nested dtype metadata and unreadable/non-lossless dtype headers are rejected
-  before saving. Ordinary numerical-array tags remain unchanged. Legacy object
+  before saving. NPY headers have a 1 MiB limit on read and write, independent
+  of the size of the array data. Ordinary numerical-array tags remain unchanged. Legacy object
   tags remain readable with their original shape limitations.
 - **`ExternalFileRef`** (`store/external.py`, exported by `core.calculate.store`)
   — frozen descriptor of a caller-owned absolute local path or file URI (empty or

@@ -95,7 +95,7 @@ class _BindingChanged(ValueError):
 
 def _verify_signature(calculator: CalculatorBase, signature: CalculatorSignature, label: str) -> None:
     actual = calculator_to_signature(calculator)
-    if parameters_changed(calculator) or not actual.stable or actual.identity() != signature.identity():
+    if parameters_changed(calculator) or not actual.stable or not actual.same_identity(signature):
         raise _BindingChanged(f"calculator parameters could not be verified against the frozen signature for {label!r}")
 
 
@@ -282,7 +282,7 @@ class Study:
     def _check_recipe(self, signature: CalculatorSignature) -> None:
         with self._database._repo.session() as session:
             row = session.get(Recipe, signature.hash)
-            if row is not None and CalculatorSignature.from_json(row.signature_text).identity() != signature.identity():
+            if row is not None and not CalculatorSignature.from_json(row.signature_text).same_identity(signature):
                 raise ValueError("registered recipe conflicts with Study signature")
 
     def _computable(
@@ -308,10 +308,7 @@ class Study:
             if reconstruct:
                 _trusted_payload(signature.as_dict(full=True), {})
                 calc = calculator_from_signature(signature)
-                if (
-                    not isinstance(calc, CalculatorBase)
-                    or calculator_to_signature(calc).identity() != signature.identity()
-                ):
+                if not isinstance(calc, CalculatorBase) or not calculator_to_signature(calc).same_identity(signature):
                     raise ValueError("reconstructed calculator does not match its frozen signature")
                 calculators[label] = calc
             else:

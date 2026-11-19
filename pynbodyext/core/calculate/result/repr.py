@@ -261,41 +261,47 @@ class ResultRepr:
     def _result_sections(result: Result[Any]) -> list[Block]:
         """The drill-down sections, each named after the attribute that shows it."""
         sections: list[Block] = []
-        if result.named_values:
+        if result.diagnostics.get("named_values"):
             sections.append(
-                Section(
+                Section.drilldown(
                     "Named values",
-                    [Fields(result.named_values._display_rows(), nowrap=True)],
-                    attr="named_values",
+                    "named_values",
+                    lambda: Fields(result.named_values._display_rows(), nowrap=True),
                     collapsible=False,
                 )
             )
         if result.warnings:
-            rows = [[index + 1, str(warning)] for index, warning in enumerate(result.warnings)]
             sections.append(
-                Section("Warnings", [Table(["#", "message"], rows, nowrap=True)], attr="warnings", collapsible=False)
-            )
-        error_rows = ResultRepr._result_error_rows(result)
-        if error_rows:
-            sections.append(
-                Section(
-                    "Errors",
-                    [Table(["node", "phase", "message"], error_rows, nowrap=True)],
-                    attr="errors",
+                Section.drilldown(
+                    "Warnings",
+                    "warnings",
+                    lambda: Table(["#", "message"], list(enumerate(map(str, result.warnings), start=1)), nowrap=True),
                     collapsible=False,
                 )
             )
-        if result.provenance is not None:
+        if result.errors or any(node.run.error is not None for node in result.nodes.values()):
             sections.append(
-                Section("Provenance", [Fields(result.provenance._display_rows(), nowrap=True)], attr="provenance")
+                Section.drilldown(
+                    "Errors",
+                    "errors",
+                    lambda: Table(["node", "phase", "message"], ResultRepr._result_error_rows(result), nowrap=True),
+                    collapsible=False,
+                )
             )
-        sections.append(
-            Section("Execution tree", [Pre(result.execution_tree)], attr="execution_tree", open=not result.ok)
+        provenance = result.provenance
+        if provenance is not None:
+            sections.append(
+                Section.drilldown("Provenance", "provenance", lambda: Fields(provenance._display_rows(), nowrap=True))
+            )
+        sections.extend(
+            [
+                Section.drilldown(
+                    "Execution tree", "execution_tree", lambda: Pre(result.execution_tree), open=not result.ok
+                ),
+                Section.drilldown("Performance", "performance", lambda: Pre(result.performance.strip())),
+                Section.drilldown("Cache", "cache", lambda: Pre(result.cache.strip())),
+            ]
         )
-        for title, attr, report in (("Performance", "performance", result.performance), ("Cache", "cache", result.cache)):
-            text = str(report).strip()
-            if text:
-                sections.append(Section(title, [Pre(text)], attr=attr))
         return sections
 
     @staticmethod

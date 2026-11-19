@@ -33,9 +33,14 @@ import base64
 import hashlib
 import io
 import json
-from dataclasses import MISSING, Field, dataclass, field, fields as dataclass_fields, is_dataclass
+import struct
+from collections.abc import Mapping
+from dataclasses import MISSING, dataclass, field, fields as dataclass_fields, is_dataclass
 from enum import Enum
+from threading import RLock
 from typing import TYPE_CHECKING, Any, ClassVar
+from uuid import uuid4
+from weakref import ReferenceType, ref
 
 import numpy as np
 from pynbody import units
@@ -50,6 +55,7 @@ from pynbodyext.core.calculate.interfaces import (
 )
 from pynbodyext.core.calculate.params.fields import captured_init_value, collect_param_specs
 from pynbodyext.util._type import class_path, import_object
+from pynbodyext.util.arrays import dtype_has_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -78,6 +84,64 @@ __all__ = [
 
 def _make_unit(value: Any) -> Any:
     return units.Unit(value)
+
+
+def _pipeline_output_values(payload: dict[str, Any], decode: Callable[[Any], Any] | None = None) -> dict[str, Any]:
+    """Resolve ordered output bindings, optionally decoding each distinct recipe once."""
+    outputs: dict[str, Any] = {}
+    for item in payload["outputs"]:
+        if "same_as" in item:
+            value = outputs[item["same_as"]]
+        else:
+            value = item["value"] if decode is None else decode(item["value"])
+        outputs[item["key"]] = value
+    return outputs
+
+
+_session_tokens: dict[int, tuple[ReferenceType[Any], str]] = {}
+_session_token_lock = RLock()
+
+
+def _session_token(value: Any) -> str:
+    """Identify a live node or array without retaining it or recycling its token."""
+    address = id(value)
+
+    def forget(reference: ReferenceType[Any]) -> None:
+        with _session_token_lock:
+            entry = _session_tokens.get(address)
+            if entry is not None and entry[0] is reference:
+                del _session_tokens[address]
+
+    with _session_token_lock:
+        entry = _session_tokens.get(address)
+        if entry is None or entry[0]() is not value:
+            entry = ref(value, forget), uuid4().hex
+            _session_tokens[address] = entry
+        return entry[1]
+
+
+def _contains_session_identity(value: Any) -> bool:
+    """Recognise session-only leaves in compact v1 payloads, which omit the schema and stability."""
+    if isinstance(value, list):
+        return any(_contains_session_identity(item) for item in value)
+    if not isinstance(value, dict):
+        return False
+    kind = value.get("node")
+    if (
+        kind == "lambda_property"
+        or value.get("type") == "unsupported"
+        or (value.get("type") == "array" and ("sha256" not in value or value.get("storage") == "object_hash"))
+    ):
+        return True
+    for key, item in value.items():
+        if (kind, key) in (("dataclass", "init"), ("generic", "identity")) and isinstance(item, dict):
+            # These mappings hold scientific parameter names. Only their values
+            # are encoded nodes, even if a parameter happens to be named 'type'.
+            if (kind == "generic" and "opaque_id" in item) or any(_contains_session_identity(v) for v in item.values()):
+                return True
+        elif _contains_session_identity(item):
+            return True
+    return False
 
 
 def _freeze_signature_value(value: Any) -> Any:
@@ -121,7 +185,7 @@ class CalculatorSignature:
         The payload — hence :attr:`hash` — is the same in every Python session
         for an equal calculator, so it can key data that outlives the process
         (a persistent result store, a table of galaxies).  False when a part is
-        identified by something session-specific, such as ``id()`` of an object or
+        identified by something session-specific, such as an opaque node's token or
         the ``repr`` of a function; such a signature still separates calculators
         within one run.  ``unstable_paths`` names those parts.
     """
@@ -157,6 +221,10 @@ class CalculatorSignature:
         payload itself keeps the values as given, for rebuilding and display.
         """
         return _canonical_identity(self.payload)
+
+    def same_identity(self, other: CalculatorSignature) -> bool:
+        """Compare the full canonical payloads, including corresponding NaN values."""
+        return _canonical_payload(self.identity()) == _canonical_payload(other.identity())
 
     def short_hash(self, *, length: int = 12) -> str:
         return self.hash[:length]
@@ -211,11 +279,15 @@ class CalculatorSignature:
         payload = data.get("payload")
         if not isinstance(payload, dict):
             raise TypeError("calculator signature payload must be a dictionary")
+        if "stable" in data:
+            stable = bool(data["stable"])
+        else:
+            stable = schema != "pynbodyext.calculator.signature/v1" and not _contains_session_identity(payload)
         return cls(
             payload=payload,
             constructible=bool(data.get("constructible", True)),
             non_constructible_paths=tuple(str(p) for p in data.get("non_constructible_paths", ())),
-            stable=bool(data.get("stable", True)),
+            stable=stable,
             unstable_paths=tuple(str(p) for p in data.get("unstable_paths", ())),
         )
 
@@ -335,12 +407,43 @@ def _sort_encoded_commutative(items: list[_Encoded]) -> list[_Encoded]:
     return sorted(items, key=lambda item: _payload_sort_key(item.value))
 
 
-def _field_default(item: Field[Any]) -> tuple[bool, Any]:
-    if item.default is not MISSING:
-        return True, item.default
-    if item.default_factory is not MISSING:
-        return True, item.default_factory()
-    return False, None
+def _object_array_element(value: Any, path: str, ancestors: frozenset[int]) -> Any:  # noqa: PLR0911
+    """Encode one Python element for hashing, preserving its type and container boundaries."""
+    if value is None or type(value) in (bool, int, str):
+        return value
+    if type(value) is bytes:
+        return ["bytes", value.hex()]
+    if type(value) is float:
+        return ["float", struct.pack("!d", value).hex()]
+    if type(value) is complex:
+        return ["complex", struct.pack("!dd", value.real, value.imag).hex()]
+    if id(value) in ancestors:
+        raise ValueError("recursive object array element")
+    if type(value) in (list, tuple):
+        ancestors = ancestors | {id(value)}
+        return [class_path(value), [_object_array_element(item, path, ancestors) for item in value]]
+    if type(value) is dict:
+        ancestors = ancestors | {id(value)}
+        return [
+            "dict",
+            [
+                [_object_array_element(k, path, ancestors), _object_array_element(v, path, ancestors)]
+                for k, v in value.items()
+            ],
+        ]
+    if isinstance(value, (np.ndarray, np.generic)) and dtype_has_metadata(value.dtype):
+        raise ValueError("object array element has dtype metadata")
+    if isinstance(value, np.void) and value.dtype.hasobject:
+        return [
+            "record",
+            str(value.dtype),
+            [_object_array_element(value[k], path, ancestors) for k in value.dtype.names or ()],
+        ]
+    if isinstance(value, np.generic):
+        return [class_path(value), str(value.dtype), value.tobytes().hex()]
+    if type(value) in (np.ndarray, SimArray):
+        return _Encoder.array_payload(value, path, 0, ancestors=ancestors).value
+    raise ValueError(f"cannot identify object array element of type {class_path(value)} at {path}")
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +465,9 @@ class _Encoder:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def array_payload(value: np.ndarray, path: str, inline_bytes: int) -> _Encoded:
+    def array_payload(
+        value: np.ndarray, path: str, inline_bytes: int, *, ancestors: frozenset[int] = frozenset()
+    ) -> _Encoded:
         array = np.asarray(value)
         base: dict[str, Any] = {
             "type": "array",
@@ -376,12 +481,21 @@ class _Encoder:
             base["units"] = str(value.units)
         buf = io.BytesIO()
         try:
+            if array.dtype.hasobject:
+                if type(value) not in (np.ndarray, SimArray) or dtype_has_metadata(array.dtype):
+                    raise ValueError("object array subclass or dtype metadata")
+                digest = hashlib.sha256()
+                ancestors = ancestors | {id(value)}
+                for item in array.flat:
+                    digest.update(_canonical_payload(_object_array_element(item, path, ancestors)).encode("utf-8"))
+                    digest.update(b"\n")
+                base.update(storage="object_hash", sha256=digest.hexdigest())
+                return _Encoded(base, constructible=False, paths=(path,), unstable=(path,))
             np.save(buf, array, allow_pickle=False)
-        except Exception as exc:
-            # No content hash: the payload names only dtype and shape, which does
-            # not tell two such arrays apart.
-            base["reason"] = f"array cannot be serialized without pickle: {exc}"
-            base["repr"] = repr(value)
+        except (TypeError, ValueError, NotImplementedError, RecursionError):
+            # A manual calculation can still use the array. Distinct arrays with
+            # opaque elements or layouts must never share a transient store key.
+            base.update(storage="opaque", session_token=_session_token(value))
             return _Encoded(base, constructible=False, paths=(path,), unstable=(path,))
         data = buf.getvalue()
         base["sha256"] = hashlib.sha256(data).hexdigest()
@@ -400,9 +514,11 @@ class _Encoder:
         )
 
     @staticmethod
-    def encode_value(value: Any, path: str, inline_bytes: int) -> _Encoded:  # noqa: PLR0911
+    def encode_value(value: Any, path: str, inline_bytes: int, *, output_names: dict[int, str] | None = None) -> _Encoded:  # noqa: PLR0911
         """Encode an arbitrary Python value into a JSON-compatible payload."""
         if is_calculator_node(value):
+            if output_names is not None and id(value) in output_names:
+                return _Encoded({"type": "pipeline_output", "key": output_names[id(value)]})
             return _Encoder.encode_calculator_value(value, path, inline_bytes)
         if value is None or isinstance(value, (bool, int, float, str)):
             return _Encoded(value)
@@ -416,25 +532,27 @@ class _Encoder:
             return _Encoded({"type": "unit", "value": str(value)})
         if isinstance(value, np.ndarray):
             return _Encoder.array_payload(value, path, inline_bytes)
-        if isinstance(value, tuple):
-            items = [_Encoder.encode_value(item, f"{path}[{i}]", inline_bytes) for i, item in enumerate(value)]
-            return _merge_encoded({"type": "tuple", "items": [e.value for e in items]}, items)
-        if isinstance(value, list):
-            items = [_Encoder.encode_value(item, f"{path}[{i}]", inline_bytes) for i, item in enumerate(value)]
-            return _merge_encoded({"type": "list", "items": [e.value for e in items]}, items)
-        if isinstance(value, dict):
+
+        def encode_child(item: Any, child_path: str) -> _Encoded:
+            return _Encoder.encode_value(item, child_path, inline_bytes, output_names=output_names)
+
+        if isinstance(value, (tuple, list)):
+            items = [encode_child(item, f"{path}[{i}]") for i, item in enumerate(value)]
+            kind = "tuple" if isinstance(value, tuple) else "list"
+            return _merge_encoded({"type": kind, "items": [e.value for e in items]}, items)
+        if isinstance(value, dict) or (output_names is not None and isinstance(value, Mapping)):
             pairs: list[dict[str, Any]] = []
             children: list[_Encoded] = []
-            for i, (k, v) in enumerate(sorted(value.items(), key=lambda p: repr(p[0]))):
-                ke = _Encoder.encode_value(k, f"{path}.key[{i}]", inline_bytes)
-                ve = _Encoder.encode_value(v, f"{path}[{repr(k)}]", inline_bytes)
+            entries = value.items() if output_names is not None else sorted(value.items(), key=lambda p: repr(p[0]))
+            for i, (k, v) in enumerate(entries):
+                ke = encode_child(k, f"{path}.key[{i}]")
+                ve = encode_child(v, f"{path}[{repr(k)}]")
                 pairs.append({"key": ke.value, "value": ve.value})
                 children.extend((ke, ve))
             return _merge_encoded({"type": "dict", "items": pairs}, children)
         if callable(value):
             return _non_constructible(value, path, "callables cannot be reconstructed from signature")
         return _non_constructible(value, path, "unsupported value type")
-
 
 
 # ---------------------------------------------------------------------------
@@ -578,7 +696,12 @@ def calculator_to_signature(
 
 
 def calculator_from_signature(signature: CalculatorSignature | dict[str, Any] | str) -> Any:
-    """Reconstruct a calculator from a constructible signature."""
+    """Reconstruct a calculator from a trusted, constructible signature.
+
+    Reconstruction can import the classes named in the signature and run their
+    constructors or custom reconstruction hooks. Supply only recipes from a
+    source whose Python code you trust.
+    """
     if isinstance(signature, str):
         signature = CalculatorSignature.from_json(signature)
     elif isinstance(signature, dict):
@@ -612,6 +735,8 @@ def _encode_init_entries(calculator: Any, path: str, inline_array_bytes: int) ->
     The one implementation of the rule.  It feeds the signature payload (identity)
     and the display label, so the two cannot drift; parameters left at their declared
     default are omitted, because the renderer spells them out from the class.
+    A factory has no fixed default value. Record its initialized value explicitly
+    so reconstruction and display do not need to call the factory again.
     """
     field_map = {f.name: f for f in dataclass_fields(type(calculator))}
     entries: list[tuple[str, _Encoded]] = []
@@ -620,8 +745,7 @@ def _encode_init_entries(calculator: Any, path: str, inline_array_bytes: int) ->
         if item is None or not item.init or not spec.signature:
             continue
         value = _argument_value(calculator, spec.name)
-        has_default, default = _field_default(item)
-        if has_default and _encoded_values_equal(value, default, inline_array_bytes):
+        if item.default is not MISSING and _encoded_values_equal(value, item.default, inline_array_bytes):
             continue
         encoded = _Encoder.encode_value(value, f"{path}.init.{spec.name}", inline_array_bytes)
         entries.append((spec.name, encoded))
@@ -632,10 +756,10 @@ def calculator_pretty_init_args(calculator: Any, *, inline_array_bytes: int = DE
     """Return a pretty-printed string of the calculator's init arguments.
 
     Every positional parameter is rendered, including when it has its declared
-    default, while keyword-only parameters at their declared defaults are
-    omitted.  Both halves come from :func:`_encode_init_entries` and
-    :func:`display_init_payload`, the same pair the signature payload and a
-    stored signature use.
+    default. Keyword-only parameters at a fixed declared default are omitted.
+    Values produced by a default factory are rendered explicitly. Both halves
+    come from :func:`_encode_init_entries` and :func:`display_init_payload`,
+    the same pair the signature payload and a stored signature use.
     """
     if not is_dataclass(calculator):
         return ""
@@ -662,13 +786,21 @@ def calculator_parameter_rows(
     that takes part in the signature, in declaration order — keyword-only ones
     too, since a table has room for them — with the value spelled the way the
     signature expression spells it and a flag for "left at its declared default".
-    Built from the same :func:`_encode_init_entries` the payload uses, so the
-    table cannot disagree with the identity it describes.
+    Hand-written nodes can also declare constructor values through their
+    ``signature_payload`` mapping.
     """
-    if not is_dataclass(calculator):
-        return []
-
     from .render import SignaturePrinter, default_init_payload
+
+    if not is_dataclass(calculator):
+        identity = calculator.signature_payload() if is_calculator_node(calculator) else None
+        return [
+            (
+                name,
+                SignaturePrinter.value(_Encoder.encode_value(value, f"init.{name}", inline_array_bytes).value),
+                False,
+            )
+            for name, value in (identity or {}).items()
+        ]
 
     explicit = {name: enc.value for name, enc in _encode_init_entries(calculator, "init", inline_array_bytes)}
     defaults = default_init_payload(type(calculator), inline_array_bytes=inline_array_bytes)
@@ -726,7 +858,8 @@ def calculator_unpack(signature_json: str, *, pretty_key: str | None = None) -> 
     Parameters
     ----------
     signature_json : str
-        A JSON string previously returned by :func:`calculator_pack`.
+        Trusted JSON previously returned by :func:`calculator_pack`. Reconstruction
+        may import classes and run their Python constructors or hooks.
     pretty_key : str, optional
         The corresponding human-readable key.  Not used for reconstruction;
         accepted only for API symmetry / self-documenting call sites.
