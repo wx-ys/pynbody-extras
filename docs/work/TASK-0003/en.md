@@ -36,3 +36,7 @@ GitHub returned 79 conversation comments (53 review guides and 26 quota or size 
 | [#58](https://github.com/wx-ys/pynbody-extras/pull/58) | Joined worker transforms and lazy raw Filter consumption have coverage. Database-confirmed saves and recovery publish historical member origins and use sites accessible by pinned version. Value-only store hits explicitly expose `selection_observations is None`. A scoped input delivered to `check_input` counts as consumed under ADR-023. |
 
 The Pipeline subclass fix also covers existing pickles and catalogues. Reconstructed recipes preserve output names, order and cache identity. Repeated aliases are individually discoverable in Database results. In an independently checked seven-layer recipe, storing each child once reduced the encoded size from 415,441 to 1,739 bytes.
+
+## Verification
+
+`make check` passed all 1,983 fast tests, Ruff, mypy, package metadata and the bilingual index. `make test-all` passed all 1,991 tests with pandas, SQLite, the compiled extension and snapshot data. Both source distributions built successfully. The OpenMP C++ suite also passed. [PR #60](https://github.com/wx-ys/pynbody-extras/pull/60)

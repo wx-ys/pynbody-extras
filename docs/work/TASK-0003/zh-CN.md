@@ -36,3 +36,7 @@ GitHub 返回了 79 条对话评论，其中 53 条为评审导读，26 条为�
 | [#58](https://github.com/wx-ys/pynbody-extras/pull/58) | 已有回归覆盖工作线程的变换及原始 Filter 的按需消费。Database 确认保存或恢复后，可按固定版本查询成员来源及使用位置。仅含数值的存储命中显式返回 `selection_observations is None`。按 ADR-023，传给 `check_input` 的作用域输入属于已经消费的输入。 |
 
 Pipeline 子类修复也覆盖旧版 pickle 和数据库目录。重建配方后，输出名称、顺序和缓存键均一致。共用计算器的多个输出仍可在 Database 中分别按名称查到。在独立复核的七层配方中，每个子计算器只保存一次后，编码大小从 415,441 字节降至 1,739 字节。
+
+## 验证
+
+`make check` 的 1,983 项快速测试、Ruff、mypy、打包元数据及双语索引检查均已通过。`make test-all` 在包含 pandas、SQLite、原生扩展及真实快照数据的环境中通过全部 1,991 项测试。两个源码发行包均构建成功，OpenMP C++ 测试也已通过。[PR #60](https://github.com/wx-ys/pynbody-extras/pull/60)

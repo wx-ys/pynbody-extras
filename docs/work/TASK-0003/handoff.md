@@ -12,3 +12,7 @@
 - A nested custom Pipeline repeated its children in its output bindings, constructor state and dependencies. The seven-layer audit case fell from 415,441 bytes to 1,739 bytes. A twelve-layer check visited twelve hooks. Rebuilding preserved the original hash. Shared output aliases were both discoverable in Database and survived the portable JobSpec round trip.
 
 已核对第 1 至 59 个已合并 PR，逐项结果和依据见双语工作项。验证环境包含 Linux、Python 3.11、pynbody 2.8、SQLite、原生扩展、真实快照及 pandas。
+
+## 2026-11-20 · Integration
+
+`make check` passed 1,983 fast tests and checked 145 source files with mypy. `make test-all` passed all 1,991 tests with no skips. The warning from ParamSum exercising an empty selection was expected. The isolated packaging tests built both source distributions with their PyPI build dependencies. `make cpp-test` reported `ALL PASS` with OpenMP. [Implementation commit](https://github.com/wx-ys/pynbody-extras/commit/8b02e23ccd4f7c7c9a1ef6afbbb073c9f42aafd9) · [PR #60](https://github.com/wx-ys/pynbody-extras/pull/60)
