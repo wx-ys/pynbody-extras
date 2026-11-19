@@ -165,7 +165,7 @@ class Pipeline(CalculatorBase[dict[str, Any], dict[str, Any]]):
                     # dependencies without an intervening bound scope.
                     branch = PipelineTransformScope(restore=True)
                     with branch.lifetime(ctx, self):
-                        node_result = ctx.evaluate(child, replace(input, transform_owner=branch))
+                        node_result = ctx.evaluate(child, replace(input, transform_owner=branch), edge=("outputs", key))
                 except Exception:
                     if ctx.options.errors != ErrorPolicy.COLLECT_PARTIAL or ctx.pipeline_frame_failed:
                         raise

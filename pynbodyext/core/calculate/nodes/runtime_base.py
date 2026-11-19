@@ -93,6 +93,7 @@ from abc import ABC
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
 from pynbodyext.core.calculate.params.fields import ParamView
+from pynbodyext.core.calculate.result.enums import BuiltinKinds
 from pynbodyext.core.calculate.runtime import CalcRuntime, TransformRuntime, bind_runtime
 
 from .base import CalculatorBase
@@ -155,6 +156,13 @@ class RuntimeCalculatorBase(CalculatorBase[TRaw, TPublic], Generic[TRaw, TPublic
             with ctx.phase(self, "resolve_params"):
                 values = self.resolve_params(runtime)
                 params = self.prepare_resolved_params(runtime, values)
+
+            recorder = ctx.selection_recorder
+            if recorder is not None and ctx.current_node is not None:
+                node_id = ctx.current_node.node_id
+                recorder.measurements[node_id] = recorder.context(runtime.sim)
+                if self.kind == BuiltinKinds.FILTER:
+                    recorder.prepared(node_id, self, runtime.sim, params, values)
 
             with ctx.phase(self, "calculate"):
                 if input.transform_owner is not None and isinstance(runtime, TransformRuntime):

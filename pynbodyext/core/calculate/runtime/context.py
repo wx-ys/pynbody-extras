@@ -92,6 +92,7 @@ if TYPE_CHECKING:
     from .engine import EvalEngine
     from .input import NodeInput
     from .options import RunOptions
+    from .selection_observations import SelectionRecorder
 
 
 TRaw = TypeVar("TRaw")
@@ -162,6 +163,7 @@ class ExecutionContext:
     mutation: _MutationState = field(default_factory=_MutationState)
     records: _RunRecords = field(default_factory=_RunRecords)
     pipeline_frame_failed: bool = False
+    selection_recorder: SelectionRecorder | None = None
 
     _node_stack: list[ResultNode] = field(default_factory=list)
     _evaluation_stack: list[tuple[int, tuple[Any, ...]]] = field(default_factory=list)
@@ -181,18 +183,44 @@ class ExecutionContext:
         """Currently active result node, if any."""
         return self._node_stack[-1] if self._node_stack else None
 
-    def evaluate(self, node: CalculatorBase[Any, Any], input: NodeInput | None = None) -> ResultNode:
-        """Evaluate a dependency node in this context."""
-        return self.engine.evaluate(node, self, input)
+    def evaluate(
+        self, node: CalculatorBase[Any, Any], input: NodeInput | None = None, *, edge: tuple[str, ...] | None = None
+    ) -> ResultNode:
+        """Evaluate a dependency and retain its actual occurrence, including cache hits."""
+        result = self.engine.evaluate(node, self, input)
+        if self.selection_recorder is not None and self.current_node is not None:
+            self.selection_recorder.link(self.current_node.node_id, result.node_id, edge)
+        return result
 
-    def public_value(self, node: CalculatorBase[TRaw, TPublic], input: NodeInput | None = None) -> TPublic:
-        node_result = self.evaluate(node, input)
+    def public_value(
+        self, node: CalculatorBase[TRaw, TPublic], input: NodeInput | None = None, *, edge: tuple[str, ...] | None = None
+    ) -> TPublic:
+        node_result = self.evaluate(node, input, edge=edge)
         return self.nodes.runtime[node_result.node_id].public_value
 
-    def raw_value(self, node: CalculatorBase[TRaw, TPublic], input: NodeInput | None = None) -> TRaw:
+    def raw_value(
+        self, node: CalculatorBase[TRaw, TPublic], input: NodeInput | None = None, *, edge: tuple[str, ...] | None = None
+    ) -> TRaw:
         """Evaluate a dependency and return its raw value."""
-        node_result = self.evaluate(node, input)
+        node_result = self.evaluate(node, input, edge=edge)
         return self.nodes.runtime[node_result.node_id].raw_value
+
+    def select(self, node: CalculatorBase, input: NodeInput, *, role: str, edge: tuple[str, ...]) -> NodeInput:
+        from .input import FilterResult
+        from .selection_observations import SelectionBinding
+
+        result = self.evaluate(node, input, edge=edge)
+        raw = self.nodes.runtime[result.node_id].raw_value
+        if not isinstance(raw, FilterResult):
+            raise TypeError("filter nodes must return FilterResult")
+        binding = None
+        if self.selection_recorder is not None and self.current_node is not None:
+            prior = input.selection_binding
+            binding = SelectionBinding(
+                self.selection_recorder, self.current_node.node_id, result.node_id, edge, role,
+                None if prior is None else prior.origin_id
+            )
+        return input.with_selection(raw, binding)
 
     def register_node(self, node_result: ResultNode) -> None:
         """Register a newly created result node."""

@@ -275,7 +275,7 @@ class AndFilter(FilterBase):
         return {"left": self.left, "right": self.right}
 
     def _build_mask_runtime(self, sim: SimSnap, params: Any, ctx: ExecutionContext, input: NodeInput) -> Any:
-        return ctx.public_value(self.left, input) & ctx.public_value(self.right, input)
+        return ctx.public_value(self.left, input, edge=("left",)) & ctx.public_value(self.right, input, edge=("right",))
 
 
 class OrFilter(FilterBase):
@@ -293,7 +293,7 @@ class OrFilter(FilterBase):
         return {"left": self.left, "right": self.right}
 
     def _build_mask_runtime(self, sim: SimSnap, params: Any, ctx: ExecutionContext, input: NodeInput) -> Any:
-        return ctx.public_value(self.left, input) | ctx.public_value(self.right, input)
+        return ctx.public_value(self.left, input, edge=("left",)) | ctx.public_value(self.right, input, edge=("right",))
 
 
 class NotFilter(FilterBase):
@@ -310,4 +310,4 @@ class NotFilter(FilterBase):
         return {"child": self.child}
 
     def _build_mask_runtime(self, sim: SimSnap, params: Any, ctx: ExecutionContext, input: NodeInput) -> Any:
-        return ~ctx.public_value(self.child, input)
+        return ~ctx.public_value(self.child, input, edge=("child",))

@@ -101,7 +101,7 @@ filter and the resulting scope composition.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Generic, TypeAlias, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeAlias, TypeVar, cast
 
 from pynbody.snapshot import SimSnap
 from pynbody.transformation import Transformation
@@ -117,7 +117,7 @@ from pynbodyext.core.calculate.result.enums import (
     normalize_revert_policy,
 )
 from pynbodyext.core.calculate.runtime import CalcRuntime, TransformRuntime
-from pynbodyext.core.calculate.runtime.input import FilterResult, NodeInput, TransformResult
+from pynbodyext.core.calculate.runtime.input import NodeInput, TransformResult
 from pynbodyext.core.calculate.runtime.transform_scope import PipelineTransformScope
 
 from .runtime_base import RuntimeCalculatorBase
@@ -156,6 +156,7 @@ class TransformBase(RuntimeCalculatorBase[TransformResult[HandleT], HandleT], Ge
     positional parameters (``ShiftPosTo("ssc", move_all=False)``).
     """
 
+    frame_operation: ClassVar[str | None] = None
     node_kind = BuiltinKinds.TRANSFORM
     effect = EffectPolicy.MUTATING
     cacheable = False
@@ -249,10 +250,7 @@ class TransformBase(RuntimeCalculatorBase[TransformResult[HandleT], HandleT], Ge
         measure_input = input
         if self.measure_filter is not None:
             with ctx.phase(self, "measure_filter"):
-                filter_result = ctx.raw_value(self.measure_filter, input)
-                if not isinstance(filter_result, FilterResult):
-                    raise TypeError("measure filters must return FilterResult")
-                measure_input = input.with_selection(filter_result)
+                measure_input = ctx.select(self.measure_filter, input, role="transform_measure", edge=("measure_filter",))
 
         return TransformRuntime(
             ctx=ctx,
@@ -306,21 +304,23 @@ class TransformBase(RuntimeCalculatorBase[TransformResult[HandleT], HandleT], Ge
 
     def _execute_in_scope(self, ctx: ExecutionContext, input: NodeInput) -> TransformResult[HandleT]:
         owner = input.transform_owner
-        if owner is None or type(self).execute is TransformChain.execute:
+        if type(self).execute is TransformChain.execute:
             return self.execute(ctx, input)
-        start = len(owner.steps)
+        start = len(owner.steps) if owner is not None else 0
         try:
             result = self.execute(ctx, input)
         except Exception:
             # Low-level execute overrides may apply a mutation without ever
             # delivering a handle to the standard compute/wrap lifecycle.
-            if type(self).execute is not RuntimeCalculatorBase.execute:
+            if owner is not None and type(self).execute is not RuntimeCalculatorBase.execute:
                 ctx.pipeline_frame_failed = True
             raise
         # A delegating chain has already registered its individual steps. A
         # custom execute hook can instead return a complete receipt of its own.
-        if not isinstance(self, TransformChain) or len(owner.steps) == start:
+        if owner is not None and (not isinstance(self, TransformChain) or len(owner.steps) == start):
             owner.confirm(ctx, self, result, start)
+        if ctx.selection_recorder is not None and ctx.current_node is not None:
+            ctx.selection_recorder.applied(self, ctx.current_node.node_id, result.handle, result.target)
         return result
 
     def sim_after_transform(self, sim: SimSnap, target: TransformTarget, handle: HandleT) -> SimSnap:
@@ -365,6 +365,8 @@ class TransformBase(RuntimeCalculatorBase[TransformResult[HandleT], HandleT], Ge
 
             with observation_phase("revert"):
                 handle.revert()  # type: ignore[attr-defined]
+                if ctx.selection_recorder is not None:
+                    ctx.selection_recorder.reverted(handle)
                 ctx.advance_mutation_generation(f"revert {self.log_label}", observed_phase="revert")
 
     @classmethod
@@ -415,8 +417,8 @@ class TransformChain(TransformBase[tuple[TransformStep, ...]]):
         steps: list[TransformStep] = []
         try:
             with ctx.phase(self, "calculate"):
-                for transform in self.transforms:
-                    result = ctx.raw_value(transform, work)
+                for index, transform in enumerate(self.transforms):
+                    result = ctx.raw_value(transform, work, edge=("transforms", str(index)))
                     if not isinstance(result, TransformResult):
                         raise TypeError("transform nodes must return TransformResult")
                     steps.append(TransformStep(transform=transform, result=result))

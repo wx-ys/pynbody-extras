@@ -154,13 +154,14 @@ class ValueResolver(Protocol):
 class RuntimeValueResolver:
     ctx: ExecutionContext
     input: NodeInput
+    edge: tuple[str, ...] | None = None
 
     @property
     def active_sim(self) -> Any:
         return self.input.active_sim
 
     def calculator_value(self, node: CalculatorBase[Any, TPublic]) -> TPublic:
-        return self.ctx.public_value(node, self.input)
+        return self.ctx.public_value(node, self.input, edge=self.edge)
 
 
 @dataclass(slots=True)

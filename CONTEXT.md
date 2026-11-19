@@ -79,6 +79,17 @@ initialization. Metadata browsing and planning load no particle data. Manual
 Study computation creates no Run or stored value. Legacy SampleTable and
 ORM StudyReport keep their own contracts and schemas.
 
+## Selection observations (ADR-023)
+
+An addressable particle calculation can return `Result.selection_observations`.
+A Selection origin freezes the consumed Filter, resolved parameters, parent,
+ordered root indices and frame at selection. A Selection use connects that
+origin to an output path, dependency occurrence and role. An output observation
+records its measurement frame, including for unfiltered leaves. A complete
+SelectionContext describes the root revision, particle targets, units and ordered
+observed operations. Pure calculations can operate without a persistent root.
+The value-only batch path omits collection. [ADR-023](docs/adr/0023-selection-observations.md)
+
 ## Distribution ownership (ADR-019)
 
 `pynbodyext-core` is the root distribution and sole owner of all `pynbodyext/**`

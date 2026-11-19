@@ -87,6 +87,8 @@ class PipelineTransformScope:
                     if not getattr(handle, "_reverted", False):
                         before = ctx.mutation.generation
                         transform.cleanup(ctx, handle)
+                        if ctx.selection_recorder is not None:
+                            ctx.selection_recorder.reverted(handle)
                         if before == ctx.mutation.generation:
                             ctx.advance_mutation_generation(f"revert {transform.log_label}", observed_phase="revert")
                         ctx.mutation.pipeline_generation = ctx.mutation.generation
