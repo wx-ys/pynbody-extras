@@ -57,3 +57,5 @@ the [handoff](handoff.md).
 ```bash
 .venv/bin/python -m pytest -q tests/test_pipeline_branch_scopes.py tests/test_pipeline_scope_versions.py tests/test_postprocessors.py
 ```
+
+Indexed particle subsets restore their exact coordinates after all three periodic wrapping conventions. An invalid alignment direction or parallel up vector is reported before mutation, so independent outputs can still run under `collect_partial`. [PR #57](https://github.com/wx-ys/pynbody-extras/pull/57)

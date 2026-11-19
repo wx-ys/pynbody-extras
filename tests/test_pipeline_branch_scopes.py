@@ -417,12 +417,17 @@ def test_eager_bin_cleanup_failure_stops_the_enclosing_partial_pipeline():
     np.testing.assert_array_equal(sim["x"], [1.0, 3.0])
 
 
-def test_invalid_alignment_before_rotation_preserves_partial_sibling():
+@pytest.mark.parametrize(("vector", "up", "error"), [
+    (np.zeros(3), None, "zero or NaN"),
+    (np.array([0., np.inf, 0.]), None, "finite"),
+    (np.array([0., 0., 1.]), np.array([0., 0., 1.]), "parallel"),
+])
+def test_invalid_alignment_before_rotation_preserves_partial_sibling(vector, up, error):
     sim = branch_snapshot()
     before = sim["pos"].copy()
-    invalid = Coordinates().transform(AlignVec(np.zeros(3)))
+    invalid = Coordinates().transform(AlignVec(vector, up=up))
     result = Pipeline({"invalid": invalid, "native": Coordinates()}).run(sim, errors="collect_partial")
-    assert not result.ok and "zero or NaN" in result.errors[0].message
+    assert not result.ok and error in result.errors[0].message
     assert result.value["invalid"] is None
     np.testing.assert_array_equal(result.value["native"]["pos"], before)
     assert sim.current_transformation() is None

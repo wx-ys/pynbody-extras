@@ -47,3 +47,9 @@ Created the bilingual item against `c56120f`. The Phase 1 contract is in
 阶段验收共 139 项。快速检查通过，全量 1,838 项全部通过。对同一个 Bin Filter
 重复读取会复用已记录的子集。两个 Filter 使用不同的平移参数时能分别读回各自
 的粒子。工作项等待核心运行时的人工评审。
+
+## 2026-11-20 · Pre-merge review
+
+Three indexed-subset tests reproduced periodic wrapping that skipped the forward mutation or failed before wrapping. Two alignment tests reproduced a lost healthy sibling after invalid axis input. All five new cases pass after write-through subset assignment and pre-mutation axis validation.
+
+The reviewed tree passed `make check` (1,836 fast tests) and `make test-all` (1,843 tests) on November 20, including data, pandas, native and distribution tests.

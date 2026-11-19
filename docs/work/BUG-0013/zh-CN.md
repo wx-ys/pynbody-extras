@@ -44,3 +44,5 @@ SQLite 回归用例先写入旧配方和旧结果，关闭并重新打开 Databa
 ```bash
 .venv/bin/python -m pytest -q tests/test_pipeline_branch_scopes.py tests/test_pipeline_scope_versions.py tests/test_postprocessors.py
 ```
+
+三种周期回卷约定都能恢复不连续粒子子集的原坐标。方向无效或向上向量平行时，定轴在修改快照前报错，`collect_partial` 仍可计算其他输出。[PR #57](https://github.com/wx-ys/pynbody-extras/pull/57)
