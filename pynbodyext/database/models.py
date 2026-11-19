@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import Boolean, ForeignKey, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from pynbodyext.orm.models import Catalogue, CatalogueObject, DataObject, Run
+from pynbodyext.orm.models import Catalogue, CatalogueObject, DataObject, Recipe, Run
 
 
 class Base(DeclarativeBase):
@@ -58,6 +58,17 @@ class ResultSummary(Base):
     calculator_hash: Mapped[str] = mapped_column(String(64))
     ref_json: Mapped[str] = mapped_column(Text)
     summary_json: Mapped[str] = mapped_column(Text)
+
+
+class RecipeOutput(Base):
+    """One declared output per recipe and its ordered scopes and dependency occurrences."""
+
+    __tablename__ = "pynbodyext_database_recipe_outputs"
+    recipe_hash: Mapped[str] = mapped_column(ForeignKey(Recipe.hash), primary_key=True)
+    path_json: Mapped[str] = mapped_column(Text, primary_key=True)
+    ordinal: Mapped[int]
+    leaf: Mapped[bool]
+    declaration_json: Mapped[str] = mapped_column(Text)
 
 
 class DatabaseNamespace(Base):

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pynbody
-from sqlalchemy import create_engine, inspect, select
+from sqlalchemy import create_engine, delete, inspect, select
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.engine import URL
 
@@ -30,6 +30,8 @@ from pynbodyext.orm.loading import parse_input_identity
 from pynbodyext.orm.models import DataLocation, DataObject, Recipe, Selection
 from pynbodyext.orm.selections import SELECTION_SCHEMA, SelectionSpec, descriptor_key
 
+from .member_models import StagedMemberInput
+from .member_storage import producer_source, publish_observations, stage_observations
 from .models import (
     Base,
     DatabaseNamespace,
@@ -43,12 +45,25 @@ from .models import (
 )
 
 
-def encode_input(value: SavedInput) -> str:
-    return json.dumps(asdict(value), sort_keys=True)
+def encode_input(value: SavedInput, *, selection_id: int | None = None) -> str:
+    data = asdict(value if selection_id is None else replace(value, indices=None))
+    if selection_id is not None:
+        data["indices_selection_id"] = selection_id
+    return json.dumps(data, sort_keys=True)
 
 
-def decode_input(text: str) -> SavedInput:
+def decode_input(text: str, session: Any = None) -> SavedInput:
     value = json.loads(text)
+    if "indices_selection_id" in value:
+        if session is None:
+            raise ValueError("reading an archived index block requires its database session")
+        selection = session.get(Selection, value.pop("indices_selection_id"))
+        if selection is None or value["indices"] is not None:
+            raise ValueError("invalid index block in particle selection description")
+        spec = json.loads(selection.definition_json)
+        if spec.get("kind") != "indices" or selection.view_input.signature != tuple(value["signature"]):
+            raise ValueError("particle selection points to a different view")
+        value["indices"] = spec["indices"]
     for key in ("signature", "root_signature", "unit_basis"):
         value[key] = tuple(value[key])
     if value["indices"] is not None:
@@ -230,6 +245,13 @@ class Database:
             DATABASE_CONTEXT.reset(token)
 
     @property
+    def results(self) -> Any:
+        """Search confirmed saved output recipes, contexts and member uses."""
+        from .result_queries import ResultDiscovery
+
+        return ResultDiscovery(self)
+
+    @property
     def snapshots(self) -> Any:
         from .objects import InputCollection
 
@@ -270,54 +292,82 @@ class Database:
         self._check_write()
         if not is_stable_sim_identity(desc.signature) or desc.location is None:
             raise ValueError("persistent results require a file-backed stable input identity")
-        parse_input_identity(desc.signature)
+        parsed = parse_input_identity(desc.signature)
+        if parsed.root_signature != desc.root_signature:
+            raise ValueError("input description conflicts with captured root")
         root = self._repo.register_input(desc.root_signature, location=desc.location)
-        data = self._repo.register_input(desc.signature)
         root_desc = replace(desc, signature=desc.root_signature, indices=None)
         with self._repo.session() as session, session.begin():
-            for row, info in ((root, root_desc), (data, desc)):
-                existing = session.get(InputInfo, row.id)
-                text = encode_input(info)
-                if existing is None:
-                    session.add(InputInfo(input_id=row.id, description=text))
-                    session.flush()
-                elif decode_input(existing.description) != info:
-                    old = decode_input(existing.description)
-                    # Logical locations are aliases; captured replay facts may not drift.
-                    if replace(old, location=info.location) != info:
-                        raise ValueError("input replay description changed; register a new revision")
-            if desc.indices is not None:
-                spec = SelectionSpec.indices(list(desc.indices))
-                key = descriptor_key(
-                    root.id,
-                    desc.root_count,
-                    spec,
-                    view_signature=desc.signature if parse_input_identity(desc.signature).kind == "halo" else None,
-                )
-                selection = session.scalar(select(Selection).where(Selection.descriptor_key == key))
-                if selection is None:
-                    session.add(
-                        Selection(
-                            root_input_id=root.id,
-                            view_input_id=data.id,
-                            schema=SELECTION_SCHEMA,
-                            definition_json=spec.to_json(),
-                            expected_count=desc.root_count,
-                            descriptor_key=key,
-                        )
-                    )
-                elif selection.view_input_id != data.id:
-                    raise ValueError("selection descriptor points at a different input")
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            root = session.scalars(select(DataObject).where(DataObject.id == root.id)).one()
+            self._store_description(session, root, root_desc)
+            if desc.indices is None:
+                if desc.signature != root_desc.signature:
+                    raise ValueError("particle selection has no exact indices")
+                data = root
+            else:
+                data, _ = self._record_exact_view(session, root, desc)
         return self._repo.get_input(data.id)
+
+    @staticmethod
+    def _store_description(
+        session: Any, data: DataObject, desc: SavedInput, *, selection_id: int | None = None
+    ) -> None:
+        existing = session.get(InputInfo, data.id)
+        if existing is None:
+            session.add(InputInfo(input_id=data.id, description=encode_input(desc, selection_id=selection_id)))
+            session.flush()
+        elif replace(decode_input(existing.description, session), location=desc.location) != desc:
+            # Registered logical locations may alias the same immutable input.
+            raise ValueError("input replay description changed; register a new revision")
+
+    def _record_exact_view(
+        self, session: Any, root: DataObject, desc: SavedInput, *, staged: bool = False
+    ) -> tuple[DataObject, Selection]:
+        if desc.indices is None:
+            raise ValueError("particle selection requires exact indices")
+        kind = parse_input_identity(desc.signature).kind
+        if kind not in ("halo", "subset") or particle_index_digest(desc.indices) != desc.signature[-1]:
+            raise ValueError("particle selection digest conflicts with captured input")
+        if any(type(i) is not int or i < 0 or i >= desc.root_count for i in desc.indices):
+            raise ValueError("particle selection index outside the captured root")
+        previous_input_id = None
+        if staged:
+            previous_input_id = session.scalar(
+                select(DataObject.id).where(DataObject.identity_key == sim_identity_key(desc.signature))
+            )
+        data = self._repo._input_row(session, root.timestep, desc.signature, kind, root)
+        if staged:
+            if previous_input_id is None:
+                session.add(StagedMemberInput(input_id=data.id))
+        else:
+            session.execute(delete(StagedMemberInput).where(StagedMemberInput.input_id == data.id))
+        spec = SelectionSpec.indices(list(desc.indices))
+        key = descriptor_key(root.id, desc.root_count, spec, view_signature=desc.signature if kind == "halo" else None)
+        selection = session.scalar(select(Selection).where(Selection.descriptor_key == key))
+        if selection is None:
+            selection = Selection(
+                root_input_id=root.id, view_input_id=data.id, schema=SELECTION_SCHEMA, definition_json=spec.to_json(),
+                expected_count=desc.root_count, descriptor_key=key,
+            )
+            session.add(selection)
+            session.flush()
+        elif selection.view_input_id != data.id or selection.definition_json != spec.to_json():
+            raise ValueError("selection descriptor points at a different input")
+        self._store_description(session, data, desc, selection_id=selection.id)
+        return data, selection
 
     def _description(self, input_id: int) -> SavedInput:
         self._check()
         with self._repo.session() as session:
-            row = session.get(InputInfo, input_id)
-            if row is None:
-                raise ValueError("input has no reload description")
-            desc = decode_input(row.description)
-        data = self._repo.get_input(input_id)
+            return self._description_in(session, input_id)
+
+    def _description_in(self, session: Any, input_id: int) -> SavedInput:
+        row = session.get(InputInfo, input_id)
+        data = session.get(DataObject, input_id)
+        if row is None or data is None:
+            raise ValueError("input has no reload description")
+        desc = decode_input(row.description, session)
         self._repo._validate_input_metadata(data)
         parsed = parse_input_identity(desc.signature)
         if parsed.root_signature != desc.root_signature or type(desc.root_count) is not int or desc.root_count < 0:
@@ -334,18 +384,17 @@ class Database:
                 raise ValueError("particle selection digest conflicts with input identity")
             if data.parent_id is None:
                 raise ValueError("selection has no root input")
-            root_desc = self._description(data.parent_id)
+            root_desc = self._description_in(session, data.parent_id)
             if root_desc.root_count != desc.root_count or root_desc.signature != desc.root_signature:
                 raise ValueError("selection root description conflicts with view")
             spec = SelectionSpec.indices(list(desc.indices))
             key = descriptor_key(
                 data.parent_id, desc.root_count, spec, view_signature=desc.signature if parsed.kind == "halo" else None
             )
-            with self._repo.session() as session:
-                selection = session.scalar(select(Selection).where(Selection.descriptor_key == key))
+            selection = session.scalar(select(Selection).where(Selection.descriptor_key == key))
             if selection is None or selection.view_input_id != data.id:
                 raise ValueError("input has no matching immutable Selection definition")
-            self._repo.get_selection(selection.id)
+            self._repo._validate_selection(selection)
         return desc
 
     def register(
@@ -392,7 +441,7 @@ class Database:
         data = self._record_input(desc)
         self._repo.register_recipe(signature)
         self._alias_check(data.id, name, signature)
-        self._associate_catalogue(result, data.id)
+        source = self._associate_catalogue(result, data.id)
         op_id = str(uuid.uuid4())
         with self._repo.session() as session, session.begin():
             session.add(
@@ -413,6 +462,8 @@ class Database:
                     ),
                 )
             )
+            session.flush()
+            stage_observations(self, session, desc, data.id, result, op_id, source=source)
         token = self._store.pending.set(op_id)
         try:
             ref = self._store.store(result, sim_signature=desc.signature, calculator_signature=signature)
@@ -426,15 +477,21 @@ class Database:
             raise DatabasePersistenceError(ref, op_id) from exc
         return ref
 
-    def _associate_catalogue(self, result: Any, input_id: int) -> None:
+    def _associate_catalogue(self, result: Any, input_id: int) -> tuple[tuple[str, ...], str | None] | None:
         if parse_input_identity(result._save_input.signature).kind != "halo":
-            return
-        from .catalogues import associate_saved_catalogue
+            return None
+        from .catalogues import Catalogue, associate_saved_catalogue
 
         link = result._save_catalogue
-        if link is not None and link[0]() is not None:
-            if associate_saved_catalogue(self, link[0](), link[1], input_id):
-                return
+        catalogue = None if link is None else link[0]()
+        if catalogue is not None and associate_saved_catalogue(self, catalogue, link[1], input_id):
+            # A raw halo establishes its live catalogue, but the caller may have given the same adapter two names.
+            matching = [pk for pk, instance in self._catalogue_live.items() if instance() is catalogue]
+            if len(matching) == 1:
+                number = result._save_input.signature[-2]
+                halo = Catalogue(self, matching[0]).halos[number]
+                return halo.object_locator, None
+            return None
         with self._repo.session() as session:
             existing = session.scalar(select(ObjectSelection).where(ObjectSelection.input_id == input_id))
         if existing is None:
@@ -446,6 +503,7 @@ class Database:
                 UserWarning,
                 stacklevel=3,
             )
+        return None
 
     def _finish_save(self, operation_id: str) -> None:
         with self._repo.session() as session:
@@ -456,7 +514,7 @@ class Database:
         data = self._repo.get_input(op.input_id)
         signature = CalculatorSignature.from_json(op.signature_text)
         self._repo._validate_input_metadata(data)
-        self._description(data.id)
+        description = self._description(data.id)
         with self._repo.session() as session:
             recipe = session.get(Recipe, signature.hash)
             if (
@@ -472,6 +530,7 @@ class Database:
         if op.run_id is not None:
             self._repo.finish_run(op.run_id, ref, reused=op.reused)
         with self._repo.session() as session, session.begin():
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             summary = session.get(ResultSummary, ref.version_id)
             if summary is None:
                 session.add(
@@ -492,6 +551,12 @@ class Database:
             stored = session.get(SaveOperation, operation_id)
             if stored is None:
                 raise ValueError("save operation disappeared")
+            session.flush()  # The version summary owns the foreign keys of its observations.
+            if not op.reused:
+                publish_observations(self, session, op.id, ref.version_id, description.root_signature)
+            from .result_queries import index_recipe
+
+            index_recipe(session, signature)
             stored.completed = True
 
     def recover(self, ref: RecordRef | SavedResultRef) -> None:
@@ -600,14 +665,16 @@ class Database:
         desc = self._description(input_id)
         return self._load_description(desc, location_id=location_id)
 
-    def _load_description(self, desc: SavedInput, *, location_id: int | None = None) -> Any:
+    def _load_description(
+        self, desc: SavedInput, *, location_id: int | None = None, convert_units: bool = True
+    ) -> Any:
         root = self._registered_input(desc.root_signature)
         if root is None:
             raise ValueError("input root is not registered")
         loaded = self._repo.load_input(root.input_id, location_id=location_id)
         if len(loaded.sim) != desc.root_count:
             raise ValueError("loaded root particle count changed; use a new revision")
-        if desc.unit_basis:
+        if convert_units and desc.unit_basis:
             loaded.sim.physical_units(distance=desc.unit_basis[0], velocity=desc.unit_basis[1], mass=desc.unit_basis[2])
         sim = loaded.sim
         if desc.indices is not None:
@@ -696,6 +763,7 @@ class Database:
             (sim, provider), calculator, options = compute()
             manual_result = execute(calculator, sim, options, provider=provider)
             manual_result._database = self
+            manual_result._save_source = producer_source(source)
             return manual_result
 
         from .catalogues import Halo, _bind_object
@@ -721,6 +789,7 @@ class Database:
                 invocation.failed = True
             raise
         self._attach(result, desc, signature)
+        result._save_source = producer_source(source)
         if result.errors:
             self._repo.fail_run(run.id, RuntimeError(str(result.errors)))
             if invocation is not None:

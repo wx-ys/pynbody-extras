@@ -293,3 +293,69 @@ A failed cell carries its diagnostic. An incomplete cell can carry a separate
 `recovery_ref`; use `db.recover` to finish a recoverable save and collect again
 to observe the cache. Portable table export rejects opaque values and requires
 `overwrite=True` to replace an existing file. See [ADR-021](adr/0021-database-studies-and-detached-tables.md).
+
+## Find the particles behind a measurement
+
+A saved calculation records each Filter view it consumed. Open the same database later to load those particle indices in order, including duplicate indices. Start from a catalogue that declares an exact subhalo membership. When importing your own catalogue, `host.subhalos.register(7, particles=view)` binds a snapshot view to the original subhalo ID. Omit `particles` to record an object whose membership is unknown.
+
+```python
+from pynbodyext.filters import Disc, FamilyFilter
+from pynbodyext.properties import AngMomVec, KappaRot
+from pynbodyext.transforms import AlignVec
+
+host = snap.catalogues["groups"].halos[42]
+sub = host.subhalos[7]
+stars = sub.members.register("star")
+face_on = AlignVec(AngMomVec())
+disc = Disc("10 kpc", "1 kpc")
+calc = KappaRot().transform(face_on).filter(disc)
+result = calc.run(stars)
+
+disk = stars.members[disc]
+particles = disk.load()
+origin = stars.members.where(filter=Disc, transform=face_on).one()
+face_on_particles = origin.load(frame="selection")
+measurements = disk.used_by
+```
+
+`members[selector]` reads previously registered membership. The strings `"star"` and `"dm"` stand for the corresponding `FamilyFilter` instances. An empty confirmed member has a particle count of zero. A missing registration raises `KeyError`. When several origins selected the same sequence, `.load()` still works and `.origins` lists them. If the particle sequences differ, choose an origin with `.where(...).one()`.
+
+Selection-frame loading replays witnessed rotations, position shifts and velocity shifts on an independent view. A periodic wrap or an unreported custom transformation can leave the recorded frame incomplete. Its origin still provides the original-coordinate particles. Both forms of loading require access to the recorded snapshot revision.
+
+## Find outputs and compare subhalos with hosts
+
+`results.where` returns metadata for saved outputs. A Filter class matches a type, and a Filter instance matches its full signature. `transform=` matches an ordered method or chain. `uses=` also searches dependencies used for tasks such as measuring an axis. `context=` matches the actual recorded frame. Predicates in a single query apply to one output.
+
+```python
+hits = stars.results.where(transform=face_on, filter=Disc)
+hit = hits.one()
+value = db.fetch(hit.ref).value
+uses = hit.members.where(role="output_filter", filter=disc)
+original_particles = uses.one().load()
+```
+
+A standalone result has output path `()`. A named Pipeline emits one hit per leaf, with paths such as `("kinematics", "krot")`. These paths share the pinned root receipt. To trace an earlier Study value after a refresh, pass its cell's `ref` and the desired `output` path to `db.results.where`. A historical result that predates membership recording exposes `hit.members.recorded == False`.
+
+Use the catalogue inventory as the left table when the sample denominator includes subhalos with missing measurements. Object and host locators include the database, snapshot and catalogue revision, and preserve the original number's type. `to_dataframe(limit=100, offset=0)` reads a page in catalogue row order. Metadata browsing leaves the particle loader idle.
+
+```python
+from pynbodyext.properties import ParamSum
+
+cat = snap.catalogues["groups"]
+mass = ParamSum("mass")
+sub_measure = mass.filter(FamilyFilter("star"))
+inventory = cat.subhalos.to_dataframe()
+child = db.results.where(objects=cat.subhalos, calculator=sub_measure).to_dataframe()
+hosts = db.results.where(objects=cat.halos, calculator=mass).to_dataframe()
+comparison = inventory.merge(
+    child[["object_locator", "ref"]], on="object_locator", how="left", validate="one_to_one"
+)
+host_mass = hosts[["object_locator", "ref"]].rename(
+    columns={"object_locator": "host_locator", "ref": "host_mass_ref"}
+)
+comparison = comparison.merge(host_mass, on="host_locator", how="left", validate="many_to_one")
+```
+
+A zero-mass measurement has a valid receipt. A missing measurement leaves its receipt column empty. `membership_known` describes the available particle binding independently of either result. Fixed Study tables can reopen and display their captured values after the database closes.
+
+For host and subhalo measurements that must share one read time, put their exact handles and both calculations in one Study and call `collect(missing="keep")`. Each successful cell then retains its version even if another writer refreshes the database.

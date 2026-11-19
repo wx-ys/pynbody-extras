@@ -1,0 +1,21 @@
+{
+  "id": "FEAT-0021",
+  "type": "feature",
+  "status": "done",
+  "title_en": "Navigate and replay observed selection frames",
+  "title_zh": "查询并重放筛选时的坐标",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-20",
+  "updated": "2026-11-20",
+  "completed": "2026-11-20",
+  "resolution": "implemented",
+  "pr": null,
+  "related": [
+    "FEAT-0020"
+  ],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

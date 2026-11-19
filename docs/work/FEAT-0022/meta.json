@@ -1,0 +1,21 @@
+{
+  "id": "FEAT-0022",
+  "type": "feature",
+  "status": "done",
+  "title_en": "Discover saved outputs and trace their particle members",
+  "title_zh": "发现已存输出并反查粒子成员",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-20",
+  "updated": "2026-11-20",
+  "completed": "2026-11-20",
+  "resolution": "implemented",
+  "pr": null,
+  "related": [
+    "FEAT-0021"
+  ],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

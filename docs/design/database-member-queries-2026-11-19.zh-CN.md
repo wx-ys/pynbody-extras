@@ -2,6 +2,8 @@
 
 设计草案，2026-11-19。源码基线为合并 ADR-021 的 `c56120f`。[English](database-member-queries-2026-11-19.md)
 
+2026-11-20 已实施。已交付 API 及用法见[数据库指南](../database.zh-CN.md)，运行时与存储合同见 [ADR-023](../adr/0023-selection-observations.md) 和 [ADR-024](../adr/0024-saved-members-and-output-discovery.md)。
+
 从一个星系出发，分析者需要找到其中的恒星和孔径选集。从论文中的一个数值出发，则需要找回当时使用的粒子、坐标系与计算定义。建议用 `obj.members[选择器]` 浏览已登记的成员，用 `obj.results.where(...)` 发现已存输出，用固定结果引用追溯一次具体测量。目录、单次计算和 Study 已有可用接口。本文中的 `members`、`used_by`、结果集合的 `where` 与选集坐标重载均为提议。
 
 ## 从 Subhalo 到薄盘内的恒星
