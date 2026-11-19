@@ -661,3 +661,96 @@ def test_advanced_receipt_can_declare_handle_nonrevertible(hook):
     assert not result.ok and result.value is None and "b" not in result.named
     np.testing.assert_allclose(sim["pos"], np.asarray(before) - [1.0, 0.0, 0.0])
     sim.current_transformation().revert()
+
+
+@pytest.mark.parametrize("delegate", [False, True], ids=["own-receipt", "tracked-steps"])
+def test_custom_transform_chain_releases_its_receipt_once(delegate):
+    from pynbodyext.calculate import TransformBase
+    from pynbodyext.core.calculate.nodes.transforms import TransformChain, TransformStep
+    from pynbodyext.core.calculate.runtime.input import TransformResult
+
+    cleanup_calls = []
+
+    @TransformBase.dataclass
+    class Shift(TransformBase):
+        def build_handle(self, sim, target, params=None):
+            return target.translate([2., 0., 0.])
+
+        def cleanup(self, ctx, handle):
+            cleanup_calls.append("shift")
+            super().cleanup(ctx, handle)
+
+    class CustomChain(TransformChain):
+        def execute(self, ctx, input):
+            if delegate:
+                return super().execute(ctx, input)
+            target = input.active_sim
+            step = self.transforms[0]
+            handle = step.build_handle(target, target)
+            applied = TransformResult(handle=handle, target=target, sim_after=target)
+            return TransformResult(handle=(TransformStep(step, applied),), target=target, sim_after=target)
+
+    sim = branch_snapshot()
+    original = sim["pos"].copy()
+    scope = CustomChain(Shift())
+    values = Pipeline({"moved": Coordinates().transform(scope), "sibling": Coordinates()}).run(sim).value
+    np.testing.assert_array_equal(values["moved"]["pos"], original + [2., 0., 0.])
+    np.testing.assert_array_equal(values["sibling"]["pos"], original)
+    np.testing.assert_array_equal(sim["pos"], original)
+    assert cleanup_calls == ["shift"]
+    assert sim.current_transformation() is None
+
+
+@pytest.mark.parametrize("container", ["dataclass", "mapping", "proxy", "tuple"])
+def test_custom_measurement_containers_keep_their_values_and_type(container):
+    from collections import UserDict
+    from dataclasses import dataclass, field
+    from types import MappingProxyType
+
+    from pynbodyext.transforms import ShiftPosTo
+
+    @dataclass(frozen=True, slots=True)
+    class Measurement:
+        position: object
+        first: object = field(init=False)
+
+        def __post_init__(self):
+            object.__setattr__(self, "first", self.position[0])
+
+    class TaggedTuple(tuple):
+        def __new__(cls, position, label):
+            obj = super().__new__(cls, (position,))
+            obj.label = label
+            return obj
+
+    @PropertyBase.dataclass
+    class Read(PropertyBase):
+        def calculate(self, sim, params=None):
+            position = sim["pos"]
+            if container == "dataclass":
+                return Measurement(position)
+            if container == "mapping":
+                return UserDict({"position": position})
+            if container == "proxy":
+                return MappingProxyType({"position": position})
+            return TaggedTuple(position, "stars")
+
+    sim = branch_snapshot()
+    sim["pos"].units = "kpc"
+    original = sim["pos"].copy()
+    node = Read().transform(ShiftPosTo(np.array([1., 0., 0.])))
+    result = Pipeline({"reading": node}).run(sim).value["reading"]
+    expected = original - [1., 0., 0.]
+    if container == "dataclass":
+        assert type(result) is Measurement
+        np.testing.assert_array_equal(result.first, expected[0])
+        measured = result.position
+    elif container in ("mapping", "proxy"):
+        assert type(result) is (UserDict if container == "mapping" else MappingProxyType)
+        measured = result["position"]
+    else:
+        assert type(result) is TaggedTuple and result.label == "stars"
+        measured = result[0]
+    np.testing.assert_array_equal(measured, expected)
+    assert measured.units == original.units
+    np.testing.assert_array_equal(sim["pos"], original)

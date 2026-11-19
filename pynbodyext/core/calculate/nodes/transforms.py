@@ -317,7 +317,9 @@ class TransformBase(RuntimeCalculatorBase[TransformResult[HandleT], HandleT], Ge
             if type(self).execute is not RuntimeCalculatorBase.execute:
                 ctx.pipeline_frame_failed = True
             raise
-        if not isinstance(self, TransformChain):
+        # A delegating chain has already registered its individual steps. A
+        # custom execute hook can instead return a complete receipt of its own.
+        if not isinstance(self, TransformChain) or len(owner.steps) == start:
             owner.confirm(ctx, self, result, start)
         return result
 

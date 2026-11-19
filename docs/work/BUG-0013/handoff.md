@@ -53,3 +53,5 @@ Created the bilingual item against `c56120f`. The Phase 1 contract is in
 Three indexed-subset tests reproduced periodic wrapping that skipped the forward mutation or failed before wrapping. Two alignment tests reproduced a lost healthy sibling after invalid axis input. All five new cases pass after write-through subset assignment and pre-mutation axis validation.
 
 The reviewed tree passed `make check` (1,836 fast tests) and `make test-all` (1,843 tests) on November 20, including data, pandas, native and distribution tests.
+
+A final review reproduced a custom transform chain losing its receipt and four borrowed-array containers losing their values or types. Both custom-chain paths and all four containers now pass. At the final tree, `make check` passed 1,842 fast tests and `make test-all` passed all 1,849. Callers sharing a mutable root across independent threads coordinate access as described in ADR-022.

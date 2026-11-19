@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import contextmanager
-from copy import copy
-from dataclasses import dataclass, field
+from copy import copy, deepcopy
+from dataclasses import dataclass, field, fields, is_dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from pynbody.array import IndexedSimArray
 
 from pynbodyext.core.calculate.result.enums import RevertPolicy
+
+from .input import FilterResult, TransformResult
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -19,7 +23,6 @@ if TYPE_CHECKING:
     from pynbodyext.core.calculate.nodes.transforms import TransformBase
 
     from .context import ExecutionContext
-    from .input import TransformResult
     from .runtime import TransformRuntime
 
 
@@ -111,22 +114,56 @@ def freeze_array_views(value: Any) -> Any:
         return frozen_array
     if isinstance(value, IndexedSimArray) or isinstance(value, np.ndarray) and value.base is not None:
         return value.copy()
-    if isinstance(value, dict):
-        result = value
-        for key, item in value.items():
-            frozen = freeze_array_views(item)
-            if frozen is not item:
-                if result is value:
-                    result = copy(value)
-                result[key] = frozen
-        return result
+    if isinstance(value, Mapping):
+        return _freeze_mapping(value)
     if isinstance(value, (tuple, list)):
         items = [freeze_array_views(item) for item in value]
         if any(item is not frozen for item, frozen in zip(value, items, strict=True)):
-            if isinstance(value, list):
-                result_list = copy(value)
-                result_list[:] = items
-                return result_list
-            make = getattr(type(value), "_make", None)
-            return make(items) if make is not None else tuple(items)
+            return _replace_sequence_items(value, items)
+    if is_dataclass(value) and not isinstance(value, (type, FilterResult, TransformResult)):
+        # Transformation receipts and live handles retain their cleanup state.
+        if not callable(getattr(value, "revert", None)):
+            result = value
+            for descriptor in fields(value):
+                if not hasattr(value, descriptor.name):
+                    continue
+                item = getattr(value, descriptor.name)
+                frozen = freeze_array_views(item)
+                if frozen is not item:
+                    if result is value:
+                        result = copy(value)
+                    object.__setattr__(result, descriptor.name, frozen)
+            return result
     return value
+
+
+def _replace_sequence_items(value: tuple | list, items: list[Any]) -> tuple | list:
+    if isinstance(value, list):
+        result = copy(value)
+        result[:] = items
+        return result
+    frozen = tuple.__new__(type(value), items)
+    if hasattr(value, "__dict__"):
+        vars(frozen).update(vars(value))
+    return frozen
+
+
+def _freeze_mapping(value: Mapping) -> Mapping:
+    changed = {}
+    for key, item in value.items():
+        frozen = freeze_array_views(item)
+        if frozen is not item:
+            changed[key] = frozen
+    if not changed:
+        return value
+    if isinstance(value, dict):
+        result = copy(value)
+        result.update(changed)
+        return result
+    if isinstance(value, MappingProxyType):
+        return MappingProxyType(dict(value) | changed)
+    # A read-only Mapping need not accept a dict in its constructor. Its copy
+    # protocol preserves the concrete type and any instance-specific behavior.
+    memo = {id(key): key for key in value}
+    memo.update({id(item): changed.get(key, item) for key, item in value.items()})
+    return deepcopy(value, memo)

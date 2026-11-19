@@ -31,6 +31,13 @@ error and stops subsequent branches. The still-active native handles are
 available to the caller in stack order. Ordinary fully reversible nested
 scopes restore each layer exactly once.
 
+Each invocation owns a mutable particle tree for its duration. Concurrent analyses
+can use independent roots. Callers that share one live root across threads must
+coordinate all readers, writers and native transforms on that root. A custom
+transform can reject invalid inputs in `prepare_params`, before any mutation.
+If an apply hook raises without returning an undo handle, the runtime cannot
+establish which arrays that hook changed and stops dependent measurements.
+
 The Pipeline recipe records the execution semantics in its signature. A new
 auto run computes under the new key. Fixed historical receipts, immutable
 Study columns and independent Property keys keep their meaning.
