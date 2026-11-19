@@ -81,6 +81,11 @@ reversion, so the default cleanup path is often sufficient. Override
 :meth:`cleanup` only when the handle is a plain custom object or needs
 special reversal logic.
 
+Validate parameters in :meth:`prepare_params` before applying a transform.
+A Pipeline using ``collect_partial`` can then continue with its next named
+output after a validation error. An apply hook that raises before returning
+its handle leaves the frame uncertain and stops subsequent outputs.
+
 Which Hook To Implement
 -----------------------
 Most :class:`TransformBase` subclasses should implement :meth:`build_handle`.
@@ -315,10 +320,11 @@ class TransformBase(RuntimeCalculatorBase[TransformResult[HandleT], HandleT], Ge
             if owner is not None and type(self).execute is not RuntimeCalculatorBase.execute:
                 ctx.pipeline_frame_failed = True
             raise
-        # A delegating chain has already registered its individual steps. A
-        # custom execute hook can instead return a complete receipt of its own.
-        if owner is not None and (not isinstance(self, TransformChain) or len(owner.steps) == start):
-            owner.confirm(ctx, self, result, start)
+        if owner is not None:
+            if isinstance(self, TransformChain) and len(owner.steps) > start:
+                self._confirm_returned_steps(ctx, owner, start, cast("tuple[TransformStep, ...]", result.handle))
+            else:
+                owner.confirm(ctx, self, result, start)
         if ctx.selection_recorder is not None and ctx.current_node is not None:
             ctx.selection_recorder.applied(self, ctx.current_node.node_id, result.handle, result.target)
         return result
@@ -445,6 +451,24 @@ class TransformChain(TransformBase[tuple[TransformStep, ...]]):
     def is_revertible(self, handle: tuple[TransformStep, ...]) -> bool:
         """Whether any step in the chain is revertible."""
         return any(step.result.revertible for step in handle)
+
+    def _confirm_returned_steps(
+        self, ctx: ExecutionContext, owner: PipelineTransformScope, start: int, steps: tuple[TransformStep, ...]
+    ) -> None:
+        """Place directly applied steps in receipt order among delegated steps."""
+        recorded = {id(handle): i for i, (_, handle, _) in enumerate(owner.steps[start:], start)}
+        before = len(owner.steps)
+        pending = list(steps)
+        # Later insertions cannot move the recorded positions still to visit.
+        while pending:
+            step = pending.pop()
+            handle = step.result.handle
+            if id(handle) in recorded:
+                before = recorded[id(handle)]
+            elif isinstance(step.transform, TransformChain) and step.transform.revert_policy != RevertPolicy.NEVER:
+                pending.extend(handle)
+            else:
+                owner.applied(ctx, step.transform, handle, revertible=step.result.revertible, before=before)
 
     def cleanup(self, ctx: ExecutionContext, handle: tuple[TransformStep, ...]) -> None:
         """Clean up chain steps in reverse execution order."""

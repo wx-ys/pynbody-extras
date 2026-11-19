@@ -1,9 +1,9 @@
-"""Persisted recipes and values across the Pipeline branch-scope change."""
+"""Persisted recipes and values across the Pipeline transform scope change."""
 
 import numpy as np
 import pynbody
 import pytest
-from test_pipeline_branch_scopes import branch_snapshot
+from test_pipeline_branch_scopes import particle_snapshot
 
 import pynbodyext as pe
 from pynbodyext.calculate import CalculatorBase, Pipeline, PropertyBase
@@ -45,7 +45,7 @@ class FieldSummary(Pipeline):
     ],
     ids=["pipeline", "custom-constructor", "combined", "nested"],
 )
-def test_branch_recipes_round_trip_under_new_addresses(recipe, legacy_hash):
+def test_pipeline_recipes_round_trip_under_new_addresses(recipe, legacy_hash):
     signature = recipe.to_signature()
     assert signature.hash != legacy_hash
     assert calculator_from_signature(signature.to_json()).to_signature() == signature
@@ -110,7 +110,7 @@ def membership_pipeline(pipeline_type):
 
 def test_upgrade_recomputes_auto_and_preserves_frozen_study_cells(tmp_path):
     path, storage = tmp_path / "snapshot", tmp_path / "results.sqlite"
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     sim["mass"][:] = np.arange(1.0, 7.0)
     sim.properties["time"] = 0.0
     (tmp_path / "units.param").write_text("dKpcUnit = 1\ndMsolUnit = 1\nbComove = 0\n")

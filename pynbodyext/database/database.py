@@ -517,10 +517,7 @@ class Database:
         description = self._description(data.id)
         with self._repo.session() as session:
             recipe = session.get(Recipe, signature.hash)
-            if (
-                recipe is None
-                or CalculatorSignature.from_json(recipe.signature_text).identity() != signature.identity()
-            ):
+            if recipe is None or not CalculatorSignature.from_json(recipe.signature_text).same_identity(signature):
                 raise ValueError("saved recipe metadata conflicts with operation")
         if ref.version_id is None or ref.cache_key != RecordRef(data.signature, signature.hash).cache_key:
             raise ValueError("saved receipt conflicts with input/recipe")

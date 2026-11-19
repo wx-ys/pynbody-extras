@@ -1,4 +1,4 @@
-"""Recovery keeps each sample cell value and diagnostic consistent."""
+"""Recovery keeps each sample cell value and error consistent."""
 
 from typing import ClassVar
 
@@ -51,7 +51,7 @@ def test_store_fill_clears_only_recovered_error():
     assert table.missing() == [(row.name, "missing")]
 
 
-def test_cache_miss_preserves_existing_diagnostics():
+def test_cache_miss_preserves_existing_errors():
     sim, calc, table, row = failed_table(InMemoryResultStore())
     previous_values, previous_errors = dict(row.values), dict(row.errors)
     table.fill_from_store()
@@ -76,7 +76,7 @@ class UnavailableStore(InMemoryResultStore):
         raise OSError("backend unavailable")
 
 
-def test_failed_backend_read_preserves_existing_diagnostics():
+def test_failed_backend_read_preserves_existing_errors():
     sim, calc, table, row = failed_table(InMemoryResultStore())
     Recoverable.failing = False
     calc.run(sim, store=table.store, sim_identity=identity)

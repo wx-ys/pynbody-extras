@@ -18,7 +18,7 @@ The signature system is the source of the identity:
 A record found under a hash is checked against the requested signature before it
 is returned.  A persistent store refuses either half of a key that would mean
 nothing in the next session: a calculator signature that is not
-:attr:`~CalculatorSignature.stable` (identified by ``id()`` or a function repr),
+:attr:`~CalculatorSignature.stable` (for example, a recipe keyed by a process-local token),
 and a session-only simulation identity (see
 :mod:`~pynbodyext.core.calculate.runtime.sim_identity`).
 
@@ -131,10 +131,10 @@ def _check_record(record: ResultRecord | None, signature: CalculatorSignature) -
     collision or a corrupted row.  Either way the stored value answers another
     question, and returning it would be a silent wrong result.
     """
-    if record is None or not record.calculator_signature_text:
-        return record
+    if record is None:
+        return None
     stored = CalculatorSignature.from_json(record.calculator_signature_text)
-    if stored.identity() != signature.identity():
+    if not stored.same_identity(signature):
         raise SignatureMismatchError(
             f"record {record.calculator_signature_hash[:12]}... was stored for {stored.pretty()!r}, "
             f"not for {signature.pretty()!r}"
@@ -468,7 +468,11 @@ class ResultStore(ABC):
         return self._put(record)
 
     def fetch(self, ref: RecordRef) -> Result:
-        """Read an exact saved version, or the current result for an unpinned ref."""
+        """Read an exact saved version, or the current result for an unpinned ref.
+
+        Read from a trusted store. Rebuilding its calculator may import Python
+        classes and execute their constructors or reconstruction hooks.
+        """
         record = self._read_ref(ref)
         if record is None:
             raise KeyError(f"no stored result for {ref.key!r}")
@@ -486,10 +490,11 @@ class ResultStore(ABC):
             ref.version_id is not None and record.version_id != ref.version_id
         ):
             raise SignatureMismatchError("stored record does not match the requested identity/version")
-        if record.calculator_signature_text:
-            signature = CalculatorSignature.from_json(record.calculator_signature_text)
-            if signature.hash != ref.calculator_signature_hash:
-                raise SignatureMismatchError("stored signature text does not match the requested hash")
+        if not record.calculator_signature_text:
+            raise SignatureMismatchError("stored record is missing its calculator signature text")
+        signature = CalculatorSignature.from_json(record.calculator_signature_text)
+        if signature.hash != ref.calculator_signature_hash:
+            raise SignatureMismatchError("stored signature text does not match the requested hash")
         return record
 
     def get(
@@ -539,7 +544,7 @@ class ResultStore(ABC):
                 continue
             seen.add(ref.calculator_signature_hash)
             record = self._read_ref(ref)
-            if record is None or not record.calculator_signature_text:
+            if record is None:
                 continue
             catalog.add(CalculatorSignature.from_json(record.calculator_signature_text))
         return catalog
@@ -567,7 +572,8 @@ class ResultStore(ABC):
         content-addressed hash can be derived (matching the one recorded at
         :meth:`store` time) to locate the record; the calculator is then rebuilt
         from the record's own ``calculator_signature_text`` via
-        :func:`calculator_from_signature`.
+        :func:`calculator_from_signature`. Read from a trusted store because
+        rebuilding the recipe may import classes and execute their constructors.
 
         Returns
         -------

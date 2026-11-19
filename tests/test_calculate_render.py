@@ -10,6 +10,8 @@ address-dependent fields are asserted only structurally.
 from __future__ import annotations
 
 import re
+import sys
+from itertools import pairwise
 
 from calculate_helpers import MassSum, RBelow, make_pipeline, make_sim
 
@@ -162,6 +164,21 @@ def test_rich_card_execution_tree_shows_the_child_nodes() -> None:
     assert pre is not None
     for name in ("MassSum", "TempMean", "RBelow"):
         assert name in pre.group(1)
+
+
+def test_rich_card_renders_an_execution_tree_beyond_the_recursion_limit() -> None:
+    from pynbodyext.core.calculate.result.result import Result, ResultNode
+
+    nodes = [
+        ResultNode(str(i), kind="property", signature=(), name=f"level-{i}")
+        for i in range(sys.getrecursionlimit() + 1)
+    ]
+    for parent, child in pairwise(nodes):
+        parent.children.append(child.node_id)
+    result = Result(value=0, root=nodes[0], nodes={node.node_id: node for node in nodes})
+
+    html = result._repr_card().html("rich")
+    assert f"{nodes[-1].name}&lt;property&gt;" in html
 
 
 def test_summary_contains_expected_sections() -> None:
@@ -432,6 +449,39 @@ def test_result_simple_card_names_its_drilldown_attributes() -> None:
     assert "()" not in details, "a drill-down is an attribute, never a call"
 
 
+def test_simple_result_card_lists_details_without_building_them(monkeypatch) -> None:
+    from pynbodyext.core.calculate.result.result import ErrorInfo
+
+    result = _result()
+
+    def unexpected(*args):
+        raise AssertionError("a hidden drill-down was formatted")
+
+    class UnformattedWarning:
+        __str__ = unexpected
+
+    result.warnings.append(UnformattedWarning())
+    result.errors.append(ErrorInfo(error_type="ValueError", message="bad input"))
+    for attr in ("named_values", "execution_tree", "performance", "cache"):
+        monkeypatch.setattr(type(result), attr, property(unexpected))
+    monkeypatch.setattr(type(result.provenance), "_display_rows", unexpected)
+    monkeypatch.setattr(ResultRepr, "_result_error_rows", unexpected)
+
+    html = result._repr_card().html("simple")
+    for attr in ("named_values", "warnings", "errors", "provenance", "execution_tree", "performance", "cache"):
+        assert f"<code>.{attr}</code>" in html
+
+
+def test_simple_calculator_card_lists_its_tree_without_building_it(monkeypatch) -> None:
+    pipeline = make_pipeline()
+
+    def unexpected(self):
+        raise AssertionError("a hidden dependency tree was formatted")
+
+    monkeypatch.setattr(type(pipeline), "dependency_tree", property(unexpected))
+    assert "<code>.dependency_tree</code>" in pipeline._repr_card().html("simple")
+
+
 def test_provenance_shows_the_same_fields_in_every_style() -> None:
     """Regression: ``result.provenance`` used to dump its raw dataclass repr.
 
@@ -547,7 +597,7 @@ def test_result_card_reuses_the_section_attributes() -> None:
 
 
 _CARD_TITLE_RE = re.compile(
-    r"<summary>([^<]+)</summary>" r"|<div class='pynbodyext-calc-section-title'>([^<]+)</div>"
+    r"<summary>([^<]+)</summary>|<div class='pynbodyext-calc-section-title'>([^<]+)</div>"
 )
 
 

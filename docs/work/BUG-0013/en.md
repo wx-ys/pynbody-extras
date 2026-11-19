@@ -10,7 +10,7 @@ output selects root indices `[3, 4, 5]` and the native output selects
 indices but left 6 of the caller's 18 position components changed.
 
 ```bash
-.venv/bin/python -m pytest -q tests/test_pipeline_branch_scopes.py::test_branch_order_restores_entry_frame
+.venv/bin/python -m pytest -q tests/test_pipeline_branch_scopes.py::test_named_output_order_restores_entry_frame
 ```
 
 ## Phase 1 acceptance criteria

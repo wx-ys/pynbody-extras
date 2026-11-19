@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import is_dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pynbodyext.core.calculate.interfaces import (
     register_calculator_layer,
@@ -26,13 +26,19 @@ from pynbodyext.core.calculate.interfaces import (
 from pynbodyext.core.calculate.result.enums import RevertPolicy
 from pynbodyext.core.calculate.result.signature import (
     _COMMUTATIVE_PROPERTY_OPS,
+    CalculatorSignature,
     _Decoder,
     _encode_init_entries,
     _Encoded,
     _Encoder,
     _merge_encoded,
+    _pipeline_output_values,
+    _session_token,
     _sort_encoded_commutative,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 def _is_calculator(value: Any) -> bool:
@@ -46,18 +52,6 @@ def _is_transform_base(value: Any) -> bool:
     from .transforms import TransformBase
 
     return isinstance(value, TransformBase)
-
-
-def _is_plain_pipeline(value: Any) -> bool:
-    """Whether *value* is a :class:`Pipeline` built by ``Pipeline.__init__``.
-
-    Only then is ``cls(outputs)`` the way to rebuild it; a subclass with its own
-    constructor is a generic node and describes itself through
-    ``signature_payload``.
-    """
-    from .pipeline import Pipeline
-
-    return isinstance(value, Pipeline) and type(value).__init__ is Pipeline.__init__
 
 
 def _class_identity(calculator: Any) -> dict[str, Any]:
@@ -151,31 +145,49 @@ def _encode_dataclass(calculator: Any, path: str, inline_bytes: int) -> _Encoded
     return _merge_encoded(payload, children)
 
 
+def _encode_outputs(
+    outputs: Mapping[str, Any], path: str, inline_bytes: int, *, output_names: dict[int, str] | None = None
+) -> _Encoded:
+    entries: list[dict[str, Any]] = []
+    children: list[_Encoded] = []
+    first_name: dict[str, str] = {}
+    for key, child in outputs.items():
+        if output_names is not None and id(child) in output_names:
+            entries.append({"key": key, "same_as": output_names[id(child)]})
+            continue
+        encoded = _Encoder.encode_calculator_value(child, f"{path}.outputs[{key!r}]", inline_bytes)
+        children.append(encoded)
+        if output_names is not None:
+            name = first_name.setdefault(CalculatorSignature(payload=encoded.value).hash, key)
+            output_names[id(child)] = name
+            if name != key:
+                entries.append({"key": key, "same_as": name})
+                continue
+        entries.append({"key": key, "value": encoded.value})
+    return _merge_encoded(entries, children)
+
+
 def _encode_special(calculator: Any, path: str, inline_bytes: int) -> _Encoded | None:
     """Encode known special calculator types; returns None for unknown types."""
     from .base import CombinedCalculator
     from .expr import CalculatorValueProperty, ConstantProperty, LambdaProperty, OpProperty
     from .filters import AndFilter, NotFilter, OrFilter
+    from .pipeline import Pipeline
     from .transforms import TransformChain
 
     ts, ts_children = _transform_state(calculator, inline_bytes, path)
     encoded: _Encoded | None = None
 
-    if _is_plain_pipeline(calculator):
+    if isinstance(calculator, Pipeline) and type(calculator).__init__ is Pipeline.__init__:
+        if type(calculator) is not Pipeline:
+            return _encode_generic(calculator, path, inline_bytes, pipeline_outputs=calculator.outputs)
         # Output names are part of what a pipeline computes (they key its value
         # dict), so they are identity; the pipeline's own ``name`` is a label and
         # is not, like every other node's.  Order is kept: it is the order of
         # the returned dict.
-        outputs = [
-            (key, _Encoder.encode_calculator_value(child, f"{path}.outputs[{key!r}]", inline_bytes))
-            for key, child in calculator.outputs.items()
-        ]
-        pipeline_payload = {
-            "node": "pipeline",
-            **_class_identity(calculator),
-            "outputs": [{"key": key, "value": enc.value} for key, enc in outputs],
-        }
-        encoded = _merge_encoded(pipeline_payload, [enc for _, enc in outputs])
+        outputs = _encode_outputs(calculator.outputs, path, inline_bytes)
+        pipeline_payload = {"node": "pipeline", **_class_identity(calculator), "outputs": outputs.value}
+        encoded = _merge_encoded(pipeline_payload, [outputs])
 
     elif isinstance(calculator, CombinedCalculator):
         items = [
@@ -232,37 +244,53 @@ def _encode_special(calculator: Any, path: str, inline_bytes: int) -> _Encoded |
         )
 
     elif isinstance(calculator, LambdaProperty):
-        # The function is identified by its repr, which carries its address: it
-        # separates two lambdas within a run, but not across sessions.
-        payload = {"node": "lambda_property", **_class_identity(calculator), "func_repr": repr(calculator._func)}
+        try:
+            token = _session_token(calculator._func)
+        except TypeError:
+            # Some built-in callable types cannot be weakly referenced.
+            token = _session_token(calculator)
+        payload = {"node": "lambda_property", **_class_identity(calculator), "func_token": token}
         encoded = _Encoded(payload, constructible=False, paths=(f"{path}.func",), unstable=(f"{path}.func",))
 
     return encoded
 
 
-def _encode_generic(calculator: Any, path: str, inline_bytes: int) -> _Encoded:
+def _encode_generic(
+    calculator: Any, path: str, inline_bytes: int, *, pipeline_outputs: Mapping[str, Any] | None = None
+) -> _Encoded:
     """Encode a generic (non-dataclass, non-special) calculator."""
     payload_items = calculator.signature_payload()
     children: list[_Encoded] = []
     identity: dict[str, Any] = {}
+    payload: dict[str, Any] = {"node": "generic", **_class_identity(calculator), "identity": identity}
+    output_names: dict[int, str] | None = None
+    if pipeline_outputs is not None:
+        # Encode the ordered children once. Constructor state may refer back to
+        # the same child through an arbitrary nesting of mappings or sequences.
+        output_names = {}
+        outputs = _encode_outputs(pipeline_outputs, path, inline_bytes, output_names=output_names)
+        payload["outputs"] = outputs.value
+        children.append(outputs)
     opaque = payload_items is None
     if opaque:
         # No declared identity: fall back to the object itself, which keeps two
         # such nodes apart within a run but means nothing in another session.
-        identity["opaque_id"] = id(calculator)
+        identity["opaque_id"] = _session_token(calculator)
     else:
         for key, value in payload_items.items():
-            enc = _Encoder.encode_value(value, f"{path}.identity.{key}", inline_bytes)
+            # A custom hook may carry its constructor's output mapping in any
+            # nested field. Its order is observable when the Pipeline runs.
+            enc = _Encoder.encode_value(value, f"{path}.identity.{key}", inline_bytes, output_names=output_names)
             identity[key] = enc.value
             children.append(enc)
     deps = [
         _Encoder.encode_calculator_value(dep, f"{path}.deps[{i}]", inline_bytes)
         for i, dep in enumerate(calculator.dependencies())
+        if output_names is None or id(dep) not in output_names
     ]
     children.extend(deps)
     ts, ts_children = _transform_state(calculator, inline_bytes, path)
     children.extend(ts_children)
-    payload: dict[str, Any] = {"node": "generic", **_class_identity(calculator), "identity": identity}
     if deps:
         payload["deps"] = [e.value for e in deps]
     if ts is not None:
@@ -325,13 +353,48 @@ def _decode_generic(payload: dict[str, Any]) -> Any:
     rebuild = getattr(cls, "from_signature_payload", None)
     if not callable(rebuild) or "opaque_id" in payload.get("identity", {}):
         raise ValueError(f"cannot reconstruct {payload['class']}: it defines no from_signature_payload()")
-    identity = {key: _Decoder.decode_value(value) for key, value in payload.get("identity", {}).items()}
-    return _apply_transform_state(rebuild(identity), payload.get("transform"))
+    outputs = _pipeline_output_values(payload, _Decoder.decode_value) if "outputs" in payload else None
+    identity = {
+        key: _Decoder.decode_value(_resolve_output_refs(value, outputs) if outputs is not None else value)
+        for key, value in payload.get("identity", {}).items()
+    }
+    rebuilt = _apply_transform_state(rebuild(identity), payload.get("transform"))
+    if outputs is not None:
+        from .pipeline import Pipeline
+
+        if (
+            not isinstance(rebuilt, Pipeline)
+            or list(rebuilt.outputs) != list(outputs)
+            or not all(
+                rebuilt.outputs[name] is child or rebuilt.outputs[name].to_signature().same_identity(child.to_signature())
+                for name, child in outputs.items()
+            )
+        ):
+            raise ValueError(
+                f"cannot reconstruct {payload['class']}: its hook did not restore the recorded ordered outputs"
+            )
+    return rebuilt
+
+
+def _resolve_output_refs(value: Any, outputs: Mapping[str, Any]) -> Any:
+    """Resolve local references in one hook's parameters. Nested nodes own their outputs."""
+    if isinstance(value, list):
+        return [_resolve_output_refs(item, outputs) for item in value]
+    if isinstance(value, dict) and "node" not in value:
+        if value.get("type") == "pipeline_output":
+            return outputs[value["key"]]
+        return {key: _resolve_output_refs(item, outputs) for key, item in value.items()}
+    return value
 
 
 def _decode_pipeline(payload: dict[str, Any]) -> Any:
+    from .pipeline import Pipeline
+
     cls = _resolve_class(payload)
-    return cls({item["key"]: _Decoder.decode_value(item["value"]) for item in payload["outputs"]})
+    # Older pipeline payloads may legitimately name a subclass.
+    if not isinstance(cls, type) or not issubclass(cls, Pipeline):
+        raise ValueError(f"pipeline signature requires a Pipeline class, got {payload['class']!r}")
+    return cls(_pipeline_output_values(payload, _Decoder.decode_value))
 
 
 def _decode_combined(payload: dict[str, Any]) -> Any:

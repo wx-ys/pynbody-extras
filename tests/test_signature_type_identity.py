@@ -255,3 +255,46 @@ def test_result_find_matches_a_named_class() -> None:
     result = Pipeline({"hot": HotFraction(25.0)}).run(make_sim())
     found = result.find(HotFraction)
     assert [node.class_info.semantic_calculator_class_path for node in found] == ["tests.HotFraction"]
+
+
+def test_rendering_and_packing_do_not_run_default_factories_again(registry):
+    from dataclasses import field
+
+    from pynbodyext.core.calculate.result.signature import calculator_pack, calculator_parameter_rows
+
+    calls = []
+
+    def next_sample():
+        calls.append(1)
+        return len(calls)
+
+    @PropertyBase.dataclass
+    class Sample(PropertyBase):
+        signature_name = "tests.FactorySample"
+        sample: int = field(default_factory=next_sample)
+
+        def calculate(self, sim, params=None):
+            return self.sample
+
+    first, second = Sample(), Sample()
+    assert (first.sample, second.sample) == (1, 2)
+    assert repr(first) == "Sample(1)"
+    assert calculator_parameter_rows(first)[0][:2] == ("sample", "1")
+    assert first._repr_html_()
+    text, signature = calculator_pack(second)
+    assert text == "FactorySample(2)"
+    assert calculator_from_signature(signature).sample == 2
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("style", ["rich", "simple"])
+def test_constant_and_handwritten_identity_values_appear_in_parameter_rows(style):
+    from pynbodyext.core.calculate.display import repr_style
+    from pynbodyext.core.calculate.nodes.expr import ConstantProperty
+    from pynbodyext.core.calculate.result.signature import calculator_parameter_rows
+
+    for node, name, value in [(ConstantProperty(3), "value", "3"), (HotFraction(25), "threshold", "25")]:
+        assert calculator_parameter_rows(node) == [(name, value, False)]
+        with repr_style(style):
+            html = node._repr_html_()
+        assert ">Parameters</" in html and name in html

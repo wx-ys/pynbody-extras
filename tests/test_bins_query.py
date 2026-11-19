@@ -4,6 +4,17 @@ import numpy as np
 import pytest
 
 
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [("vz.p16", ("vz", "p16")), ("vz.abs.mean", None), ("age.mean@mass", None), ("mass", None)],
+)
+def test_legacy_stat_key_keeps_its_two_field_contract(query, expected) -> None:
+    from pynbodyext.core.calculate.bins.statistics import parse_stat_key
+
+    with pytest.warns(DeprecationWarning, match="parse_pipeline_key"):
+        assert parse_stat_key(query) == expected
+
+
 def test_model_derives_shape_and_root() -> None:
     from pynbodyext.core.calculate.bins.model import BinResultModel
 

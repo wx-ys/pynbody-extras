@@ -157,6 +157,18 @@ def test_a01_a02_a03_a06_share_exact_versions(study_env):
     assert len(loads) == 3
 
 
+def test_study_compares_nan_bindings_and_keeps_strict_json_definitions(study_env):
+    from pynbodyext.core.calculate import ConstantProperty
+
+    db, obj, _ = study_env
+    cc = ConstantProperty(float("nan"))
+    study = db.study(objects=[obj], calculations={"signal": cc})
+    rebound = study.bind_calculators({"signal": ConstantProperty(float("nan"))})
+    assert rebound.calculations["signal"].hash == cc.to_signature().hash
+    with pytest.raises(ValueError, match="JSON compliant"):
+        rebound.save(name="nan")
+
+
 def test_a04_scientific_input_and_calculator_changes_miss(study_env, monkeypatch):
     db, obj, sim = study_env
     cc = CountMass()

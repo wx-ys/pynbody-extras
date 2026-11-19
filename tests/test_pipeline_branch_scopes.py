@@ -1,4 +1,4 @@
-"""Pipeline branches must see their own physical coordinate frame."""
+"""Each named Pipeline output measures particles in its own coordinate frame."""
 
 import numpy as np
 import pynbody
@@ -15,7 +15,7 @@ class RootIndices(PropertyBase):
         return np.asarray(sim.get_index_list(sim.ancestor)).copy()
 
 
-def branch_snapshot():
+def particle_snapshot():
     sim = pynbody.new(dm=2, star=4)
     sim["pos"][:] = [[10, 10, 10], [11, 11, 11], [1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, 0]]
     sim["vel"][:] = np.arange(18.0).reshape(6, 3)
@@ -23,8 +23,8 @@ def branch_snapshot():
 
 
 @pytest.mark.parametrize("order", [("rotated", "native"), ("native", "rotated")])
-def test_branch_order_restores_entry_frame(order):
-    sim = branch_snapshot()
+def test_named_output_order_restores_entry_frame(order):
+    sim = particle_snapshot()
     before = {key: np.asarray(sim[key]).copy() for key in ("pos", "vel")}
     entry = sim.current_transformation()
     disc = Disc(3.0, 0.1)
@@ -32,7 +32,7 @@ def test_branch_order_restores_entry_frame(order):
     outputs = {"rotated": RootIndices().transform(face_on).filter(disc), "native": RootIndices().filter(disc)}
     expected = {"native": [2, 3, 5], "rotated": [3, 4, 5]}
     for key in order:
-        fresh = branch_snapshot()
+        fresh = particle_snapshot()
         np.testing.assert_array_equal(outputs[key].run(fresh.star).value, expected[key])
     result = Pipeline({key: outputs[key] for key in order}).run(sim.star)
     assert result.ok
@@ -60,7 +60,7 @@ def test_nested_frames_and_borrowed_arrays():
 
     from pynbodyext.transforms import ShiftPosTo
 
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     sim["pos"].units = "kpc"
     sim["vel"].units = "km s^-1"
     native_pos, native_vel = sim["pos"].copy(), sim["vel"].copy()
@@ -70,7 +70,7 @@ def test_nested_frames_and_borrowed_arrays():
     rotation = AlignVec(np.array([1.0, 0.0, 0.0]))
     inner = Pipeline({"disk": Coordinates().transform(rotation), "parent": Coordinates()}).transform(shift)
     value = Pipeline({"inner": inner, "outer": Coordinates()}).run(sim).value
-    rotated = branch_snapshot()
+    rotated = particle_snapshot()
     rotated["pos"][:] = np.asarray(at_entry) - [1.0, 0.0, 0.0]
     rotation.run(rotated)
     np.testing.assert_allclose(value["inner"]["disk"]["pos"], rotated["pos"])
@@ -87,7 +87,7 @@ def test_nested_frames_and_borrowed_arrays():
 
 
 @pytest.mark.parametrize("errors", ["success", "raise", "collect", "collect_partial"])
-def test_nested_branch_exit_keeps_external_frame(errors):
+def test_nested_output_exit_keeps_external_frame(errors):
     from pynbodyext.core.calculate import InMemoryResultStore
     from pynbodyext.transforms import ShiftPosTo
 
@@ -103,7 +103,7 @@ def test_nested_branch_exit_keeps_external_frame(errors):
             cleanup.append("parent")
             super().cleanup(ctx, handle)
 
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     native = sim["pos"].copy()
     outside = sim.translate(np.array([2.0, 0.0, 0.0]))
     start = sim["pos"].copy()
@@ -140,7 +140,7 @@ def test_nested_branch_exit_keeps_external_frame(errors):
 @pytest.mark.parametrize("observe", [False, True])
 @pytest.mark.parametrize("batch", [False, True])
 def test_shared_transform_restores_after_each_measurement(cache, observe, batch):
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     before = sim["pos"].copy()
     rotate = AlignVec(np.array([1.0, 0.0, 0.0]))
     measure = Coordinates()
@@ -151,7 +151,7 @@ def test_shared_transform_restores_after_each_measurement(cache, observe, batch)
             values = run_one(sim)
     else:
         values = calc.run(sim, cache=cache, observe=observe).value
-    expected = branch_snapshot()
+    expected = particle_snapshot()
     rotate.run(expected)
     for key in ("first", "again"):
         np.testing.assert_allclose(values[key]["pos"], expected["pos"])
@@ -161,7 +161,7 @@ def test_shared_transform_restores_after_each_measurement(cache, observe, batch)
 
 
 def test_named_transform_scope_and_standalone_handle_lifetimes():
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     before = sim["pos"].copy()
     rotate = AlignVec(np.array([1.0, 0.0, 0.0]))
     value = Pipeline({"rotation": rotate, "native": Coordinates()}).run(sim).value
@@ -177,7 +177,7 @@ def test_named_transform_scope_and_standalone_handle_lifetimes():
 def test_explicit_retention_is_visible_to_sibling(level):
     from pynbodyext.transforms import ShiftPosTo
 
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     before = sim["pos"].copy()
     step = ShiftPosTo(np.array([1.0, 0.0, 0.0]))
     if level == "scope":
@@ -204,7 +204,7 @@ def test_subset_target_is_independent_of_an_inherited_root_transform():
         def calculate(self, sim, params=None):
             return sim.ancestor["pos"]
 
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     before = sim["pos"].copy()
     ids = [2, 4]
     shift_root = ShiftPosTo(np.array([1.0, 0.0, 0.0]))
@@ -246,7 +246,7 @@ def test_failures_after_transform_restore_before_next_output(phase):
                 raise RuntimeError("public failed")
             return value
 
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     before = sim["pos"].copy()
     node = BrokenProperty().transform(AlignVec(np.array([1.0, 0.0, 0.0])))
     if phase == "filter":
@@ -284,7 +284,7 @@ def test_unrestored_frame_stops_partial_run(cleanup_failure, science_fails, capl
             visited.append(True)
             return 1
 
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     store = InMemoryResultStore()
     body = Fails() if science_fails else Coordinates()
     res = Pipeline({"bad": body.transform(Unrestorable()), "later": Later()}).run(
@@ -309,7 +309,7 @@ def test_partial_transform_chain_unwinds_known_steps():
         def build_handle(self, sim, target, params=None):
             raise RuntimeError("cannot apply next step")
 
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     before = sim["pos"].copy()
     steps = ShiftPosTo(np.array([1.0, 0.0, 0.0])).then(CannotApply())
     with pytest.raises(RuntimeError, match="cannot apply next step"):
@@ -423,7 +423,7 @@ def test_eager_bin_cleanup_failure_stops_the_enclosing_partial_pipeline():
     (np.array([0., 0., 1.]), np.array([0., 0., 1.]), "parallel"),
 ])
 def test_invalid_alignment_before_rotation_preserves_partial_sibling(vector, up, error):
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     before = sim["pos"].copy()
     invalid = Coordinates().transform(AlignVec(vector, up=up))
     result = Pipeline({"invalid": invalid, "native": Coordinates()}).run(sim, errors="collect_partial")
@@ -467,7 +467,7 @@ def test_shared_outputs_reapply_retained_effects_inside_a_composite(observe):
         def process(self, value):
             return value
 
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     before = sim["pos"].copy()
     prop = Forward(source=Coordinates().transform(ShiftPosTo(np.array([1.0, 0.0, 0.0])), revert=False))
     values = Pipeline({"one": prop, "two": prop}).run(sim, observe=observe, cache=True).value
@@ -491,7 +491,7 @@ def test_custom_transform_failure_only_continues_with_a_recoverable_frame(hook):
         def wrap_raw(self, runtime, computed):
             raise RuntimeError("wrapping returned handle failed")
 
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     before = sim["pos"].copy()
     calc = Pipeline({"bad": Coordinates().transform(BrokenHook()), "later": Coordinates()})
     res = calc.run(sim, errors="collect_partial")
@@ -517,7 +517,7 @@ def test_low_level_transform_result_owns_returned_handle():
             handle = input.active_sim.translate([1.0, 0.0, 0.0])
             return TransformResult(handle=handle, target=input.active_sim, sim_after=input.active_sim)
 
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     before = sim["pos"].copy()
     res = Pipeline({"shift": Coordinates().transform(DirectShift()), "later": Coordinates()}).run(sim)
     assert res.ok
@@ -565,7 +565,7 @@ def test_bound_scope_releases_body_transforms_before_own_handle(role):
     a = ShiftPosTo(np.array([1.0, 0.0, 0.0]))
     b = ShiftPosTo(np.array([2.0, 0.0, 0.0]))
     body = {"transform": b, "chain": b.then(b), "combined": b & Coordinates()}[role]
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     before = sim["pos"].copy()
     result = Pipeline({"body": body.transform(a), "after": Coordinates()}).run(sim)
     assert result.ok and sim.current_transformation() is None
@@ -576,14 +576,14 @@ def test_bound_scope_releases_body_transforms_before_own_handle(role):
 def test_pipeline_does_not_reuse_live_view_from_outside(observe):
     from pynbodyext.transforms import ShiftPosTo
 
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     before = sim["pos"].copy()
     read = Coordinates()
     shift = ShiftPosTo(np.array([1.0, 0.0, 0.0]))
     inside = Pipeline({"entry": read, "shifted": read.transform(shift, revert=False)})
-    _, branches = (read & inside).run(sim, observe=observe).value
-    np.testing.assert_allclose(branches["entry"]["pos"], before)
-    np.testing.assert_allclose(branches["shifted"]["pos"], np.asarray(before) - [1.0, 0.0, 0.0])
+    _, outputs = (read & inside).run(sim, observe=observe).value
+    np.testing.assert_allclose(outputs["entry"]["pos"], before)
+    np.testing.assert_allclose(outputs["shifted"]["pos"], np.asarray(before) - [1.0, 0.0, 0.0])
 
 
 def test_named_containers_preserve_measured_fields_and_types():
@@ -591,18 +591,23 @@ def test_named_containers_preserve_measured_fields_and_types():
 
     from pynbodyext.transforms import ShiftPosTo
 
-    Point = namedtuple("Point", "position")
+    class Point(namedtuple("Coordinates", "position")):
+        def __new__(cls, position):
+            point = super().__new__(cls, position)
+            point.self_ref = point
+            return point
 
     @PropertyBase.dataclass
     class PointMeasurement(PropertyBase):
         def calculate(self, sim, params=None):
             return OrderedDict([("point", Point(sim["pos"]))])
 
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     before = sim["pos"].copy()
     node = PointMeasurement().transform(ShiftPosTo(np.array([1.0, 0.0, 0.0])))
     value = Pipeline({"point": node}).run(sim).value["point"]
     assert isinstance(value, OrderedDict) and isinstance(value["point"], Point)
+    assert value["point"].self_ref is value["point"]
     np.testing.assert_allclose(value["point"].position, np.asarray(before) - [1.0, 0.0, 0.0])
     np.testing.assert_allclose(sim["pos"], before)
 
@@ -610,7 +615,7 @@ def test_named_containers_preserve_measured_fields_and_types():
 def test_retained_native_handle_can_block_outer_cleanup(caplog):
     from pynbodyext.transforms import ShiftPosTo
 
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     start = sim["pos"].copy()
     a = ShiftPosTo(np.array([1.0, 0.0, 0.0]))
     b = ShiftPosTo(np.array([2.0, 0.0, 0.0]))
@@ -628,7 +633,7 @@ def test_retained_native_handle_can_block_outer_cleanup(caplog):
 def test_standalone_property_keeps_its_default_transform():
     from pynbodyext.transforms import ShiftPosTo
 
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     start = sim["pos"].copy()
     Coordinates().transform(ShiftPosTo(np.array([1.0, 0.0, 0.0]))).run(sim)
     np.testing.assert_allclose(sim["pos"], np.asarray(start) - [1.0, 0.0, 0.0])
@@ -652,7 +657,7 @@ def test_advanced_receipt_can_declare_handle_nonrevertible(hook):
             receipt.revertible = False
             return receipt
 
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     before = sim["pos"].copy()
     typ = ReceiptInWrap if hook == "wrap_raw" else ReceiptInExecute
     result = Pipeline({"a": Coordinates().transform(typ(np.array([1.0, 0.0, 0.0]))), "b": Coordinates()}).run(
@@ -690,7 +695,7 @@ def test_custom_transform_chain_releases_its_receipt_once(delegate):
             applied = TransformResult(handle=handle, target=target, sim_after=target)
             return TransformResult(handle=(TransformStep(step, applied),), target=target, sim_after=target)
 
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     original = sim["pos"].copy()
     scope = CustomChain(Shift())
     values = Pipeline({"moved": Coordinates().transform(scope), "sibling": Coordinates()}).run(sim).value
@@ -701,7 +706,52 @@ def test_custom_transform_chain_releases_its_receipt_once(delegate):
     assert sim.current_transformation() is None
 
 
-@pytest.mark.parametrize("container", ["dataclass", "mapping", "proxy", "tuple"])
+@pytest.mark.parametrize("direct_first", [True, False])
+def test_custom_chain_restores_direct_and_delegated_steps_in_receipt_order(direct_first):
+    from dataclasses import replace
+
+    from pynbodyext.calculate import TransformBase
+    from pynbodyext.core.calculate.nodes.transforms import TransformChain, TransformStep
+    from pynbodyext.core.calculate.runtime.input import TransformResult
+
+    cleanup = []
+
+    @TransformBase.dataclass
+    class Shift(TransformBase):
+        dx: float
+
+        def build_handle(self, sim, target, params=None):
+            return target.translate([self.dx, 0., 0.])
+
+        def cleanup(self, ctx, handle):
+            cleanup.append(self.dx)
+            super().cleanup(ctx, handle)
+
+    class MixedChain(TransformChain):
+        def execute(self, ctx, input):
+            def direct_step():
+                target = input.active_sim
+                step = Shift(2.)
+                handle = step.build_handle(target, target)
+                return TransformStep(step, TransformResult(handle=handle, target=target, sim_after=target))
+
+            before = (direct_step(),) if direct_first else ()
+            tracked = super().execute(ctx, input)
+            after = () if direct_first else (direct_step(),)
+            return replace(tracked, handle=before + tracked.handle + after)
+
+    sim = particle_snapshot()
+    original = sim["pos"].copy()
+    node = Coordinates().transform(MixedChain(Shift(1.)))
+    result = Pipeline({"moved": node, "sibling": Coordinates()}).run(sim, errors="collect_partial")
+    assert result.ok
+    np.testing.assert_array_equal(result.value["moved"]["pos"], original + [3., 0., 0.])
+    np.testing.assert_array_equal(result.value["sibling"]["pos"], original)
+    assert cleanup == ([1., 2.] if direct_first else [2., 1.])
+    assert sim.current_transformation() is None
+
+
+@pytest.mark.parametrize("container", ["dataclass", "mapping", "proxy", "tuple", "tuple_attribute"])
 def test_custom_measurement_containers_keep_their_values_and_type(container):
     from collections import UserDict
     from dataclasses import dataclass, field
@@ -719,7 +769,8 @@ def test_custom_measurement_containers_keep_their_values_and_type(container):
 
     class TaggedTuple(tuple):
         def __new__(cls, position, label):
-            obj = super().__new__(cls, (position,))
+            obj = super().__new__(cls, (position,) if container == "tuple" else ())
+            obj.position = position
             obj.label = label
             return obj
 
@@ -735,7 +786,7 @@ def test_custom_measurement_containers_keep_their_values_and_type(container):
                 return MappingProxyType({"position": position})
             return TaggedTuple(position, "stars")
 
-    sim = branch_snapshot()
+    sim = particle_snapshot()
     sim["pos"].units = "kpc"
     original = sim["pos"].copy()
     node = Read().transform(ShiftPosTo(np.array([1., 0., 0.])))
@@ -750,7 +801,68 @@ def test_custom_measurement_containers_keep_their_values_and_type(container):
         measured = result["position"]
     else:
         assert type(result) is TaggedTuple and result.label == "stars"
-        measured = result[0]
+        if container == "tuple":
+            assert result.position is result[0]
+        measured = result.position
     np.testing.assert_array_equal(measured, expected)
     assert measured.units == original.units
     np.testing.assert_array_equal(sim["pos"], original)
+
+
+@pytest.mark.parametrize("container", ["dict", "list"])
+@pytest.mark.parametrize("attribute_only", [False, True])
+@pytest.mark.parametrize("slotted", [False, True], ids=["instance-dict", "slots"])
+def test_mutable_measurement_container_attributes_follow_the_measured_frame(container, attribute_only, slotted):
+    from pynbodyext.transforms import ShiftPosTo
+
+    class Readings(dict if container == "dict" else list):
+        if slotted:
+            __slots__ = ("position", "self_ref")
+
+    @PropertyBase.dataclass
+    class Read(PropertyBase):
+        def calculate(self, sim, params=None):
+            readings = Readings()
+            readings.position = sim["pos"]
+            readings.self_ref = readings
+            if not attribute_only:
+                if container == "dict":
+                    readings["position"] = readings.position
+                else:
+                    readings.append(readings.position)
+            return readings
+
+    sim = particle_snapshot()
+    original = sim["pos"].copy()
+    moved = Read().transform(ShiftPosTo(np.array([1., 0., 0.])))
+    readings = Pipeline({"moved": moved}).run(sim).value["moved"]
+    assert type(readings) is Readings and readings.self_ref is readings
+    if not attribute_only:
+        assert readings.position is readings["position" if container == "dict" else 0]
+    np.testing.assert_array_equal(readings.position, original - [1., 0., 0.])
+    np.testing.assert_array_equal(sim["pos"], original)
+
+
+@pytest.mark.parametrize("container", ["dict", "list"])
+def test_cyclic_measurement_reports_error_and_restores_frame(container):
+    from pynbodyext.transforms import ShiftPosTo
+
+    @PropertyBase.dataclass
+    class CyclicMeasurement(PropertyBase):
+        def calculate(self, sim, params=None):
+            if container == "dict":
+                reading = {"position": sim["pos"]}
+                reading["self"] = reading
+            else:
+                reading = [sim["pos"]]
+                reading.append(reading)
+            return reading
+
+    sim = particle_snapshot()
+    before = sim["pos"].copy()
+    moved = CyclicMeasurement().transform(ShiftPosTo(np.array([1., 0., 0.])))
+    result = Pipeline({"moved": moved, "after": Coordinates()}).run(sim, errors="collect_partial")
+    assert result.errors and "cyclic" in result.errors[0].message.lower()
+    assert result.value["moved"] is None
+    np.testing.assert_array_equal(result.value["after"]["pos"], before)
+    np.testing.assert_array_equal(sim["pos"], before)

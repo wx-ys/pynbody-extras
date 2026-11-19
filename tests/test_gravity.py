@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from native_helpers import require_native
 
-pytest.importorskip("pynbodyext._native", reason="the gravity layer needs the compiled C++ extension")
+require_native()
 
 from pynbodyext.gravity import Gravity, KernelKind
 

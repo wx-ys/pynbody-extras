@@ -327,10 +327,7 @@ def _preflight(
             if not signature.stable:
                 raise ValueError("study recipes must have stable CalculatorSignatures")
             recipe = session.get(Recipe, signature.hash)
-            if (
-                recipe is not None
-                and CalculatorSignature.from_json(recipe.signature_text).identity() != signature.identity()
-            ):
+            if recipe is not None and not CalculatorSignature.from_json(recipe.signature_text).same_identity(signature):
                 raise ValueError("stored recipe conflicts with its hash")
             columns.append((label, calculator, signature.hash))
     selected: dict[int, int] = {}

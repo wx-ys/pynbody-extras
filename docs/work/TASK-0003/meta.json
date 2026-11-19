@@ -1,0 +1,19 @@
+{
+  "id": "TASK-0003",
+  "type": "task",
+  "status": "review",
+  "title_en": "Audit Sourcery feedback on merged pull requests",
+  "title_zh": "核查已合并 PR 中的 Sourcery 评审意见",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-20",
+  "updated": "2026-11-20",
+  "completed": null,
+  "resolution": null,
+  "pr": null,
+  "related": ["BUG-0005", "BUG-0011", "BUG-0012", "BUG-0013", "FEAT-0005", "FEAT-0019", "FEAT-0020"],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

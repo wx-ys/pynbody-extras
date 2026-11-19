@@ -178,7 +178,8 @@ class EvalEngine:
             either half of the key is session-only; the run warns and computes.
         reuse : bool, default True
             Look the result up in *store* before computing.  ``False`` always
-            computes and replaces the stored result (a refresh).
+            recomputes, appends a new version and updates the current cache.
+            Earlier versions remain available through their pinned references.
 
         Notes
         -----

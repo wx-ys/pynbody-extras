@@ -85,6 +85,10 @@ Notes
 Keep output keys stable and unique. If a pipeline output name collides with
 another named node, execution will fail.
 
+Concurrent runs can operate on independent particle snapshots. If threads
+share a snapshot or views of the same root, the caller must coordinate reads,
+writes and native transformations for the duration of each run.
+
 If one child seems to recompute unexpectedly, inspect the shared dependency
 graph through the trace and cache reports.
 """
@@ -92,6 +96,7 @@ graph through the trace and cache reports.
 from __future__ import annotations
 
 from dataclasses import replace
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from pynbodyext.core.calculate.interfaces import register_node_factory
@@ -127,8 +132,23 @@ class Pipeline(CalculatorBase[dict[str, Any], dict[str, Any]]):
         super().__init__(name=name)
         if not outputs:
             raise ValueError("Pipeline requires at least one output.")
-        self.outputs = dict(outputs)
+        self._outputs = dict(outputs)
         self._validate_output_names()
+
+    @property
+    def outputs(self) -> Mapping[str, CalculatorBase[Any, Any]]:
+        """Ordered outputs fixed at construction, including when this Pipeline is nested."""
+        return MappingProxyType(self._outputs)
+
+    def __setstate__(self, state: Any) -> None:
+        """Restore historical pickle attributes and derive the recipe key afresh."""
+        attributes, slots = state if isinstance(state, tuple) else (state, {})
+        self.__dict__.update(attributes or {})
+        if "outputs" in self.__dict__:
+            self._outputs = self.__dict__.pop("outputs")
+        self.__dict__.pop("_signature_cache", None)
+        for name, value in slots.items():
+            setattr(self, name, value)
 
     def _validate_output_names(self) -> None:
         output_keys = set(self.outputs)

@@ -239,7 +239,7 @@ class AnalysisRepository:
             if recipe is None:
                 recipe = Recipe(hash=signature.hash, signature_text=signature.to_json())
                 session.add(recipe)
-            elif CalculatorSignature.from_json(recipe.signature_text).identity() != signature.identity():
+            elif not CalculatorSignature.from_json(recipe.signature_text).same_identity(signature):
                 raise ValueError("stored recipe conflicts with its hash")
             return recipe
 

@@ -8,7 +8,8 @@ future) can persist them without knowing about numpy or pynbody.
 
 Every encoded value is tagged with a ``"__kind"`` discriminator. Numeric arrays
 use raw C-contiguous bytes, dtype and shape; object arrays use shaped, flat
-elements, and structured arrays use NPY with pickle disabled. Sim arrays also
+elements, and structured arrays use NPY with pickle disabled and a maximum
+header size of 1 MiB. Sim arrays also
 carry their units string. Structured object fields, dtype metadata and layouts
 that NPY cannot represent losslessly are rejected during encoding. Other values
 that are not natively representable fall back to a pickled opaque blob, keeping
@@ -32,9 +33,14 @@ from typing import Any
 
 import numpy as np
 
+from pynbodyext.util.arrays import dtype_has_metadata
+
 from .external import ExternalFileRef
 
 __all__ = ["ValueCodec"]
+
+# Wide scientific records can exceed NumPy's default 10,000-byte NPY header limit.
+_MAX_NPY_HEADER_SIZE = 1024 * 1024
 
 
 def _b64(data: bytes) -> str:
@@ -69,29 +75,32 @@ def _canonical_payload(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
-def _reject_dtype_metadata(dtype: np.dtype[Any]) -> None:
-    if dtype.metadata is not None:
-        raise TypeError("structured dtype metadata is unsupported")
-    if dtype.subdtype is not None:
-        _reject_dtype_metadata(dtype.subdtype[0])
-    if dtype.fields is not None:
-        for name in dtype.names or ():
-            _reject_dtype_metadata(dtype.fields[name][0])
+def _check_structured_header(buffer: io.BytesIO) -> None:
+    """Check the declared NPY header length before NumPy reads or parses its text."""
+    buffer.seek(0)
+    version = np.lib.format.read_magic(buffer)
+    if version not in ((1, 0), (2, 0), (3, 0)):
+        raise ValueError(f"unsupported NPY format {version}")
+    # NPY v1 stores the length in two little-endian bytes, v2 and v3 in four.
+    length = int.from_bytes(buffer.read(2 if version == (1, 0) else 4), "little")
+    if length > _MAX_NPY_HEADER_SIZE:
+        raise ValueError(f"structured NPY header exceeds {_MAX_NPY_HEADER_SIZE} bytes")
+    buffer.seek(0)
 
 
 def _validate_structured_dtype(dtype: np.dtype[Any]) -> None:
     """Check header readability without allocating another full value array."""
-    _reject_dtype_metadata(dtype)
+    if dtype_has_metadata(dtype):
+        raise TypeError("structured dtype metadata is unsupported")
     buffer = io.BytesIO()
     try:
         np.save(buffer, np.empty(0, dtype=dtype), allow_pickle=False)
-        size = buffer.tell()
-        buffer.seek(0)
-        restored = np.load(buffer, allow_pickle=False, max_header_size=size)
+        _check_structured_header(buffer)
+        restored = np.load(buffer, allow_pickle=False, max_header_size=_MAX_NPY_HEADER_SIZE)
         if restored.dtype != dtype:
             raise ValueError("NPY changes the structured dtype")
     except (TypeError, ValueError) as exc:
-        raise TypeError("structured dtype cannot be represented losslessly") from exc
+        raise TypeError(f"structured dtype header cannot be represented losslessly: {exc}") from exc
 
 
 class ValueCodec:
@@ -207,8 +216,9 @@ class ValueCodec:
             buffer = io.BytesIO()
             try:
                 np.save(buffer, np.asarray(value), allow_pickle=False)
+                _check_structured_header(buffer)
             except (TypeError, ValueError) as exc:
-                raise TypeError("structured dtype cannot be represented losslessly") from exc
+                raise TypeError(f"structured array cannot be represented losslessly: {exc}") from exc
             payload: dict[str, Any] = {"__kind": "structured_array_v1", "data_b64": _b64(buffer.getvalue())}
             if units is not None:
                 payload["units"] = units
@@ -372,9 +382,8 @@ class ValueCodec:
     def _decode_structured_array(self, data: dict[str, Any]) -> Any:
         raw = _unb64(data["data_b64"])
         with io.BytesIO(raw) as buffer:
-            # Wide scientific records may legitimately exceed NumPy's default
-            # header limit. Bound it by this payload, while keeping pickle off.
-            array = np.load(buffer, allow_pickle=False, max_header_size=len(raw))
+            _check_structured_header(buffer)
+            array = np.load(buffer, allow_pickle=False, max_header_size=_MAX_NPY_HEADER_SIZE)
         if not isinstance(array, np.ndarray) or array.dtype.fields is None or array.dtype.hasobject:
             raise ValueError("invalid structured-array payload")
         if "units" in data:

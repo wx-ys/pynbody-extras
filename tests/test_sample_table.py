@@ -246,6 +246,28 @@ def test_errors_can_be_recorded_instead_of_raised(tmp_path) -> None:
     assert table.missing() == [("b", "f")]
 
 
+@pytest.mark.parametrize("names", [["one"], ["one", "two", "three"]])
+def test_compute_checks_name_count_before_calculating_any_row(tmp_path, names) -> None:
+    store = InMemoryResultStore()
+    table = SampleTable({"mass": Counted()}, store=store)
+    objects = (obj(tmp_path / basename) for basename in ("a", "b"))
+    with pytest.raises(ValueError, match="names.*objects|objects.*names"):
+        table.compute(objects, names=iter(names))
+
+    assert len(table) == 0
+    assert CALLS == []
+    assert store.list_refs() == []
+
+
+def test_row_lookup_reports_ambiguous_display_names(tmp_path) -> None:
+    objects = [obj(tmp_path / folder / "snap") for folder in ("a", "b")]
+    table = SampleTable().compute(objects)
+    assert [row.name for row in table] == ["snap", "snap"]
+    with pytest.raises(ValueError, match="ambiguous.*snap|snap.*ambiguous"):
+        table.row("snap")
+    assert table.rows[0].identity != table.rows[1].identity
+
+
 # ---------------------------------------------------------------------------
 # Persistent stores
 # ---------------------------------------------------------------------------
@@ -288,7 +310,9 @@ def _table(tmp_path) -> SampleTable:
 
 def test_columns_filters_and_units(tmp_path) -> None:
     table = _table(tmp_path)
-    assert np.array_equal(table.column("m"), [10.0, 20.0, 40.0])
+    mass = table.column("m")
+    assert isinstance(mass, np.ndarray)
+    assert np.array_equal(mass, [10.0, 20.0, 40.0])
     assert table.units("mu") == "Msol"
     assert table.units("m") is None
     heavy = table.where(lambda row: row["m"] > 15)
@@ -302,6 +326,20 @@ def test_a_missing_value_is_nan_in_a_numeric_column(tmp_path) -> None:
     table.rows[1].values["m"] = None
     column = table.column("m")
     assert column[0] == 10.0 and np.isnan(column[1])
+
+
+def test_complex_column_preserves_imaginary_values_and_missing_rows(tmp_path) -> None:
+    table = SampleTable({"wave": LambdaProperty(lambda sim: np.complex64(2 + 3j))})
+    table.add(obj(tmp_path / "a"))
+    table.add(obj(tmp_path / "b")).values["wave"] = 10**30
+    table.add(obj(tmp_path / "c")).values.pop("wave")
+
+    values = table.column("wave")
+    assert isinstance(values, np.ndarray)
+    assert np.issubdtype(values.dtype, np.complexfloating)
+    assert values[0] == 2 + 3j
+    assert values[1] == complex(10**30)
+    assert np.isnan(values[2])
 
 
 def test_to_dataframe_keeps_what_each_column_is(tmp_path) -> None:

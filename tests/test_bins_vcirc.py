@@ -14,15 +14,11 @@ from __future__ import annotations
 import numpy as np
 import pynbody
 import pytest
+from native_helpers import require_native
 from pynbody import units
 from pynbody.array import SimArray
 
 from pynbodyext.core.calculate import Bin1D, BinsArray
-
-
-def require_native() -> None:
-    """Skip the calling test when the native gravity extension is not built."""
-    pytest.importorskip("pynbodyext._native", reason="vcirc needs the compiled pynbodyext._native extension")
 
 
 def point_mass_sim() -> pynbody.SimSnap:
