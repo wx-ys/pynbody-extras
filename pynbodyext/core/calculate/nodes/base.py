@@ -178,6 +178,7 @@ class CalculatorBase(
     effect: EffectPolicy = EffectPolicy.CONTEXTUAL
     cacheable: bool = True
     parallel_safe: bool = True
+    _manages_output_scopes = False
     cache_policy: CachePolicy = CachePolicy.AUTO
 
     # Mapping of dynamic parameter names to unit metadata used for runtime resolution.
@@ -308,6 +309,9 @@ class CalculatorBase(
             Raw calculator value before public-value conversion.
         """
         raise NotImplementedError
+
+    def _execute_in_scope(self, ctx: ExecutionContext, input: NodeInput) -> TRaw:
+        return self.execute(ctx, input)
 
     def materialize(self, ctx: ExecutionContext, value: TRaw) -> TRaw:
         return value

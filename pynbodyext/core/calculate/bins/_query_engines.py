@@ -28,6 +28,8 @@ from .arrays import BinsArray
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from pynbodyext.core.calculate.runtime.context import ExecutionContext
+
     from .model import BinResultModel
     from .registries import BinDerivedSpec
     from .result import BinNDResult
@@ -38,6 +40,23 @@ if TYPE_CHECKING:
 _BATCH_RUN_OPTIONS: RunOptions = RunOptions(
     cache=False, progress=False, perf_time=False, perf_memory=False, observe=False
 )
+
+def scoped_bin_calculator(query: CalculatorBase, parent: ExecutionContext) -> Callable[[Any], Any]:
+    """Prepare a per-subset call that restores the current eager Pipeline frame."""
+    signature = query.to_signature()
+    node_key = signature.cache_key()
+
+    def run_one(subset: Any) -> Any:
+        return parent.engine.run_light(
+            query,
+            subset,
+            _BATCH_RUN_OPTIONS,
+            _precomputed_node_sig=node_key,
+            _precomputed_structured_sig=signature,
+            _pipeline_parent=parent,
+        )
+
+    return run_one
 
 def _wrap(
     owner: BinNDResult, values: Any, *, name: str, field: str | None = None, mode: str | None = None
@@ -264,6 +283,9 @@ class ApplyComposer:
 
     def _value_nonvectorized(self, query: Callable[[Any], Any] | CalculatorBase[Any, Any]) -> np.ndarray:
         if isinstance(query, CalculatorBase):
+            parent = self._owner.root._eager_context
+            if parent is not None:
+                return self._per_bin(scoped_bin_calculator(query, parent))
             with query.batch(_BATCH_RUN_OPTIONS) as run_one:
                 return self._per_bin(run_one)
         return self._per_bin(query)

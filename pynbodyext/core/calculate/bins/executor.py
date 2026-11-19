@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from pynbodyext.core.calculate.nodes.base import CalculatorBase
+
+from ._query_engines import scoped_bin_calculator
 from .axis_materializer import AxisMaterializer
 from .model import BinResultModel
 from .result import BinNDResult, SubBinNDResult
@@ -44,13 +47,16 @@ class BinExecutor:
         result = self.build_result(
             sim, materialized.axes, materialized.values, source_sim=input.sim_raw, scope_signature=input.cache_token
         )
-        for key in self._calculator.active:
-            if isinstance(key, str):
+        # Eager queries can call calculators through batch() or pynbody selectors.
+        # Let those calls see this frame only while the Bin is executing.
+        result._eager_context = ctx if input.pipeline_managed else None
+        try:
+            for key in self._calculator.active:
+                if not (isinstance(key, str) or callable(key)):
+                    raise TypeError(f"Unsupported active key {key!r}.")
                 result[key]
-            elif callable(key):
-                result[key]
-            else:
-                raise TypeError(f"Unsupported active key {key!r}.")
+        finally:
+            result._eager_context = None
         return result
 
     def resolve_axes(
@@ -98,8 +104,12 @@ class BinExecutor:
         return cls(model=model)
 
     def spawn_result(self, parent: BinNDResult, subset: Any) -> SubBinNDResult:
+        context = parent.root._eager_context
         values = tuple(
-            self._axis_materializer._resolve_source(spec, subset).values for spec in self._calculator.axes_specs
+            scoped_bin_calculator(spec.prop, context)(subset)
+            if context is not None and isinstance(spec.prop, CalculatorBase)
+            else self._axis_materializer._resolve_source(spec, subset).values
+            for spec in self._calculator.axes_specs
         )
         result = self.build_result(
             subset,

@@ -16,6 +16,7 @@ import pynbody
 import pytest
 from pynbody.array import SimArray
 
+from pynbodyext.core.calculate import LambdaProperty, Pipeline
 from pynbodyext.transforms import WrapBox
 from pynbodyext.transforms.wrap import WrapTransformation, normalize_convention
 
@@ -69,6 +70,34 @@ def test_minirange_picks_the_narrower_convention_per_axis() -> None:
     wrap(sim, convention="minirange")
 
     assert positions(sim).tolist() == [[0.5, 4.5, 0.0], [-0.5, 5.5, 0.0]]
+
+
+@pytest.mark.parametrize(
+    ("convention", "wrapped_rows"),
+    [
+        ("center", [[0.5, -5, 0], [-0.5, -4.5, 0], [0, 4.5, -5]]),
+        ("upper", [[0.5, 5, 0], [9.5, 5.5, 0], [0, 4.5, 5]]),
+        ("minirange", [[0.5, 5, 0], [-0.5, 5.5, 0], [0, 4.5, -5]]),
+    ],
+)
+def test_pipeline_wraps_and_restores_only_the_indexed_subset(convention, wrapped_rows):
+    sim = pynbody.new(5)
+    sim["pos"][:] = [[10.5, -5, 0], [99, -19, 7], [9.5, 5.5, -10], [-23, 33, 5], [-10, 14.5, 15]]
+    sim["pos"].units = "kpc"
+    selected = [0, 2, 4]
+    original = sim["pos"].copy()
+    expected = original.copy()
+    expected[selected] = wrapped_rows
+
+    root_positions = LambdaProperty(lambda view: view.ancestor["pos"])
+    wrapped = root_positions.transform(WrapBox(boxsize=10.0, convention=convention, move_all=False))
+    values = Pipeline({"wrapped": wrapped, "sibling": root_positions}).run(sim[selected]).value
+
+    np.testing.assert_array_equal(values["wrapped"], expected)
+    np.testing.assert_array_equal(values["sibling"], original)
+    np.testing.assert_array_equal(sim["pos"], original)
+    assert values["wrapped"].units == original.units
+    assert sim.current_transformation() is None
 
 
 def test_explicit_boxsize_is_used_without_a_snapshot_property() -> None:

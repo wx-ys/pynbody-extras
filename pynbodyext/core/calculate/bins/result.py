@@ -37,6 +37,8 @@ from .subresults import BinSubresultStore
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from pynbodyext.core.calculate.runtime.context import ExecutionContext
+
     from .arrays import BinsArray
     from .axes import BinAxis
     from .nodes import BinND
@@ -270,6 +272,7 @@ class BinNDResult(BinPlotMixin, BinSphRenderMixin):
         self._valid_mask = model.valid_mask
         self._calculator = model.calculator
         self._scope_signature = model.scope_signature
+        self._eager_context: ExecutionContext | None = None
         self._parent = model.parent.owner if model.parent is not None else None
 
         self._diagnostics = BinsResultEngine()

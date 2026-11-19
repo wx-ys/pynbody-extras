@@ -107,6 +107,14 @@ Use these terms exactly. Don't drift to synonyms.
 - **Calculator DAG** — the composed execution graph (`CalculatorBase` +
   mixins, `PropertyBase`, `PostprocessorBase`, `FilterBase`, `TransformBase`, `Pipeline`). Each node
   produces a `ResultNode`; the graph is resolved and executed by `EvalEngine`.
+- **Pipeline transform scope** — a default reversible transform bound to a
+  `Pipeline` stays active across its named outputs. Each output restores its own
+  reversible transforms before its sibling runs. On exit the Pipeline restores
+  its caller's frame, including a native transform handle already active on
+  entry. Borrowed numerical arrays retain their measured values and units.
+  A later lazy Bin query reads the live particles. An explicit `NEVER` retains
+  the requested mutation. Failure to restore a required transform stops further
+  outputs, including with `collect_partial`. [ADR-022](docs/adr/0022-pipeline-transform-scopes.md)
 - **`PostprocessorBase`** (`nodes/postprocessors.py`) — a value-consuming property
   role exported by `pynbodyext.calculate`. Decorated scientific subclasses
   implement `process(value)`; the adapter owns `calculate(sim, params)` and
@@ -116,12 +124,12 @@ Use these terms exactly. Don't drift to synonyms.
   are static configuration read through `self`. The existing Calculator DAG,
   property/runtime lifecycle, signatures, and result-store receipts remain the
   owning seams; there is no second executor or signature node kind. See ADR-014.
-  On an exception the adapter invokes cleanup for its own applied bound scope,
-  respecting revert policies and nonrevertible handles; it does not invoke an
-  inherited ancestor's cleanup callback. Native compound handles retain their
-  existing cascading revert semantics, and cleanup failures are logged while
-  preserving the original exception. Transform/filter application failures before
-  entering the adapter and generic property success cleanup are outside this path.
+  Outside a Pipeline, when a postprocessor raises, the adapter invokes only its
+  own applied bound scope's cleanup callback. It honors the scope and transform
+  revert policies and skips nonrevertible handles. A native compound handle may
+  itself revert earlier transforms. If cleanup fails, the adapter logs that
+  failure and preserves the original exception. This path starts after the
+  transform and filter have been applied.
 - **`CalculatorSignature`** (`result/signature.py`) — a frozen, structured
   description of a calculator (class + `deps` + parameters), with a content
   hash (sha256 of schema + payload) and a JSON text. *Not* a display name.
@@ -129,8 +137,10 @@ Use these terms exactly. Don't drift to synonyms.
   calculator) and **stable** (the hash is the same in every session, so it can
   key data that outlives the process; false when a part is identified by `id()`
   or a function repr — `LambdaProperty`, a node without `signature_payload`).
-  A `Pipeline` is identified by its ordered output names and children; its
-  `name`, like every node's, is a label.
+  A standard `Pipeline` records its ordered output names and children. Its
+  transform-scope version contributes to the hash of any containing recipe,
+  including recipes using Pipeline subclasses. Historical receipts retain
+  their original keys. A node's `name` is a label.
 - **Signature name** — how a payload names a calculator class: the class's own
   `signature_name` (conventionally its public import path, e.g.
   `pynbodyext.filters.Sphere`), else its class path. Not inherited: a subclass

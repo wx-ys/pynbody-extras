@@ -374,19 +374,19 @@ def test_inherited_ancestor_transform_is_not_cleaned_by_child_processor():
     # The Pipeline owns this scope; the child receives it through NodeInput.
     parent = Pipeline({"bad": child}).transform(ShiftPositions())
     assert not parent.run(sim, errors="collect").ok
-    np.testing.assert_array_equal(sim["pos"][:, 0], [1.0] * 3)
-    assert ShiftPositions.cleanup_order == []
+    np.testing.assert_array_equal(sim["pos"][:, 0], [0.0] * 3)
+    assert ShiftPositions.cleanup_order == [1.0]
 
 
-def test_native_cleanup_callback_retains_its_existing_cascading_semantics():
+def test_child_cleanup_preserves_parent_frame_for_sibling():
     sim = mass_sim()
     child = FailValues(source=ArrayValues()).transform(ShiftPositions(2.0))
-    parent = Pipeline({"bad": child}).transform(ShiftPositions(1.0))
-    assert not parent.run(sim, errors="collect").ok
-    # The adapter invokes only the child's callback, but that native handle
-    # represents a compound transformation and its revert also unwinds parent.
+    parent = Pipeline({"bad": child, "sibling": PositionValues()}).transform(ShiftPositions(1.0))
+    result = parent.run(sim, errors="collect_partial")
+    assert not result.ok and result.value["bad"] is None
+    np.testing.assert_array_equal(result.value["sibling"][:, 0], [1.0] * 3)
     np.testing.assert_array_equal(sim["pos"][:, 0], [0.0] * 3)
-    assert ShiftPositions.cleanup_order == [2.0]
+    assert ShiftPositions.cleanup_order == [2.0, 1.0]
 
 
 def test_native_never_step_can_prevent_earlier_cleanup_without_masking_error(caplog):
@@ -415,6 +415,6 @@ def test_collect_partial_cleanup_leaves_successful_sibling_science_correct():
     assert not result.ok and result.value["bad"] is None
     np.testing.assert_array_equal(result.value["good"][:, 0], [15.0] * 3)
     assert PositionValues.calls == 2
-    # Successful property scopes retain their established applied-state behavior.
-    np.testing.assert_array_equal(sim["pos"][:, 0], [5.0] * 3)
+    np.testing.assert_array_equal(sim["pos"][:, 0], [0.0] * 3)
+    assert ShiftPositions.cleanup_order == [2.0, 5.0]
     assert result.store_ref is None and store.list_refs() == []

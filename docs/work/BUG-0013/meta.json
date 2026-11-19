@@ -1,0 +1,19 @@
+{
+  "id": "BUG-0013",
+  "type": "bug",
+  "status": "done",
+  "title_en": "Restore Pipeline branch transform scopes",
+  "title_zh": "恢复 Pipeline 分支的变换作用域",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-19",
+  "updated": "2026-11-20",
+  "completed": "2026-11-20",
+  "resolution": "fixed",
+  "pr": 57,
+  "related": [],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

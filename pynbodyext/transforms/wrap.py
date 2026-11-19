@@ -185,7 +185,7 @@ class WrapTransformation(transformation.Transformation):
             center_k, upper_k = cast[: len(axes)], cast[len(axes) :]
             offsets: list[np.ndarray] = []
             for axis, (v, k_center, k_upper) in enumerate(zip(axes, center_k, upper_k, strict=True)):
-                if v.size == 0:
+                if len(v) == 0:
                     offsets.append(np.zeros_like(v, dtype=self._k_dtype))
                     continue
                 wrapped_center = v - k_center * L
@@ -210,7 +210,8 @@ class WrapTransformation(transformation.Transformation):
         lower = -0.5 * L if self.convention == "center" else 0.0
         offsets = self._promote_and_cast_k(*(np.floor((v - lower) / L) for v in axes))
         for coords, offset in zip(axes, offsets, strict=True):
-            np.subtract(coords, offset * L, out=coords)  # in place, without rebinding the name
+            # Slice assignment writes through pynbody's indexed particle views.
+            coords[:] -= offset * L
         return offsets
 
     # ── pynbody hooks ────────────────────────────────────────────────────────

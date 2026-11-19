@@ -89,6 +89,8 @@ import time
 import traceback
 import uuid
 import warnings
+from contextlib import ExitStack, nullcontext
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from pynbodyext.core.calculate.diagnostics.observer import observation_phase, render_observer_report
@@ -118,6 +120,7 @@ from .input import NodeInput
 from .options import RunOptions
 from .progress import NodeProgressEvent, RunProgressEvent
 from .sim_identity import SimIdentityProvider, id_based_sim_identity, is_stable_sim_identity
+from .transform_scope import PipelineTransformScope, freeze_array_views
 
 if TYPE_CHECKING:
     from pynbodyext.core.calculate.nodes.base import CalculatorBase
@@ -279,6 +282,7 @@ class EvalEngine:
         *,
         _precomputed_node_sig: tuple[Any, ...] | None = None,
         _precomputed_structured_sig: Any | None = None,
+        _pipeline_parent: ExecutionContext | None = None,
     ) -> TPublic:
         """Run *node* on *sim* and return only the public value, with minimal overhead.
 
@@ -301,22 +305,32 @@ class EvalEngine:
         is applied to many sub-snapshots.  Use :meth:`CalculatorBase.batch` to
         obtain a caller that pre-computes the node signature once.
         """
-        # Ultra-minimal path: no child CalculatorBase dependencies
-        if not node.dependencies():
+        # Per-bin calls have independent caches and node names, but can mutate
+        # the same particles as an enclosing Pipeline.
+        if _pipeline_parent is None and not node.dependencies():
             return self._run_minimal(node, sim, options)
 
         # Full light path: nested-calculator Param deps, etc.
         ctx = ExecutionContext(sim=sim, sim_signature=(), run_id="", options=options, engine=self)
         work = NodeInput(sim_raw=sim, sim_current=sim)
+        owner = None
+        if _pipeline_parent is not None:
+            ctx.mutation = _pipeline_parent.mutation
+            owner = PipelineTransformScope(restore=True)
+            work = replace(work, pipeline_managed=True, transform_owner=owner)
         try:
-            root = self._evaluate_light(
-                node,
-                ctx,
-                work,
-                node_sig=_precomputed_node_sig if _precomputed_node_sig is not None else node.signature(),
-                structured_sig=_precomputed_structured_sig,
-            )
+            with owner.lifetime(ctx, node) if owner is not None else nullcontext():
+                root = self._evaluate_light(
+                    node,
+                    ctx,
+                    work,
+                    node_sig=_precomputed_node_sig if _precomputed_node_sig is not None else node.signature(),
+                    structured_sig=_precomputed_structured_sig,
+                )
         except Exception:
+            if _pipeline_parent is not None and ctx.pipeline_frame_failed:
+                _pipeline_parent.pipeline_frame_failed = True
+                raise
             if options.errors == ErrorPolicy.RAISE:
                 raise
             return None  # type: ignore[return-value]
@@ -368,7 +382,7 @@ class EvalEngine:
         still evaluated through the normal :meth:`evaluate` path so that
         filters and transforms work correctly.
         """
-        cache_key = (ctx.sim_signature, work.cache_token, node_sig)
+        cache_key = (ctx.sim_signature, work.cache_token, node_sig, work.pipeline_managed)
         stack_key = (id(node), work.cache_token)
 
         if stack_key in ctx._evaluation_stack:
@@ -427,12 +441,7 @@ class EvalEngine:
         state = _NodeExecutionState()
         ctx._node_stack.append(node_result)
         try:
-            work = self._apply_node_scope(node, ctx, work)
-            self._check_node_input(node, work)
-            state.raw_value = node.execute(ctx, work)
-            state.raw_value = node.materialize(ctx, state.raw_value)
-            state.public_value = node.public_value(state.raw_value)
-            state.public_value = node.materialize_public(ctx, state.public_value)
+            self._execute_scoped_node(node, ctx, work, state)
         except Exception as exc:
             raise _NodeExecutionFailure(exc, state) from exc
         finally:
@@ -453,7 +462,9 @@ class EvalEngine:
         """
         node.check_input(work.active_sim)
 
-    def _apply_node_scope(self, node: CalculatorBase[Any, Any], ctx: ExecutionContext, work: NodeInput) -> NodeInput:
+    def _apply_node_scope(
+        self, node: CalculatorBase[Any, Any], ctx: ExecutionContext, work: NodeInput, lifetime: ExitStack
+    ) -> NodeInput:
         """Apply ``node.scope`` (transforms then filter) to ``work`` before execution.
 
         Scoped composition is expressed by cloning the concrete calculator with a
@@ -469,7 +480,15 @@ class EvalEngine:
             from pynbodyext.core.calculate.runtime.input import TransformResult
 
             with ctx.phase(node, "transform"):
-                transform_result = ctx.raw_value(transform, work)
+                target = work
+                if work.pipeline_managed:
+                    owner = PipelineTransformScope(restore=True)
+                    lifetime.enter_context(owner.lifetime(ctx, node))
+                    work = replace(work, transform_owner=owner)
+                    target = (
+                        work if scope.should_revert else replace(work, transform_owner=PipelineTransformScope(False))
+                    )
+                transform_result = ctx.raw_value(transform, target)
                 if not isinstance(transform_result, TransformResult):
                     raise TypeError("transform nodes must return TransformResult")
                 work = work.with_transform(transform_result)
@@ -484,6 +503,25 @@ class EvalEngine:
                 work = work.with_selection(filter_result)
 
         return work
+
+    def _execute_scoped_node(
+        self, node: CalculatorBase[Any, Any], ctx: ExecutionContext, work: NodeInput, state: _NodeExecutionState
+    ) -> None:
+        if node._manages_output_scopes and not work.pipeline_managed:
+            work = replace(work, pipeline_managed=True)
+        with ExitStack() as lifetime:
+            work = self._apply_node_scope(node, ctx, work, lifetime)
+            self._check_node_input(node, work)
+            state.raw_value = node._execute_in_scope(ctx, work)
+            with observation_phase("materialize"):
+                state.raw_value = node.materialize(ctx, state.raw_value)
+                state.public_value = node.materialize_public(ctx, node.public_value(state.raw_value))
+                if work.pipeline_managed:
+                    public = freeze_array_views(state.public_value)
+                    state.raw_value = (
+                        public if state.raw_value is state.public_value else freeze_array_views(state.raw_value)
+                    )
+                    state.public_value = public
 
     # ------------------------------------------------------------------
 
@@ -543,12 +581,20 @@ class EvalEngine:
         if ctx.options.observe:
             observed_scope = work.observed_scope_cache_token
             stack_scope = observed_scope
-            observed_cache_prefix = (ctx.sim_signature, observed_scope, node_signature)
-            cache_key = observed_cache_prefix
+            # Native transforms can dirty pos while an observed property reads
+            # x, or a derived field. Both apply and revert change that frame.
+            observed_cache_prefix = (
+                ctx.sim_signature,
+                observed_scope,
+                node_signature,
+                work.pipeline_managed,
+                ctx.mutation.pipeline_generation,
+            )
+            cache_key: tuple[Any, ...] = observed_cache_prefix
         else:
             cache_token = work.cache_token
             stack_scope = cache_token  # type: ignore[assignment]
-            cache_key = (ctx.sim_signature, cache_token, node_signature)  # type: ignore[assignment]
+            cache_key = (ctx.sim_signature, cache_token, node_signature, work.pipeline_managed)
 
         return _EvaluationPlan(
             work=work,
@@ -669,13 +715,7 @@ class EvalEngine:
         with ctx.node_scope(node_result, node):
             with ctx.observe_node_access(node_result, node):
                 try:
-                    work = self._apply_node_scope(node, ctx, work)
-                    self._check_node_input(node, work)
-                    state.raw_value = node.execute(ctx, work)
-                    with observation_phase("materialize"):
-                        state.raw_value = node.materialize(ctx, state.raw_value)
-                        state.public_value = node.public_value(state.raw_value)
-                        state.public_value = node.materialize_public(ctx, state.public_value)
+                    self._execute_scoped_node(node, ctx, work, state)
                 except Exception as exc:
                     raise _NodeExecutionFailure(exc, state) from exc
         return state
@@ -727,8 +767,13 @@ class EvalEngine:
         ctx.register_runtime_value(node_result.node_id, state.raw_value, state.public_value)
 
         stored_in_runtime_cache = False
-        if plan.cacheable and self._should_store_runtime_cache(
-            node, state.raw_value, state.public_value, plan.cache_policy, ctx.options
+        frame_changed = ctx.mutation.pipeline_generation > plan.work.mutation_generation
+        if (
+            plan.cacheable
+            and not frame_changed
+            and self._should_store_runtime_cache(
+                node, state.raw_value, state.public_value, plan.cache_policy, ctx.options
+            )
         ):
             cache_key = plan.cache_key
             if plan.observed_cache_prefix is not None:
