@@ -1,0 +1,21 @@
+{
+  "id": "FEAT-0019",
+  "type": "feature",
+  "status": "done",
+  "title_en": "Capture Filter membership and measurement frames during execution",
+  "title_zh": "在计算时记录 Filter 成员与测量坐标",
+  "owner": "",
+  "issue": 0,
+  "created": "2026-11-20",
+  "updated": "2026-11-20",
+  "completed": "2026-11-20",
+  "resolution": "implemented",
+  "pr": 58,
+  "related": [
+    "BUG-0013"
+  ],
+  "locales": [
+    "en",
+    "zh-CN"
+  ]
+}

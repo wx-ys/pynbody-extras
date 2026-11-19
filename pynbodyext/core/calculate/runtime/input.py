@@ -8,8 +8,11 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 import numpy as np
 
 if TYPE_CHECKING:
+    from weakref import ReferenceType
+
     from pynbodyext.core.calculate.result.result import ResultNode, ValueSummary
 
+    from .selection_observations import SelectionBinding, SelectionRecorder
     from .transform_scope import PipelineTransformScope
 
 HandleT = TypeVar("HandleT")
@@ -30,9 +33,26 @@ class FilterResult:
     _filtered_sim: Any = field(default=None, init=False, repr=False)
     _filtered_sim_ready: bool = field(default=False, init=False, repr=False)
 
+    _observation: tuple[ReferenceType[SelectionRecorder], str, int | None] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+
     @property
     def filtered_sim(self) -> Any:
-        """Build and reuse the filtered simulation view on demand."""
+        """Build and reuse the filtered view, including direct consumers of this raw result."""
+        return self.view_for(None)
+
+    def view_for(self, binding: SelectionBinding | None) -> Any:
+        sim = self._materialize_view()
+        if binding is not None:
+            binding.consume(self, sim)
+        elif self._observation is not None:
+            ref, node_id, parent_id = self._observation
+            if (recorder := ref()) is not None:
+                recorder.consume_direct(node_id, parent_id, self, sim)
+        return sim
+
+    def _materialize_view(self) -> Any:
         if self._filtered_sim_ready:
             return self._filtered_sim
 
@@ -85,12 +105,13 @@ class NodeInput:
     upstream: dict[str, ResultNode] = field(default_factory=dict)
     pipeline_managed: bool = False
     transform_owner: PipelineTransformScope | None = None
+    selection_binding: SelectionBinding | None = None
 
     @property
     def active_sim(self) -> Any:
         """Simulation object visible to the current node."""
         if self.selection is not None:
-            return self.selection.filtered_sim
+            return self.selection.view_for(self.selection_binding)
         return self.sim_current
 
     @property
@@ -124,9 +145,9 @@ class NodeInput:
         generation = result.artifacts.get("mutation_generation", self.mutation_generation)
         return replace(self, transform=result, sim_current=result.sim_after, mutation_generation=generation)
 
-    def with_selection(self, result: FilterResult) -> NodeInput:
+    def with_selection(self, result: FilterResult, binding: SelectionBinding | None = None) -> NodeInput:
         """Return a copy with an active filter selection."""
-        return replace(self, selection=result)
+        return replace(self, selection=result, selection_binding=binding)
 
     def with_mutation_generation(self, generation: int) -> NodeInput:
         """Return a copy with an updated mutation generation."""

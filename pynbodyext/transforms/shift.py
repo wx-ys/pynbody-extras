@@ -31,6 +31,7 @@ class ShiftPosTo(TransformBase[GenericTranslation]):
     """
 
     signature_name = "pynbodyext.transforms.ShiftPosTo"
+    frame_operation = "shift_pos"
 
     mode: Param[SimNpArray | str] = Param(default="ssc", field_name="pos")
 
@@ -69,6 +70,7 @@ class ShiftVelTo(TransformBase[GenericTranslation]):
     """
 
     signature_name = "pynbodyext.transforms.ShiftVelTo"
+    frame_operation = "shift_vel"
 
     mode: Param[SimNpArray | str] = Param(default="com", field_name="vel")
 

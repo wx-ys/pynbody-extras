@@ -76,6 +76,8 @@ class _MinimalBatchContext:
     **zero** sub-objects beyond itself.
     """
 
+    selection_recorder = None
+
     __slots__ = ("sim", "sim_signature", "options", "engine", "mutation", "_node_stack", "_evaluation_stack")
 
     def __init__(self, sim: Any, options: RunOptions, engine: EvalEngine) -> None:

@@ -1,5 +1,7 @@
 # Design entry point / 设计入口
 
+Particle membership and result discovery follow the reviewed November 19 design and its six acceptance stages. [English design](database-member-queries-2026-11-19.md) · [中文设计](database-member-queries-2026-11-19.zh-CN.md) · [实施计划与验收](2026-11-19-pipeline-membership-and-result-queries-plan.zh-CN.md)
+
 **Database studies design review / 数据库研究设计评审 — 2026-11-16:**
 [中文](database-study-2026-11-16.zh-CN.md) ·
 [English](database-study-2026-11-16.md) ·

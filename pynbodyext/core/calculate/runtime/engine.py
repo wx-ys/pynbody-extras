@@ -93,6 +93,8 @@ from contextlib import ExitStack, nullcontext
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
+from pynbody.snapshot import SimSnap
+
 from pynbodyext.core.calculate.diagnostics.observer import observation_phase, render_observer_report
 from pynbodyext.core.calculate.result.enums import CachePolicy, ErrorPolicy, NodeStatus, RecordPolicy
 from pynbodyext.core.calculate.result.exceptions import CycleError
@@ -114,15 +116,18 @@ from ._engine_types import (
     _NodeExecutionFailure,
     _NodeExecutionState,
 )
+from ._native_frame_observer import observe_native_frames
 from ._record import ValueRecorder
 from .context import ExecutionContext
 from .input import NodeInput
 from .options import RunOptions
 from .progress import NodeProgressEvent, RunProgressEvent
+from .selection_observations import SelectionRecorder
 from .sim_identity import SimIdentityProvider, id_based_sim_identity, is_stable_sim_identity
 from .transform_scope import PipelineTransformScope, freeze_array_views
 
 if TYPE_CHECKING:
+    from pynbodyext.core.calculate.interfaces import SavedInput
     from pynbodyext.core.calculate.nodes.base import CalculatorBase
     from pynbodyext.core.calculate.store.base import ResultStore
 
@@ -151,6 +156,7 @@ class EvalEngine:
         *,
         store: ResultStore | None = None,
         reuse: bool = True,
+        _saved_input: SavedInput | None = None,
     ) -> Result[TPublic]:
         """Run ``node`` on ``sim`` and return a :class:`Result`.
 
@@ -201,6 +207,13 @@ class EvalEngine:
             sim=sim, sim_signature=sim_signature, run_id=str(uuid.uuid4()), options=opts, engine=self
         )
 
+        if isinstance(sim, SimSnap):
+            from .persistence import try_capture_input
+
+            captured = _saved_input if _saved_input is not None else try_capture_input(sim, self._sim_identity)
+            if captured is not None:
+                ctx.selection_recorder = SelectionRecorder(sim, captured, ctx._node_stack)
+
         status = "ok"
         run_label = node.log_label
         root: ResultNode | None = None
@@ -213,7 +226,8 @@ class EvalEngine:
         ctx.log("debug", f"run start: {run_label}")
 
         try:
-            root = self.evaluate(node, ctx, NodeInput(sim_raw=sim, sim_current=sim))
+            with observe_native_frames(ctx.selection_recorder) if ctx.selection_recorder is not None else nullcontext():
+                root = self.evaluate(node, ctx, NodeInput(sim_raw=sim, sim_current=sim))
         except Exception:
             status = "error"
             if opts.errors == ErrorPolicy.RAISE:
@@ -449,7 +463,7 @@ class EvalEngine:
         return state
 
     @staticmethod
-    def _check_node_input(node: CalculatorBase[Any, Any], work: NodeInput) -> None:
+    def _check_node_input(node: CalculatorBase[Any, Any], work: NodeInput) -> Any:
         """Let a node look over the particles it is about to be computed from.
 
         This lives here, where every node's ``execute`` is called, rather than on a
@@ -460,7 +474,9 @@ class EvalEngine:
         tree instead of all of it.  See :meth:`CalculatorBase.check_input` for what
         the default does.
         """
-        node.check_input(work.active_sim)
+        sim = work.active_sim
+        node.check_input(sim)
+        return sim
 
     def _apply_node_scope(
         self, node: CalculatorBase[Any, Any], ctx: ExecutionContext, work: NodeInput, lifetime: ExitStack
@@ -488,19 +504,15 @@ class EvalEngine:
                     target = (
                         work if scope.should_revert else replace(work, transform_owner=PipelineTransformScope(False))
                     )
-                transform_result = ctx.raw_value(transform, target)
+                edge = ("scope", "transforms", "0") if len(scope.transforms) == 1 else ("scope",)
+                transform_result = ctx.raw_value(transform, target, edge=edge)
                 if not isinstance(transform_result, TransformResult):
                     raise TypeError("transform nodes must return TransformResult")
                 work = work.with_transform(transform_result)
 
         if scope.filter is not None:
-            from pynbodyext.core.calculate.runtime.input import FilterResult
-
             with ctx.phase(node, "filter"):
-                filter_result = ctx.raw_value(scope.filter, work)
-                if not isinstance(filter_result, FilterResult):
-                    raise TypeError("filter nodes must return FilterResult")
-                work = work.with_selection(filter_result)
+                work = ctx.select(scope.filter, work, role="output_filter", edge=("scope", "filter"))
 
         return work
 
@@ -511,8 +523,16 @@ class EvalEngine:
             work = replace(work, pipeline_managed=True)
         with ExitStack() as lifetime:
             work = self._apply_node_scope(node, ctx, work, lifetime)
-            self._check_node_input(node, work)
+            checked_sim = self._check_node_input(node, work)
+            if ctx.selection_recorder is not None and ctx.current_node is not None:
+                ctx.selection_recorder.measurements[ctx.current_node.node_id] = ctx.selection_recorder.context(checked_sim)
             state.raw_value = node._execute_in_scope(ctx, work)
+            if ctx.selection_recorder is not None and ctx.current_node is not None:
+                from .input import FilterResult
+
+                ctx.selection_recorder.measured_units(ctx.current_node.node_id, checked_sim)
+                if isinstance(state.raw_value, FilterResult):
+                    ctx.selection_recorder.register_filter(ctx.current_node.node_id, work.selection_binding, state.raw_value)
             with observation_phase("materialize"):
                 state.raw_value = node.materialize(ctx, state.raw_value)
                 state.public_value = node.materialize_public(ctx, node.public_value(state.raw_value))
@@ -542,6 +562,8 @@ class EvalEngine:
         )
         node_result = self._create_node_result(node, ctx, structured_signature)
         ctx.register_node(node_result)
+        if ctx.selection_recorder is not None:
+            ctx.selection_recorder.register(node, node_result.node_id, structured_signature, plan.work.sim_current)
         is_root = ctx.current_node is None
         if is_root:
             ctx.nodes.root_signature = structured_signature
@@ -895,6 +917,7 @@ class EvalEngine:
             perf_summary=perf_summary,
             warnings=list(ctx.records.warnings),
             errors=list(ctx.records.errors),
+            selection_observations=ctx.selection_recorder.finish(root.node_id, ctx.nodes.registry) if ctx.selection_recorder else None,
             reports=ReportsView(reports),
             diagnostics=DiagnosticsView(diagnostics),
         )

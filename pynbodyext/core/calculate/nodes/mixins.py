@@ -271,12 +271,14 @@ class _CalculatorGraphMixin(_CalculatorContract):
 
     def resolve_dynamic_param(self, ctx: ExecutionContext, input: NodeInput, name: str, **kwargs: Any) -> Any:
         """Resolve one named dynamic parameter inside an active run."""
-        return self.resolve_param_with(RuntimeValueResolver(ctx, input), name, **kwargs)
+        return self.resolve_param_with(RuntimeValueResolver(ctx, input, ("init", name)), name, **kwargs)
 
     def resolve_dynamic_params(self, ctx: ExecutionContext, input: NodeInput) -> dict[str, Any]:
         """Resolve all declared dynamic parameters inside an active run."""
-        resolver = RuntimeValueResolver(ctx, input)
-        return {name: self.resolve_param_with(resolver, name) for name in self.dynamic_param_names()}
+        return {
+            name: self.resolve_param_with(RuntimeValueResolver(ctx, input, ("init", name)), name)
+            for name in self.dynamic_param_names()
+        }
 
     def resolve_param_for_sim(
         self, sim: Any | None, name: str, *, options: RunOptions | None = None, **kwargs: Any

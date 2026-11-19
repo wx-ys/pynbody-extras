@@ -98,6 +98,7 @@ from .views import (
 
 if TYPE_CHECKING:
     from pynbodyext.core.calculate.nodes.base import CalculatorBase
+    from pynbodyext.core.calculate.runtime.selection_observations import SelectionObservations
     from pynbodyext.core.calculate.store.base import RecordRef
 
 T = TypeVar("T")
@@ -299,7 +300,9 @@ class Result(Generic[T]):
     store_ref: RecordRef | None = field(default=None, compare=False, repr=False)
 
     _save_catalogue: Any = field(default=None, compare=False, repr=False)
+    selection_observations: SelectionObservations | None = field(default=None, compare=False, repr=False)
     _save_input: Any = field(default=None, compare=False, repr=False)
+    _save_source: Any = field(default=None, compare=False, repr=False)
     _save_signature: str | None = field(default=None, compare=False, repr=False)
     _database: Any = field(default=None, compare=False, repr=False)
 
